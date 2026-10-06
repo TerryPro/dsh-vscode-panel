@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncScrollProportionally } from '../src/client/markdown-split-scroll.ts'
+import { syncScrollProportionally } from '../src/client/markdown/markdown-split-scroll.ts'
 
 describe('syncScrollProportionally', () => {
   it('mirrors the source scroll ratio onto the target', () => {

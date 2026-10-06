@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createConversationFileRouting,
   nativeFileReferencePath,
-} from '../src/client/conversation-file-routing.ts'
+} from '../src/client/layout/conversation-file-routing.ts'
 
 afterEach(() => { document.body.innerHTML = '' })
 

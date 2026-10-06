@@ -9,8 +9,8 @@ import {
   isHtmlPath,
   packHtml,
   resolveRelativePath,
-} from '../src/client/html-preview.ts'
-import { HtmlPreview } from '../src/client/HtmlPreview.tsx'
+} from '../src/client/editor/html-preview.ts'
+import { HtmlPreview } from '../src/client/editor/HtmlPreview.tsx'
 
 describe('isHtmlPath', () => {
   it('recognizes HTML extensions case-insensitively and from nested paths', () => {

@@ -11,7 +11,7 @@ import {
   FLOATING_MENU_LEFT_PROPERTY,
   FLOATING_MENU_TOP_PROPERTY,
   FLOATING_MODEL_MENU_ATTRIBUTE,
-} from '../src/client/conversation-layout.ts'
+} from '../src/client/layout/conversation-layout.ts'
 
 afterEach(() => {
   document.body.innerHTML = ''

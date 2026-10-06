@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { GitCommit } from '../src/contracts.ts'
-import { buildGitGraph } from '../src/client/git-graph.ts'
+import type { GitCommit } from '../src/shared/contracts.ts'
+import { buildGitGraph } from '../src/client/git/git-graph.ts'
 
 describe('Git Graph 拓扑', () => {
   it('让普通提交沿同一条轨道延续到根提交', () => {

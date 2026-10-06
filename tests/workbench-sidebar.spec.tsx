@@ -3,17 +3,17 @@
 import { cleanup, render, waitFor, type RenderResult } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
-import { SIDEBAR_SHADOWED_ATTRIBUTE, WorkbenchSidebar, type WorkbenchSidebarProps } from '../src/client/WorkbenchSidebar.tsx'
+import { SIDEBAR_SHADOWED_ATTRIBUTE, WorkbenchSidebar, type WorkbenchSidebarProps } from '../src/client/layout/WorkbenchSidebar.tsx'
 
 vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => ({ sidebarMode: 'files' }) }))
-vi.mock('../src/client/FileTree.tsx', () => ({
+vi.mock('../src/client/files/FileTree.tsx', () => ({
   FileTree: ({ workspaceId, workspacePath }: { workspaceId?: string; workspacePath?: string }) => (
     <div data-probe="file-tree" data-workspace={workspaceId} data-path={workspacePath} />
   ),
 }))
-vi.mock('../src/client/GitPanel.tsx', () => ({ GitPanel: () => <div data-probe="git" /> }))
-vi.mock('../src/client/TerminalPanel.tsx', () => ({ TerminalPanel: () => <div data-probe="terminal" /> }))
-vi.mock('../src/client/WorkbenchRail.tsx', () => ({ WorkbenchRail: () => <div data-probe="rail" /> }))
+vi.mock('../src/client/git/GitPanel.tsx', () => ({ GitPanel: () => <div data-probe="git" /> }))
+vi.mock('../src/client/terminal/TerminalPanel.tsx', () => ({ TerminalPanel: () => <div data-probe="terminal" /> }))
+vi.mock('../src/client/layout/WorkbenchRail.tsx', () => ({ WorkbenchRail: () => <div data-probe="rail" /> }))
 
 afterEach(() => { cleanup() })
 

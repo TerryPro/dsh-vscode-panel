@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   GIT_DECORATION_REFRESH_INTERVAL_MS,
   installGitDecorationRefresh,
-} from '../src/client/git-decoration-refresh.ts'
+} from '../src/client/git/git-decoration-refresh.ts'
 
 afterEach(() => { vi.useRealTimers() })
 

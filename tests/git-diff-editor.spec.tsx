@@ -3,12 +3,12 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { GitFileDiff } from '../src/contracts.ts'
+import type { GitFileDiff } from '../src/shared/contracts.ts'
 import type { DiffViewMode } from '../src/client/controller.ts'
-import { GitDiffEditor } from '../src/client/GitDiffEditor.tsx'
+import { GitDiffEditor } from '../src/client/git/GitDiffEditor.tsx'
 import { zh } from '../src/client/locales.ts'
 
-vi.mock('../src/client/DiffSurface.tsx', () => ({
+vi.mock('../src/client/editor/DiffSurface.tsx', () => ({
   DiffSurface: ({ mode, original, modified }: { mode: string; original: string; modified: string }) => (
     <div data-diff-surface={mode} data-original={original} data-modified={modified} />
   ),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTrustedWorkbenchRequest } from '../src/request-trust.ts'
+import { isTrustedWorkbenchRequest } from '../src/host/request-trust.ts'
 
 describe('workbench browser trust fence', () => {
   it('accepts loopback and deployment-trusted authorities', () => {

@@ -3,7 +3,7 @@ import {
   detectEditorLineEnding,
   normalizeEditorText,
   restoreEditorLineEndings,
-} from '../src/client/editor-line-endings.ts'
+} from '../src/client/editor/editor-line-endings.ts'
 
 describe('CodeEditor line endings', () => {
   it('compares CRLF files in CodeMirror canonical form without marking them changed', () => {

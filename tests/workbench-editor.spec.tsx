@@ -4,12 +4,12 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkbenchFileTab, WorkbenchState } from '../src/client/controller.ts'
 import { zh } from '../src/client/locales.ts'
-import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/WorkbenchEditor.tsx'
+import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/editor/WorkbenchEditor.tsx'
 
 const workbenchState = vi.hoisted(() => ({ current: {} as WorkbenchState }))
 
 vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => workbenchState.current }))
-vi.mock('../src/client/CodeEditor.tsx', () => ({
+vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
   CodeEditor: ({ ariaLabel, gitOriginal, gitLabels }: {
     ariaLabel: string
     gitOriginal?: string
@@ -18,8 +18,8 @@ vi.mock('../src/client/CodeEditor.tsx', () => ({
     <textarea aria-label={ariaLabel} data-git-original={gitOriginal} data-git-modified-label={gitLabels?.modified} />
   ),
 }))
-vi.mock('../src/client/GitDiffEditor.tsx', () => ({ GitDiffEditor: () => <div>diff</div> }))
-vi.mock('../src/client/TerminalSurface.tsx', () => ({
+vi.mock('../src/client/git/GitDiffEditor.tsx', () => ({ GitDiffEditor: () => <div>diff</div> }))
+vi.mock('../src/client/terminal/TerminalSurface.tsx', () => ({
   TerminalSurface: ({ tab }: { tab: { id: string } }) => <div data-terminal-surface={tab.id}>terminal</div>,
 }))
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({

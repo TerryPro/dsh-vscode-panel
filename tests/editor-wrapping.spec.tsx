@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CodeEditor } from '../src/client/CodeEditor.tsx'
-import { DiffSurface } from '../src/client/DiffSurface.tsx'
+import { CodeEditor } from '../src/client/editor/CodeEditor.tsx'
+import { DiffSurface } from '../src/client/editor/DiffSurface.tsx'
 
 afterEach(() => { cleanup() })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createWorkbenchWorkspaceActivator } from '../src/client/workspace-layout.ts'
+import { createWorkbenchWorkspaceActivator } from '../src/client/layout/workspace-layout.ts'
 
 describe('workbench Workspace layout binding', () => {
   it('updates the controller and reapplies the remembered middle-editor state', () => {

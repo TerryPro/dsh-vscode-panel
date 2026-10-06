@@ -3,7 +3,7 @@ import { lstat as inspectPath, mkdir, mkdtemp, rm, stat, writeFile } from 'node:
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { WorkspaceBackend } from '../src/workspace-backend.ts'
+import { WorkspaceBackend } from '../src/host/workspace-backend.ts'
 
 function harness(overrides: Record<string, unknown> = {}, workspaceRoot = '/workspace') {
   const writeText = vi.fn(() => Promise.resolve({

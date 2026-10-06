@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkbenchState } from '../src/client/controller.ts'
 import { zh } from '../src/client/locales.ts'
-import { TerminalPanel } from '../src/client/TerminalPanel.tsx'
+import { TerminalPanel } from '../src/client/terminal/TerminalPanel.tsx'
 
 const current = vi.hoisted(() => ({ state: {} as WorkbenchState }))
 vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => current.state }))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { childWorkspacePath, normalizeWorkspacePath } from '../src/path-policy.ts'
+import { childWorkspacePath, normalizeWorkspacePath } from '../src/shared/path-policy.ts'
 
 describe('workspace path policy', () => {
   it('accepts the root and slash-delimited relative file paths', () => {

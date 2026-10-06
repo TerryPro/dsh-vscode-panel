@@ -9,7 +9,7 @@ import {
   SIDEBAR_FOOT_ATTRIBUTE,
   SIDEBAR_SETTINGS_AREA_ATTRIBUTE,
   SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE,
-} from '../src/client/sidebar-footer-layout.ts'
+} from '../src/client/layout/sidebar-footer-layout.ts'
 
 afterEach(() => { document.body.innerHTML = '' })
 

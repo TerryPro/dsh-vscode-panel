@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GitPanel } from '../src/client/GitPanel.tsx'
+import { GitPanel } from '../src/client/git/GitPanel.tsx'
 import { zh } from '../src/client/locales.ts'
 
 const workbenchStore = vi.hoisted(() => {

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ModeSwitch } from '../src/client/ModeSwitch.tsx'
+import { ModeSwitch } from '../src/client/layout/ModeSwitch.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   FishLogo: () => <svg data-icon="brand" />,

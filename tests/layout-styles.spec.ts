@@ -8,12 +8,12 @@ import {
   ASSISTANT_METRICS_WRAP_ATTRIBUTE,
   CONVERSATION_NARROW_ATTRIBUTE,
   CONVERSATION_ROOT_ATTRIBUTE,
-} from '../src/client/conversation-layout.ts'
+} from '../src/client/layout/conversation-layout.ts'
 import {
   EDITOR_RELEASE_ATTRIBUTE,
   EDITOR_TRANSITION_ATTRIBUTE,
   TRANSITION_EDITOR_WIDTH,
-} from '../src/client/editor-track-transition.ts'
+} from '../src/client/editor/editor-track-transition.ts'
 import {
   DETAILS_TRACK_ATTRIBUTE,
   DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE,
@@ -24,9 +24,9 @@ import {
   resolveDetailsTrackMaximum,
   resolveDetailsTrackWidth,
   resolveResponsiveDetailsDefault,
-} from '../src/client/details-track-layout.ts'
-import { EDITOR_COLLAPSED_ATTRIBUTE, installWorkbenchLayout } from '../src/client/layout-styles.ts'
-import { CONVERSATION_COLLAPSED_ATTRIBUTE } from '../src/client/editor-layout-contract.ts'
+} from '../src/client/layout/details-track-layout.ts'
+import { EDITOR_COLLAPSED_ATTRIBUTE, installWorkbenchLayout } from '../src/client/layout/layout-styles.ts'
+import { CONVERSATION_COLLAPSED_ATTRIBUTE } from '../src/client/layout/editor-layout-contract.ts'
 
 afterEach(() => {
   document.head.innerHTML = ''

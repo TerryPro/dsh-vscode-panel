@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildGitDecorations, gitFileDecoration } from '../src/client/git-decorations.ts'
+import { buildGitDecorations, gitFileDecoration } from '../src/client/git/git-decorations.ts'
 
 describe('Git file decorations', () => {
   it('maps porcelain states to stable semantic colors', () => {

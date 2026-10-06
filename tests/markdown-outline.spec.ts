@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractMarkdownOutline } from '../src/client/markdown-outline.ts'
+import { extractMarkdownOutline } from '../src/client/markdown/markdown-outline.ts'
 
 describe('extractMarkdownOutline', () => {
   it('collects ATX headings with their level and a document-order index', () => {

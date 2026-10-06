@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
 import type { WorkbenchTerminalTab } from '../src/client/controller.ts'
-import { TerminalSurface } from '../src/client/TerminalSurface.tsx'
+import { TerminalSurface } from '../src/client/terminal/TerminalSurface.tsx'
 
 const terminalHarness = vi.hoisted(() => ({
   instances: [] as Array<{

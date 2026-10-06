@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMarkdownEdit, type MarkdownCommandKind } from '../src/client/markdown-format.ts'
+import { buildMarkdownEdit, type MarkdownCommandKind } from '../src/client/markdown/markdown-format.ts'
 
 /** Apply an edit to its source text, the way CodeMirror would, for readable assertions. */
 function apply(text: string, from: number, to: number, kind: MarkdownCommandKind): string {

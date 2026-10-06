@@ -4,8 +4,8 @@ import { EditorView } from '@codemirror/view'
 import { undo } from '@codemirror/commands'
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { CodeEditor } from '../src/client/CodeEditor.tsx'
-import { GIT_HUNK_PEEK_STORAGE_KEY } from '../src/client/git-hunk-peek-resize.ts'
+import { CodeEditor } from '../src/client/editor/CodeEditor.tsx'
+import { GIT_HUNK_PEEK_STORAGE_KEY } from '../src/client/git/git-hunk-peek-resize.ts'
 
 const rangeGetClientRects = Range.prototype.getClientRects
 const rangeGetBoundingClientRect = Range.prototype.getBoundingClientRect

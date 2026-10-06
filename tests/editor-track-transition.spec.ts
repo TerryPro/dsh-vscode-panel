@@ -10,7 +10,7 @@ import {
   TRANSITION_CONVERSATION_WIDTH,
   TRANSITION_EDITOR_WIDTH,
   TRANSITION_SIDEBAR_WIDTH,
-} from '../src/client/editor-track-transition.ts'
+} from '../src/client/editor/editor-track-transition.ts'
 
 let scheduledFrame: FrameRequestCallback | undefined
 

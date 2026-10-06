@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMarkdownPath } from '../src/markdown-path.ts'
+import { isMarkdownPath } from '../src/shared/markdown-path.ts'
 
 describe('isMarkdownPath', () => {
   it.each(['README.md', 'notes.markdown', 'guide.mdown', 'old.mkd', 'page.mdx'])('recognizes %s', path => {

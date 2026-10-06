@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { errorResponse, WorkbenchHttpError } from '../src/http.ts'
-import { WorkbenchInputError } from '../src/path-policy.ts'
+import { errorResponse, WorkbenchHttpError } from '../src/host/http.ts'
+import { WorkbenchInputError } from '../src/shared/path-policy.ts'
 
 describe('workbench HTTP policy', () => {
   it('keeps expected errors stable and removes internal failure details', () => {

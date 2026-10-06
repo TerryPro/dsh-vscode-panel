@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { unifiedDiffOptions } from '../src/client/DiffSurface.tsx'
+import { unifiedDiffOptions } from '../src/client/editor/DiffSurface.tsx'
 
 describe('full-file Diff surface modes', () => {
   it('keeps Unified rows separate and enables character-inline rendering only in Inline mode', () => {

@@ -4,7 +4,7 @@ import {
   clampGitHunkPeekWidth,
   loadGitHunkPeekWidth,
   saveGitHunkPeekWidth,
-} from '../src/client/git-hunk-peek-resize.ts'
+} from '../src/client/git/git-hunk-peek-resize.ts'
 
 describe('Git hunk popup width preference', () => {
   it('clamps width to the usable viewport while preserving compact viewports', () => {

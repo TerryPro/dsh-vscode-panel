@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installOpenFileRefresh, OPEN_FILE_REFRESH_INTERVAL_MS } from '../src/client/open-file-refresh.ts'
+import { installOpenFileRefresh, OPEN_FILE_REFRESH_INTERVAL_MS } from '../src/client/editor/open-file-refresh.ts'
 
 afterEach(() => { vi.useRealTimers() })
 

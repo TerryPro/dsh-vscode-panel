@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildGitPathTree } from '../src/client/git-tree.ts'
+import { buildGitPathTree } from '../src/client/git/git-tree.ts'
 
 describe('Git change tree', () => {
   it('groups paths into sorted directories without changing file identities', () => {

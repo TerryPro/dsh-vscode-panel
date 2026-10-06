@@ -2,7 +2,7 @@
 
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { EditorStatusBar } from '../src/client/EditorStatusBar.tsx'
+import { EditorStatusBar } from '../src/client/editor/EditorStatusBar.tsx'
 import { zh } from '../src/client/locales.ts'
 
 function t(key: keyof typeof zh, values?: Record<string, string>): string {

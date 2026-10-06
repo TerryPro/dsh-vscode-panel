@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ClientTerminals } from '@deepseek-ai/dsh-api-terminal-controller/client'
 import type { WorkbenchTerminalTab } from '../src/client/controller.ts'
-import { resolveWorkbenchWorkspaceId } from '../src/client/workspace-binding.ts'
+import { resolveWorkbenchWorkspaceId } from '../src/client/layout/workspace-binding.ts'
 
 vi.mock('@deepseek-ai/dsh-client-store', () => ({
   createSnapshotStore: <T,>(initial: T) => {

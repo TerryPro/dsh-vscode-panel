@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
-import { WorkbenchRail } from '../src/client/WorkbenchRail.tsx'
+import { WorkbenchRail } from '../src/client/layout/WorkbenchRail.tsx'
 
 const workbench = vi.hoisted(() => ({ current: {} as Record<string, unknown> }))
 

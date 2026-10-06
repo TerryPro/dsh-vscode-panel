@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FileTree } from '../src/client/FileTree.tsx'
+import { FileTree } from '../src/client/files/FileTree.tsx'
 import { zh } from '../src/client/locales.ts'
 
 const workbench = vi.hoisted(() => ({

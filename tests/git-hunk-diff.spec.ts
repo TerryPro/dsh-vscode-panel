@@ -1,7 +1,7 @@
 import { Text } from '@codemirror/state'
 import { Chunk } from '@codemirror/merge'
 import { describe, expect, it } from 'vitest'
-import { buildGitHunkDiff, type GitHunkDiffRow } from '../src/client/git-hunk-diff.ts'
+import { buildGitHunkDiff, type GitHunkDiffRow } from '../src/client/git/git-hunk-diff.ts'
 
 describe('Git local Unified Diff hunk', () => {
   it('renders modified lines with paired context and old/new line numbers', () => {

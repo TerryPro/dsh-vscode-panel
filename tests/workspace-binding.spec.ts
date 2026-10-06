@@ -4,7 +4,7 @@ import {
   resolveWorkbenchWorkspace,
   resolveWorkbenchWorkspaceId,
   type SessionActivityIndex,
-} from '../src/client/workspace-binding.ts'
+} from '../src/client/layout/workspace-binding.ts'
 
 const workspaces = [
   { workspaceId: 'workspace-a', path: '/workspace/alpha', sessionIds: ['session-a1', 'session-a2'] },

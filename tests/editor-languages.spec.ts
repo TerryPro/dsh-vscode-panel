@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { languageForPath, languageLabelForPath } from '../src/client/editor-languages.ts'
+import { languageForPath, languageLabelForPath } from '../src/client/editor/editor-languages.ts'
 
 describe('languageForPath', () => {
   it.each([

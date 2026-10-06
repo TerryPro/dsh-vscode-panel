@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { GIT_GRAPH_PAGE_SIZE } from '../src/contracts.ts'
+import { GIT_GRAPH_PAGE_SIZE } from '../src/shared/contracts.ts'
 import {
   GitBackend,
   parseGitBranches,
@@ -13,8 +13,8 @@ import {
   parseGitNameStatus,
   parseGitNumstat,
   parsePorcelainStatus,
-} from '../src/git-backend.ts'
-import type { WorkspaceBackend } from '../src/workspace-backend.ts'
+} from '../src/host/git-backend.ts'
+import type { WorkspaceBackend } from '../src/host/workspace-backend.ts'
 
 const temporaryDirectories: string[] = []
 
