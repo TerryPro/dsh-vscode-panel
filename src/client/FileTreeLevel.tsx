@@ -1,11 +1,10 @@
 import {
-  IconChevronDownOutline14,
-  IconChevronRightOutline14,
-  IconFolderClose16,
-  IconFolderOpen16,
+  FileTypeIcon,
+  IconFolderCloseRegular,
+  IconFolderOpenRegular,
+  classifyFileType,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DirectoryListing, WorkspaceEntry } from '../contracts.ts'
-import { IconFileOutline16 } from './CreateEntryIcons.tsx'
 import { FileTreeCreateRow, type FileTreeCreateKind } from './FileTreeCreateRow.tsx'
 import type { GitDecorationMap } from './git-decorations.ts'
 import css from './Workbench.module.css'
@@ -72,15 +71,12 @@ export function FileTreeLevel(props: FileTreeLevelProps) {
               props.onContextMenu(entry, event.currentTarget.getBoundingClientRect())
             }}
           >
-            <span className={css.chevron}>
-              {directory && (open ? <IconChevronDownOutline14 size={12} /> : <IconChevronRightOutline14 size={12} />)}
-            </span>
             {directory
-              ? open ? <IconFolderOpen16 size={16} /> : <IconFolderClose16 size={16} />
-              : <IconFileOutline16 size={15} />}
+              ? open ? <IconFolderOpenRegular className={css.treeIcon} /> : <IconFolderCloseRegular className={css.treeIcon} />
+              : <FileTypeIcon kind={classifyFileType(entry.name)} size={16} className={css.fileIcon} />}
             <span className={css.rowName}>{entry.name}</span>
           </button>
-          {open && props.loading.has(entry.path) && <div className={css.treeLoading} style={{ paddingLeft: 28 + props.depth * 16 }}>…</div>}
+          {open && props.loading.has(entry.path) && <div className={css.treeLoading} style={{ paddingLeft: 30 + props.depth * 16 }}>…</div>}
           {open && children !== undefined && (
             <FileTreeLevel {...props} entries={children.entries} directoryPath={entry.path} depth={props.depth + 1} />
           )}

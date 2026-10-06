@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchController } from './controller.ts'
 import type { WorkbenchKey } from './locales.ts'
@@ -7,7 +7,7 @@ import { GitPanel } from './GitPanel.tsx'
 import { TerminalPanel } from './TerminalPanel.tsx'
 import { useWorkbench } from './use-workbench.ts'
 import { WorkbenchRail } from './WorkbenchRail.tsx'
-import { resolveWorkbenchWorkspace } from './workspace-binding.ts'
+import { resolveCurrentSessionId, resolveWorkbenchWorkspace } from './workspace-binding.ts'
 import css from './Workbench.module.css'
 
 export type WorkbenchSidebarProps = PropsRuntime<'sidebar.workspaces'> & PropsLocale<'workbench'> & {
@@ -17,12 +17,14 @@ export type WorkbenchSidebarProps = PropsRuntime<'sidebar.workspaces'> & PropsLo
 /** Sidebar replacement body; the official shell, brand, controls, and settings stay mounted. */
 export function WorkbenchSidebar({ wide, expandSidebar, useSessions, useWorkspaces, controller, t }: WorkbenchSidebarProps) {
   const state = useWorkbench(controller)
-  const sessionId = useSessions(snapshot => snapshot.current)
-  const workspace = useWorkspaces(snapshot => resolveWorkbenchWorkspace(
-    snapshot.items,
-    sessionId,
-    snapshot.recentWorkspaceId,
-  ))
+  // This seat is root-scoped, so the current Session is read the way the
+  // official Workspace browser reads it: the row the main view retains.
+  const sessions = useSessions(snapshot => snapshot.byId)
+  const workspaces = useWorkspaces(snapshot => snapshot.items)
+  const workspace = useMemo(
+    () => resolveWorkbenchWorkspace(workspaces, resolveCurrentSessionId(sessions), sessions),
+    [sessions, workspaces],
+  )
   const workspaceId = workspace?.workspaceId
   useEffect(() => { controller.setWorkspace(workspaceId) }, [controller, workspaceId])
   if (!wide) {

@@ -17,9 +17,12 @@ import type {
   WorkspaceFileObservation,
   WorkspaceFileRefresh,
   WorkspaceFilesRefresh,
+  WorkspaceImageFile,
   WorkspaceRelativePath,
 } from './contracts.ts'
+import { imageMimeTypeForPath } from './contracts.ts'
 import { WorkbenchHttpError } from './http.ts'
+import { isMarkdownPath } from './markdown-path.ts'
 import { childWorkspacePath, normalizeWorkspacePath, WorkbenchInputError } from './path-policy.ts'
 
 export interface WorkspaceLimits {
@@ -100,7 +103,29 @@ export class WorkspaceBackend {
       content,
       version: info.version,
       size,
-      markdown: /\.(?:md|markdown)$/iu.test(workspace.path),
+      markdown: isMarkdownPath(workspace.path),
+    }
+  }
+
+  /** Read a workspace image as raw bytes and return it base64-encoded for inline preview. */
+  async readImage(workspaceIdValue: unknown, pathValue: unknown): Promise<WorkspaceImageFile> {
+    const workspace = await this.resolve(workspaceIdValue, pathValue)
+    if (workspace.path === '') throw new WorkbenchHttpError(400, 'FILE_REQUIRED', '请选择文件。')
+    const mimeType = imageMimeTypeForPath(workspace.path)
+    if (mimeType === undefined) {
+      throw new WorkbenchHttpError(400, 'IMAGE_UNSUPPORTED', '该文件不是可预览的图片。')
+    }
+    const info = await this.requireType(workspace, 'file')
+    if (info.size !== undefined && info.size > this.limits.maxFileBytes) {
+      throw new WorkbenchHttpError(413, 'FS_TOO_LARGE', '图片超过工作台允许的大小。')
+    }
+    const bytes = await this.ctx.fs.readBytes(workspace.target, undefined, this.limits.maxFileBytes)
+    return {
+      path: workspace.path,
+      content: Buffer.from(bytes).toString('base64'),
+      mimeType,
+      version: info.version,
+      size: bytes.byteLength,
     }
   }
 
@@ -141,7 +166,7 @@ export class WorkspaceBackend {
           content,
           version: info.version,
           size,
-          markdown: /\.(?:md|markdown)$/iu.test(workspace.path),
+          markdown: isMarkdownPath(workspace.path),
         },
       })
       changed += 1

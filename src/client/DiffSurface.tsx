@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react'
 import { EditorState } from '@codemirror/state'
 import { MergeView, unifiedMergeView } from '@codemirror/merge'
 import { EditorView } from '@codemirror/view'
-import { basicSetup } from 'codemirror'
+import { dshEditorSetup } from './editor-setup.ts'
+import { languageForPath } from './editor-languages.ts'
+import { editorSyntaxHighlighting, foldGutterTheme, indentMarkersTheme } from './editor-theme.ts'
 
 export interface DiffSurfaceProps {
   original: string
@@ -10,6 +12,7 @@ export interface DiffSurfaceProps {
   originalLabel: string
   modifiedLabel: string
   mode: 'split' | 'unified' | 'inline'
+  path?: string
 }
 
 const COLLAPSE_UNCHANGED = { margin: 3, minSize: 8 } as const
@@ -34,11 +37,15 @@ export function DiffSurface(props: DiffSurfaceProps) {
   useEffect(() => {
     if (parent.current === null) return
     const extensions = (label: string) => [
-      basicSetup,
+      dshEditorSetup,
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({ 'aria-label': label }),
+      editorSyntaxHighlighting,
+      foldGutterTheme,
+      indentMarkersTheme,
+      languageForPath(props.path) ?? [],
       diffTheme,
     ]
 
@@ -68,7 +75,7 @@ export function DiffSurface(props: DiffSurfaceProps) {
       }),
     })
     return () => { view.destroy() }
-  }, [props.mode, props.modified, props.modifiedLabel, props.original, props.originalLabel])
+  }, [props.mode, props.modified, props.modifiedLabel, props.original, props.originalLabel, props.path])
 
   return <div ref={parent} data-diff-surface={props.mode} style={{ height: '100%', minHeight: 0 }} />
 }
@@ -87,7 +94,7 @@ const diffTheme = EditorView.theme({
   '.cm-content': { padding: '10px 0 72px' },
   '.cm-gutters': {
     backgroundColor: 'var(--dsw-alias-bg-layer-1)',
-    color: 'var(--dsw-alias-label-quaternary)',
+    color: 'var(--dsw-alias-label-caption)',
     borderRight: '1px solid var(--dsw-alias-border-l1)',
   },
   '.cm-activeLine, .cm-activeLineGutter': {

@@ -4,9 +4,9 @@
 
 A three-column workspace for DeepSeek Harness Web: navigation on the left, files and terminals in the middle, and the native DSH conversation on the right.
 
-![DSH Workbench Layout showing the file explorer, editor, and native conversation](https://raw.githubusercontent.com/lsq-dsh-plugins/dsh-workbench-layout/main/assets/workbench-files-and-chat.png)
+![DSH Workbench Layout showing the file explorer, editor, and native conversation](https://raw.githubusercontent.com/TerryPro/dsh-vscode-panel/main/assets/workbench-files-and-chat.png)
 
-![DSH Workbench Layout showing the Git changes view, a side-by-side diff, and the native conversation](https://raw.githubusercontent.com/lsq-dsh-plugins/dsh-workbench-layout/main/assets/workbench-git-diff.png)
+![DSH Workbench Layout showing the Git changes view, a side-by-side diff, and the native conversation](https://raw.githubusercontent.com/TerryPro/dsh-vscode-panel/main/assets/workbench-git-diff.png)
 
 ## Overview
 
@@ -60,7 +60,7 @@ The layout, icons, colors, menus, dialogs, tooltips, and responsive behavior reu
 - Resize the middle and right columns with the official AppFrame divider behavior. The initial conversation width scales with the viewport, and its drag range grows on large displays while preserving the middle editor's usable width.
 - Collapse the middle editor from the sidebar footer; selecting a file, Diff, or terminal opens it again.
 - Keep files and Git available for a Workspace even before its Session contains messages.
-- Adapt the composer, menus, failure messages, Session Log action, and assistant timing statistics when the conversation becomes narrow.
+- Adapt the composer, menus, failure messages, and assistant timing statistics when the conversation becomes narrow.
 - Return the conversation to the official center layout and surface colors when the middle editor is collapsed.
 
 ## Installation
@@ -72,6 +72,8 @@ dsh plugin --profile web add @lsq64737/dsh-workbench-layout
 ```
 
 Restart DSH Web if it is already running.
+
+This release is built and tested against DSH Web 0.2.0-rc.2. Its peer ranges still accept 0.1.5-rc.1, which declares the same sidebar, right-column, and footer slot contracts.
 
 The terminal feature depends on the native `node-pty` package. If pnpm reports `ERR_PNPM_IGNORED_BUILDS`, run `pnpm approve-builds` from the DSH Web profile directory, approve `node-pty`, and then repeat the installation or restart DSH Web.
 
@@ -109,6 +111,7 @@ Git features require the selected Workspace root to be a Git repository. Remote 
 - The file editor reads text files; binary files receive a binary-change notice instead of rendered content.
 - Terminal processes end when their tab closes, the page reloads, the connection ends, the Workspace changes, or the plugin stops. The default composition allows up to eight concurrent terminals.
 - The plugin reorders the official AppFrame through stable client markers because DSH does not currently expose a dedicated conversation-column placement API. A future AppFrame rewrite may require a plugin update.
+- In the Windows desktop app a collapsed sidebar has zero width and DSH hides the sidebar's browser and footer rows, so the mode switch and the middle-editor toggle are unavailable until the sidebar is expanded again. On macOS, in a browser, and on Linux the collapsed sidebar keeps its icon rail and both controls stay reachable.
 - On very narrow windows, the official AppFrame concession temporarily closes the middle editor and restores it when enough width is available.
 
 ## Development
@@ -122,6 +125,8 @@ npm test
 npm run build
 npm run test:bundle
 ```
+
+`npm run typecheck` covers the plugin sources plus the three test harnesses that stub DSH snapshots (`workspace-binding`, `workbench-sidebar`, `workbench-editor`), so a host shape change fails the build instead of silently switching those checks off. The remaining specs are not type-checked yet.
 
 ## License
 

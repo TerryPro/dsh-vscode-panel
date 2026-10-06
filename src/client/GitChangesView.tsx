@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
-  IconChevronDownOutline14,
-  IconChevronRightOutline14,
-  IconCloseOutline16,
-  IconCodeOutline16,
-  IconFolderClose16,
-  IconFolderOpen16,
-  IconPlusOutline16,
-  IconTrashOutline16,
+  IconChevronDownOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconCloseOutlineMedium,
+  IconCodeOutlineMedium,
+  IconFolderCloseMedium,
+  IconFolderOpenMedium,
+  IconPlusOutlineMedium,
+  IconTrashOutlineMedium,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -47,8 +47,8 @@ export function GitChangesView(props: GitChangesViewProps) {
         onOpen={file => { props.onOpen(file, true) }}
         onAction={props.onUnstage}
         actionLabel={props.t('git.unstage')}
-        actionIcon={<IconCloseOutline16 size={14} />}
-        headerActions={[{ label: props.t('git.unstageAll'), icon: <IconCloseOutline16 size={14} />, action: props.onUnstageAll }]}
+        actionIcon={<IconCloseOutlineMedium size={14} />}
+        headerActions={[{ label: props.t('git.unstageAll'), icon: <IconCloseOutlineMedium size={14} />, action: props.onUnstageAll }]}
         busy={props.busy}
       />
       <ChangeSection
@@ -61,13 +61,13 @@ export function GitChangesView(props: GitChangesViewProps) {
         onOpen={file => { props.onOpen(file, false) }}
         onAction={props.onStage}
         actionLabel={props.t('git.stage')}
-        actionIcon={<IconPlusOutline16 size={14} />}
+        actionIcon={<IconPlusOutlineMedium size={14} />}
         secondaryAction={props.onDiscard}
         secondaryActionLabel={props.t('git.discard')}
-        secondaryActionIcon={<IconTrashOutline16 size={14} />}
+        secondaryActionIcon={<IconTrashOutlineMedium size={14} />}
         headerActions={[
-          { label: props.t('git.stageAll'), icon: <IconPlusOutline16 size={14} />, action: props.onStageAll },
-          { label: props.t('git.discardAll'), icon: <IconTrashOutline16 size={14} />, action: props.onDiscardAll },
+          { label: props.t('git.stageAll'), icon: <IconPlusOutlineMedium size={14} />, action: props.onStageAll },
+          { label: props.t('git.discardAll'), icon: <IconTrashOutlineMedium size={14} />, action: props.onDiscardAll },
         ]}
         busy={props.busy}
       />
@@ -97,7 +97,7 @@ function ChangeSection(props: {
     <section className={css.gitSection}>
       <div className={css.gitSectionHeader}>
         <button type="button" className={css.gitSectionToggle} aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
-          {expanded ? <IconChevronDownOutline14 size={14} /> : <IconChevronRightOutline14 size={14} />}
+          {expanded ? <IconChevronDownOutlineRegular size={14} /> : <IconChevronRightOutlineRegular size={14} />}
           <span>{props.title}</span><span className={css.gitCount}>{props.files.length}</span>
         </button>
         <div className={css.gitSectionActions}>
@@ -174,8 +174,8 @@ function TreeChildren(props: {
               title={directory.path}
               onClick={() => { props.onToggle(directory.path) }}
             >
-              {expanded ? <IconChevronDownOutline14 size={12} /> : <IconChevronRightOutline14 size={12} />}
-              {expanded ? <IconFolderOpen16 size={15} /> : <IconFolderClose16 size={15} />}
+              {expanded ? <IconChevronDownOutlineRegular size={12} /> : <IconChevronRightOutlineRegular size={12} />}
+              {expanded ? <IconFolderOpenMedium size={15} /> : <IconFolderCloseMedium size={15} />}
               <span className={css.rowName}>{directory.name}</span>
             </button>
             {expanded && <TreeChildren {...props} node={directory} depth={props.depth + 1} />}
@@ -223,7 +223,7 @@ function ChangeRow(props: ChangeRowProps) {
       style={props.depth === undefined ? undefined : { '--git-tree-depth': props.depth } as CSSProperties}
     >
       <button type="button" className={css.gitChangeMain} onClick={props.onOpen} title={renamed ? `${props.file.originalPath} → ${props.file.path}` : props.file.path}>
-        <IconCodeOutline16 size={15} />
+        <IconCodeOutlineMedium size={15} />
         <span className={css.gitFileText} data-git-file-text="" data-has-directory={directory === '' ? undefined : ''}>
           <span className={css.rowName}>{fileName(props.file.path)}</span>
           {directory !== '' && <span className={css.gitFileDirectory} data-git-file-directory="">{directory}</span>}

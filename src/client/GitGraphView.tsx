@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import {
-  IconCodeOutline16,
-  IconCopyOutline16,
-  IconEllipsisOutline16,
-  IconPlusOutline16,
-  IconRefreshOutline16,
+  IconCodeOutlineMedium,
+  IconCopyOutlineMedium,
+  IconEllipsisOutlineMedium,
+  IconPlusOutlineMedium,
+  IconRefreshOutlineMedium,
   Menu,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -166,13 +166,13 @@ function CommitEntry(props: {
           open={menuOpen}
           onClose={() => { setMenuOpen(false) }}
           items={[
-            { id: 'copy', label: props.t('git.commitMenu.copy'), icon: <IconCopyOutline16 size={14} /> },
-            { id: 'branch', label: props.t('git.commitMenu.branch'), icon: <IconPlusOutline16 size={14} /> },
+            { id: 'copy', label: props.t('git.commitMenu.copy'), icon: <IconCopyOutlineMedium size={14} /> },
+            { id: 'branch', label: props.t('git.commitMenu.branch'), icon: <IconPlusOutlineMedium size={14} /> },
             { type: 'separator', id: 'history-separator' },
-            { id: 'cherry-pick', label: props.t('git.commitMenu.cherryPick'), icon: <IconPlusOutline16 size={14} /> },
-            { id: 'revert', label: props.t('git.commitMenu.revertCommit'), icon: <IconRefreshOutline16 size={14} /> },
+            { id: 'cherry-pick', label: props.t('git.commitMenu.cherryPick'), icon: <IconPlusOutlineMedium size={14} /> },
+            { id: 'revert', label: props.t('git.commitMenu.revertCommit'), icon: <IconRefreshOutlineMedium size={14} /> },
             { type: 'separator', id: 'compare-separator' },
-            { id: 'compare', label: props.t('git.commitMenu.compare'), icon: <IconCodeOutline16 size={14} /> },
+            { id: 'compare', label: props.t('git.commitMenu.compare'), icon: <IconCodeOutlineMedium size={14} /> },
           ]}
           onSelect={(id) => {
             setMenuOpen(false)
@@ -184,7 +184,7 @@ function CommitEntry(props: {
           anchor={(
             <Tooltip label={props.t('git.commitMenu.more')} side="bottom" delayMs={450}>
               <button type="button" className={css.commitMenuButton} aria-label={props.t('git.commitMenu.more')} aria-expanded={menuOpen} onClick={() => { setMenuOpen(value => !value) }}>
-                <IconEllipsisOutline16 size={14} />
+                <IconEllipsisOutlineMedium size={14} />
               </button>
             </Tooltip>
           )}

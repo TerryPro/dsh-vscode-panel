@@ -1,8 +1,8 @@
 /** 收起侧栏的模式化快捷操作；复用官方 36px rail 几何。 */
 
 import {
-  IconListPenOutline16,
-  IconPlusOutline16,
+  IconListPenOutlineMedium,
+  IconPlusOutlineMedium,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -53,7 +53,7 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
             expandSidebar()
           }}
         >
-          {graph ? <IconListPenOutline16 size={18} /> : <IconCommitGraphOutline16 size={18} />}
+          {graph ? <IconListPenOutlineMedium size={18} /> : <IconCommitGraphOutline16 size={18} />}
         </RailButton>
       </RailActions>
     )
@@ -66,7 +66,7 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
         <RailButton label={t('terminal.new')} disabled={workspaceId === undefined} onClick={() => { controller.openTerminal(workspaceId) }}>
           <span className={css.railTerminalAdd} aria-hidden>
             <IconTerminalOutline16 size={18} />
-            <IconPlusOutline16 className={css.railAddGlyph} size={8} />
+            <IconPlusOutlineMedium className={css.railAddGlyph} size={8} />
           </span>
         </RailButton>
         {terminals.map(terminal => {

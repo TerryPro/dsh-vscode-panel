@@ -65,8 +65,15 @@ function sidebarFooterFixture() {
   const settings = document.createElement('div')
   const settingsSeat = document.createElement('div')
   settingsSeat.dataset.slot = 'sidebar.settings'
+  // The official settings registrant wraps its launcher in a trigger row and
+  // renders the settings panel after it, so the launcher is not a direct child
+  // of the seat and is not the seat's last button either.
+  const triggerRow = document.createElement('div')
   const settingsTrigger = document.createElement('button')
-  settingsSeat.appendChild(settingsTrigger)
+  settingsTrigger.setAttribute('aria-haspopup', 'dialog')
+  triggerRow.appendChild(settingsTrigger)
+  const panelClose = document.createElement('button')
+  settingsSeat.append(triggerRow, panelClose)
   settings.appendChild(settingsSeat)
   foot.append(actions, settings)
   document.body.appendChild(foot)

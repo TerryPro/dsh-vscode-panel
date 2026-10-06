@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import {
-  IconChevronDownOutline14,
-  IconChevronRightOutline14,
-  IconCodeOutline16,
-  IconFolderClose16,
-  IconFolderOpen16,
+  IconChevronDownOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconCodeOutlineMedium,
+  IconFolderCloseMedium,
+  IconFolderOpenMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GitCommitFile } from '../contracts.ts'
 import { buildGitPathTree, type GitFileLayout, type GitPathTreeNode } from './git-tree.ts'
@@ -85,8 +85,8 @@ function CommitTreeChildren(props: {
               title={directory.path}
               onClick={() => { props.onToggle(directory.path) }}
             >
-              {expanded ? <IconChevronDownOutline14 size={12} /> : <IconChevronRightOutline14 size={12} />}
-              {expanded ? <IconFolderOpen16 size={15} /> : <IconFolderClose16 size={15} />}
+              {expanded ? <IconChevronDownOutlineRegular size={12} /> : <IconChevronRightOutlineRegular size={12} />}
+              {expanded ? <IconFolderOpenMedium size={15} /> : <IconFolderCloseMedium size={15} />}
               <span className={css.rowName}>{directory.name}</span>
             </button>
             {expanded && <CommitTreeChildren {...props} node={directory} depth={props.depth + 1} />}
@@ -123,7 +123,7 @@ function CommitFileRow(props: {
       title={props.file.originalPath === undefined ? props.file.path : `${props.file.originalPath} → ${props.file.path}`}
       onClick={props.onOpen}
     >
-      <IconCodeOutline16 size={14} />
+      <IconCodeOutlineMedium size={14} />
       <span className={css.gitFileText}>
         <span className={css.rowName}>{fileName(props.file.path)}</span>
         {props.showDirectory === true && <span className={css.gitFileDirectory}>{directoryName(props.file.path)}</span>}

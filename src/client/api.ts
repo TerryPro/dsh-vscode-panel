@@ -25,6 +25,7 @@ import type {
   WorkspaceFile,
   WorkspaceFileObservation,
   WorkspaceFilesRefresh,
+  WorkspaceImageFile,
   WorkspaceAbsolutePath,
   WorkspaceRelativePath,
 } from '../contracts.ts'
@@ -45,6 +46,10 @@ export class WorkbenchApi {
 
   async readFile(workspaceId: string, path: string): Promise<WorkspaceFile> {
     return this.post('/file/read', { workspaceId, path })
+  }
+
+  async readImage(workspaceId: string, path: string): Promise<WorkspaceImageFile> {
+    return this.post('/file/image', { workspaceId, path })
   }
 
   async refreshFiles(workspaceId: string, files: WorkspaceFileObservation[]): Promise<WorkspaceFilesRefresh> {

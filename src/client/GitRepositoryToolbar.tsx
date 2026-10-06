@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import {
-  IconChevronDownOutline14,
-  IconDownloadOutline16,
-  IconEllipsisOutline16,
-  IconFolderOpenOutline16,
-  IconListPenOutline16,
-  IconLoadingOutline16,
-  IconEditOutline16,
-  IconPersonalizationOutline16,
-  IconPlusOutline16,
-  IconRefreshOutline16,
-  IconSendOutline16,
-  IconTrashOutline16,
+  IconChevronDownOutlineRegular,
+  IconDownloadOutlineMedium,
+  IconEllipsisOutlineMedium,
+  IconFolderOpenOutlineMedium,
+  IconListPenOutlineMedium,
+  IconLoadingOutlineMedium,
+  IconEditOutlineMedium,
+  IconPersonalizationOutlineMedium,
+  IconPlusOutlineMedium,
+  IconRefreshOutlineMedium,
+  IconSendOutlineMedium,
+  IconTrashOutlineMedium,
   Menu,
   Tooltip,
   type MenuEntry,
@@ -58,7 +58,7 @@ export function GitRepositoryToolbar(props: GitRepositoryToolbarProps) {
             disabled={props.status?.upstream === undefined || props.busy !== null}
             onClick={() => { props.onRemoteOperation('sync') }}
           >
-            {props.busy === 'sync' ? <IconLoadingOutline16 size={14} /> : <IconRefreshOutline16 size={14} />}
+            {props.busy === 'sync' ? <IconLoadingOutlineMedium size={14} /> : <IconRefreshOutlineMedium size={14} />}
             {props.status?.upstream !== undefined && (
               <span>↓{props.status.behind ?? 0} ↑{props.status.ahead ?? 0}</span>
             )}
@@ -75,8 +75,8 @@ function BranchMenu(props: GitRepositoryToolbarProps) {
   const local = props.branches?.branches.filter(branch => branch.kind === 'local') ?? []
   const remote = props.branches?.branches.filter(branch => branch.kind === 'remote') ?? []
   const items: MenuEntry[] = [
-    { id: 'create', label: props.t('git.createBranch'), icon: <IconPlusOutline16 size={14} /> },
-    { id: 'create-from', label: props.t('git.createBranchFrom'), icon: <IconPlusOutline16 size={14} /> },
+    { id: 'create', label: props.t('git.createBranch'), icon: <IconPlusOutlineMedium size={14} /> },
+    { id: 'create-from', label: props.t('git.createBranchFrom'), icon: <IconPlusOutlineMedium size={14} /> },
     { type: 'separator', id: 'branch-action-separator' },
     { type: 'label', id: 'local-label', text: props.t('git.localBranches') },
     ...local.map(branch => ({ id: branch.ref, label: branch.name, icon: <IconSourceControlOutline16 size={14} /> })),
@@ -112,7 +112,7 @@ function BranchMenu(props: GitRepositoryToolbarProps) {
         >
           <IconSourceControlOutline16 size={16} />
           <span>{props.status?.branch ?? (props.status?.detached === true ? props.t('git.detached') : props.t('git.title'))}</span>
-          <IconChevronDownOutline14 size={12} />
+          <IconChevronDownOutlineRegular size={12} />
         </button>
       )}
     />
@@ -131,7 +131,7 @@ function ViewToggle(props: GitRepositoryToolbarProps) {
         aria-pressed={graph}
         onClick={props.onToggleView}
       >
-        {graph ? <IconListPenOutline16 size={15} /> : <IconCommitGraphOutline16 size={16} />}
+        {graph ? <IconListPenOutlineMedium size={15} /> : <IconCommitGraphOutline16 size={16} />}
       </button>
     </Tooltip>
   )
@@ -144,8 +144,8 @@ function FileLayoutMenu(props: GitRepositoryToolbarProps) {
       open={open}
       onClose={() => { setOpen(false) }}
       items={[
-        { id: 'list', label: props.t('git.layoutList'), icon: <IconListPenOutline16 size={14} /> },
-        { id: 'tree', label: props.t('git.layoutTree'), icon: <IconFolderOpenOutline16 size={14} /> },
+        { id: 'list', label: props.t('git.layoutList'), icon: <IconListPenOutlineMedium size={14} /> },
+        { id: 'tree', label: props.t('git.layoutTree'), icon: <IconFolderOpenOutlineMedium size={14} /> },
       ]}
       selectedId={props.fileLayout}
       onSelect={(id) => {
@@ -158,7 +158,7 @@ function FileLayoutMenu(props: GitRepositoryToolbarProps) {
       anchor={(
         <Tooltip label={props.t('git.fileLayout')} side="bottom" delayMs={450}>
           <button type="button" className={css.iconButton} aria-label={props.t('git.fileLayout')} onClick={() => { setOpen(value => !value) }}>
-            <IconPersonalizationOutline16 size={15} />
+            <IconPersonalizationOutlineMedium size={15} />
           </button>
         </Tooltip>
       )}
@@ -175,18 +175,18 @@ function ActionsMenu(props: GitRepositoryToolbarProps) {
       open={open}
       onClose={() => { setOpen(false) }}
       items={[
-        { id: 'fetch', label: props.t('git.fetch'), icon: <IconRefreshOutline16 size={14} />, disabled: !hasRemote },
-        { id: 'pull', label: props.t('git.pull'), icon: <IconDownloadOutline16 size={14} />, disabled: !hasUpstream },
-        { id: 'push', label: props.status?.upstream === undefined ? props.t('git.publishBranch') : props.t('git.push'), icon: <IconSendOutline16 size={14} />, disabled: !hasRemote },
-        { id: 'sync', label: props.t('git.sync'), icon: <IconRefreshOutline16 size={14} />, disabled: !hasUpstream },
+        { id: 'fetch', label: props.t('git.fetch'), icon: <IconRefreshOutlineMedium size={14} />, disabled: !hasRemote },
+        { id: 'pull', label: props.t('git.pull'), icon: <IconDownloadOutlineMedium size={14} />, disabled: !hasUpstream },
+        { id: 'push', label: props.status?.upstream === undefined ? props.t('git.publishBranch') : props.t('git.push'), icon: <IconSendOutlineMedium size={14} />, disabled: !hasRemote },
+        { id: 'sync', label: props.t('git.sync'), icon: <IconRefreshOutlineMedium size={14} />, disabled: !hasUpstream },
         { type: 'separator', id: 'remote-separator' },
-        { id: 'target-remote', label: props.t('git.targetRemote'), icon: <IconSendOutline16 size={14} />, disabled: !hasRemote },
-        { id: 'manage-remotes', label: props.t('git.manageRemotes'), icon: <IconPersonalizationOutline16 size={14} /> },
+        { id: 'target-remote', label: props.t('git.targetRemote'), icon: <IconSendOutlineMedium size={14} />, disabled: !hasRemote },
+        { id: 'manage-remotes', label: props.t('git.manageRemotes'), icon: <IconPersonalizationOutlineMedium size={14} /> },
         { type: 'separator', id: 'remote-management-separator' },
-        { id: 'rename-branch', label: props.t('git.renameBranch'), icon: <IconEditOutline16 size={14} />, disabled: props.status?.branch === undefined },
-        { id: 'delete-branch', label: props.t('git.deleteBranch'), icon: <IconTrashOutline16 size={14} />, disabled: (props.branches?.branches.filter(branch => branch.kind === 'local' && !branch.current).length ?? 0) === 0 },
+        { id: 'rename-branch', label: props.t('git.renameBranch'), icon: <IconEditOutlineMedium size={14} />, disabled: props.status?.branch === undefined },
+        { id: 'delete-branch', label: props.t('git.deleteBranch'), icon: <IconTrashOutlineMedium size={14} />, disabled: (props.branches?.branches.filter(branch => branch.kind === 'local' && !branch.current).length ?? 0) === 0 },
         { type: 'separator', id: 'branch-management-separator' },
-        { id: 'refresh', label: props.t('git.refresh'), icon: <IconRefreshOutline16 size={14} /> },
+        { id: 'refresh', label: props.t('git.refresh'), icon: <IconRefreshOutlineMedium size={14} /> },
       ]}
       onSelect={(id) => {
         setOpen(false)
@@ -209,7 +209,7 @@ function ActionsMenu(props: GitRepositoryToolbarProps) {
             disabled={props.busy !== null}
             onClick={() => { setOpen(value => !value) }}
           >
-            {props.busy === null ? <IconEllipsisOutline16 size={15} /> : <IconLoadingOutline16 size={15} />}
+            {props.busy === null ? <IconEllipsisOutlineMedium size={15} /> : <IconLoadingOutlineMedium size={15} />}
           </button>
         </Tooltip>
       )}

@@ -1,4 +1,4 @@
-/** 右侧原生会话栏的窄栏状态、头部操作标记与模型菜单浮层几何。 */
+/** 右侧原生会话栏的窄栏状态、根表面标记与模型菜单浮层几何。 */
 
 export const CONVERSATION_NARROW_ATTRIBUTE = 'data-dsh-workbench-conversation-narrow'
 export const CONVERSATION_ROOT_ATTRIBUTE = 'data-dsh-workbench-conversation-root'
@@ -6,7 +6,6 @@ export const ASSISTANT_ACTIONS_ATTRIBUTE = 'data-dsh-workbench-assistant-actions
 export const ASSISTANT_METRICS_ATTRIBUTE = 'data-dsh-workbench-assistant-metrics'
 export const ASSISTANT_METRICS_WRAP_ATTRIBUTE = 'data-dsh-workbench-assistant-metrics-wrap'
 export const FLOATING_MODEL_MENU_ATTRIBUTE = 'data-dsh-workbench-floating-model-menu'
-export const SESSION_LOG_BUTTON_ATTRIBUTE = 'data-dsh-workbench-session-log-button'
 export const FLOATING_MENU_LEFT_PROPERTY = '--dsh-workbench-floating-menu-left'
 export const FLOATING_MENU_TOP_PROPERTY = '--dsh-workbench-floating-menu-top'
 
@@ -16,8 +15,6 @@ const MENU_GAP = 8
 const MODEL_MENU_SELECTOR = "[data-slot='conversation.input.model'] [role='menu']"
 const MODEL_TRIGGER_SELECTOR = "button[aria-haspopup='menu']"
 const CONVERSATION_SLOT_SELECTOR = ":scope > [data-slot='conversation.session']"
-const SESSION_HEADER_UTILITIES_SELECTOR = "[data-slot='conversation.session.header.utilities']"
-const SESSION_LOG_LABEL = 'Session log'
 const ASSISTANT_TAIL_SELECTOR = '[data-turn-tail]'
 
 export interface ConversationLayoutLogger {
@@ -42,9 +39,6 @@ export function createConversationLayout(
   let trigger: HTMLElement | null = null
   let menuResizeObserver: ResizeObserver | undefined
   let positionFrame: number | null = null
-  let sessionLogButton: HTMLButtonElement | null = null
-  let ownsSessionLogAriaLabel = false
-  let ownsSessionLogTitle = false
   let conversationRoot: HTMLElement | null = null
   let assistantActionRows = new Set<HTMLElement>()
   let assistantMetrics = new Set<HTMLElement>()
@@ -134,39 +128,6 @@ export function createConversationLayout(
     logger.info('workbench-layout: lifted native model menu above workbench columns')
   }
 
-  const releaseSessionLogButton = (): void => {
-    if (sessionLogButton === null) return
-    sessionLogButton.removeAttribute(SESSION_LOG_BUTTON_ATTRIBUTE)
-    if (ownsSessionLogAriaLabel && sessionLogButton.getAttribute('aria-label') === SESSION_LOG_LABEL) {
-      sessionLogButton.removeAttribute('aria-label')
-    }
-    if (ownsSessionLogTitle && sessionLogButton.title === SESSION_LOG_LABEL) {
-      sessionLogButton.removeAttribute('title')
-    }
-    sessionLogButton = null
-    ownsSessionLogAriaLabel = false
-    ownsSessionLogTitle = false
-  }
-
-  const reconcileSessionLogButton = (): void => {
-    const utilities = column.querySelector<HTMLElement>(SESSION_HEADER_UTILITIES_SELECTOR)
-    const nextButton = utilities === null ? null : findSessionLogButton(utilities)
-    if (nextButton === sessionLogButton) return
-    releaseSessionLogButton()
-    if (nextButton === null) return
-    sessionLogButton = nextButton
-    sessionLogButton.setAttribute(SESSION_LOG_BUTTON_ATTRIBUTE, '')
-    if (!sessionLogButton.hasAttribute('aria-label')) {
-      sessionLogButton.setAttribute('aria-label', SESSION_LOG_LABEL)
-      ownsSessionLogAriaLabel = true
-    }
-    if (!sessionLogButton.hasAttribute('title')) {
-      sessionLogButton.title = SESSION_LOG_LABEL
-      ownsSessionLogTitle = true
-    }
-    logger.info('workbench-layout: adopted native Session log action for responsive presentation')
-  }
-
   const reconcileAssistantMetrics = (): void => {
     const nextActionRows = new Set<HTMLElement>()
     const nextMetrics = new Set<HTMLElement>()
@@ -230,7 +191,6 @@ export function createConversationLayout(
   const reconcileDynamicControls = (): void => {
     reconcileConversationRoot()
     reconcileMenu()
-    reconcileSessionLogButton()
     reconcileAssistantMetrics()
   }
 
@@ -271,7 +231,6 @@ export function createConversationLayout(
       window.removeEventListener('resize', schedulePosition)
       window.removeEventListener('scroll', schedulePosition, true)
       releaseMenu()
-      releaseSessionLogButton()
       for (const actions of assistantActionRows) {
         actions.removeAttribute(ASSISTANT_ACTIONS_ATTRIBUTE)
         actions.removeAttribute(ASSISTANT_METRICS_WRAP_ATTRIBUTE)
@@ -294,16 +253,6 @@ function findConversationRoot(column: HTMLElement): HTMLElement | null {
     const ownsScrollBody = Array.from(child.children).some(grandchild =>
       grandchild instanceof HTMLElement && grandchild.hasAttribute('data-conversation-scroll'))
     if (ownsScrollBody) return child
-  }
-  return null
-}
-
-function findSessionLogButton(utilities: HTMLElement): HTMLButtonElement | null {
-  for (const button of utilities.querySelectorAll<HTMLButtonElement>('button')) {
-    const children = Array.from(button.children)
-    const label = children.find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement)
-    const hasDownloadGlyph = children.some(child => child instanceof SVGElement)
-    if (label?.textContent?.trim() === SESSION_LOG_LABEL && hasDownloadGlyph) return button
   }
   return null
 }

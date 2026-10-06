@@ -5,11 +5,14 @@ export const DETAILS_TRACK_FALLBACK_ATTRIBUTE = 'data-dsh-workbench-fallback-det
 export const DETAILS_TRACK_DRAGGING_ATTRIBUTE = 'data-dsh-workbench-details-dragging'
 export const DETAILS_TRACK_HANDLE_ATTRIBUTE = 'data-dsh-workbench-fallback-handle'
 export const DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE = 'data-dsh-workbench-native-details-handle'
+export const SIDEBAR_TRACK_HANDLE_ATTRIBUTE = 'data-dsh-workbench-sidebar-handle'
 export const DETAILS_TRACK_SIDEBAR_WIDTH = '--dsh-workbench-details-sidebar-width'
 export const DETAILS_TRACK_WIDTH = '--dsh-workbench-details-width'
 
 const CENTER_MIN = 640
 const DETAILS_MIN = 300
+const SIDEBAR_MIN = 264
+const SIDEBAR_MAX = 420
 const DETAILS_DEFAULT_MIN = 420
 const DETAILS_DEFAULT_MAX = 720
 const DETAILS_DEFAULT_RATIO = 0.32
@@ -51,11 +54,21 @@ export function resolveDetailsTrackWidth(
   return Math.min(maximum, Math.max(DETAILS_MIN, Math.round(preferredWidth)))
 }
 
+/** 保留官方中栏与右栏下限后，把侧栏宽度夹到可用区间。 */
+export function clampSidebarWidth(value: number, frameWidth: number): number {
+  const usable = Math.min(SIDEBAR_MAX, frameWidth - CENTER_MIN - DETAILS_MIN)
+  if (usable < SIDEBAR_MIN) return SIDEBAR_MIN
+  return Math.max(SIDEBAR_MIN, Math.min(usable, Math.round(value)))
+}
+
 /** 从 AppFrame 的行内网格读取官方已经解析好的左栏宽度。 */
 export function readNativeSidebarWidth(frame: HTMLElement, sidebar: HTMLElement): number {
   const match = FIRST_PIXEL_TRACK.exec(frame.style.gridTemplateColumns)
   const inlineWidth = match === null ? Number.NaN : Number(match[1])
-  const width = Number.isFinite(inlineWidth) && inlineWidth > 0
+  // A parsed 0 is meaningful (a fully collapsed sidebar track); only an
+  // unparseable inline grid falls back to the rendered column width, otherwise
+  // the collapsed track would read back the plugin's own overridden width.
+  const width = Number.isFinite(inlineWidth) && inlineWidth >= 0
     ? inlineWidth
     : sidebar.getBoundingClientRect().width
   return Math.max(0, Math.round(width))
@@ -75,6 +88,14 @@ export function createDetailsTrackLayout(
   fallbackHandle.setAttribute(DETAILS_TRACK_HANDLE_ATTRIBUTE, '')
   frame.appendChild(fallbackHandle)
 
+  const sidebarHandle = document.createElement('div')
+  sidebarHandle.hidden = true
+  sidebarHandle.setAttribute(SIDEBAR_TRACK_HANDLE_ATTRIBUTE, '')
+  sidebarHandle.setAttribute('role', 'separator')
+  sidebarHandle.setAttribute('aria-orientation', 'vertical')
+  sidebarHandle.setAttribute('aria-label', 'Resize sidebar')
+  frame.appendChild(sidebarHandle)
+
   let preferredWidth: number | undefined
   let renderedWidth = 0
   let activeMode: 'native' | 'fallback' | undefined
@@ -87,6 +108,13 @@ export function createDetailsTrackLayout(
   let dragFrame: number | null = null
   let sidebarCollapsed: boolean | undefined
   let nativeHandleAttributes: Record<string, string | null> | undefined
+  let pluginSidebarWidth: number | undefined
+  let renderedSidebarWidth = 0
+  let sidebarPointerId: number | undefined
+  let sidebarDragOrigin = 0
+  let sidebarDragBase = 0
+  let sidebarLatestPointer = 0
+  let sidebarDragFrame: number | null = null
 
   const preferredForFrame = (frameWidth: number): number => {
     if (preferredWidth !== undefined) return preferredWidth
@@ -176,6 +204,8 @@ export function createDetailsTrackLayout(
     removeStyleProperty(frame, DETAILS_TRACK_SIDEBAR_WIDTH)
     removeStyleProperty(frame, DETAILS_TRACK_WIDTH)
     fallbackHandle.hidden = true
+    sidebarHandle.hidden = true
+    renderedSidebarWidth = 0
     renderedWidth = 0
     sidebarCollapsed = undefined
     announceMode(undefined)
@@ -201,7 +231,9 @@ export function createDetailsTrackLayout(
     }
 
     const frameWidth = Math.max(0, Math.round(frame.getBoundingClientRect().width))
-    const sidebarWidth = readNativeSidebarWidth(frame, sidebar)
+    const collapsed = frame.hasAttribute('data-sidebar-collapsed')
+    const nativeSidebar = readNativeSidebarWidth(frame, sidebar)
+    const sidebarWidth = collapsed ? nativeSidebar : clampSidebarWidth(pluginSidebarWidth ?? nativeSidebar, frameWidth)
     const width = resolveDetailsTrackWidth(frameWidth, sidebarWidth, preferredForFrame(frameWidth))
     if (width === 0) {
       clearPresentation()
@@ -210,11 +242,19 @@ export function createDetailsTrackLayout(
 
     const maximum = resolveDetailsTrackMaximum(frameWidth, sidebarWidth)
     renderedWidth = width
+    renderedSidebarWidth = sidebarWidth
     setStyleProperty(frame, DETAILS_TRACK_SIDEBAR_WIDTH, `${sidebarWidth}px`)
     setStyleProperty(frame, DETAILS_TRACK_WIDTH, `${width}px`)
     frame.setAttribute(DETAILS_TRACK_ATTRIBUTE, '')
     frame.toggleAttribute(DETAILS_TRACK_FALLBACK_ATTRIBUTE, fallback)
     fallbackHandle.hidden = !fallback
+    sidebarHandle.hidden = collapsed
+    if (!collapsed) {
+      const usable = Math.min(SIDEBAR_MAX, frameWidth - CENTER_MIN - DETAILS_MIN)
+      sidebarHandle.setAttribute('aria-valuemin', String(SIDEBAR_MIN))
+      sidebarHandle.setAttribute('aria-valuemax', String(Math.max(SIDEBAR_MIN, usable)))
+      sidebarHandle.setAttribute('aria-valuenow', String(sidebarWidth))
+    }
     const nativeHandle = native ? findNativeDetailsHandle(frame, fallbackHandle) : null
     const nextHandle = fallback ? fallbackHandle : nativeHandle
     if (nextHandle !== null) {
@@ -226,7 +266,7 @@ export function createDetailsTrackLayout(
     }
     announceMode(fallback ? 'fallback' : 'native')
 
-    const nextSidebarCollapsed = frame.hasAttribute('data-sidebar-collapsed')
+    const nextSidebarCollapsed = collapsed
     if (sidebarCollapsed !== nextSidebarCollapsed) {
       sidebarCollapsed = nextSidebarCollapsed
       logger.info(`workbench-layout: synchronized responsive conversation track with ${nextSidebarCollapsed ? 'collapsed' : 'expanded'} sidebar at ${sidebarWidth}px`)
@@ -292,6 +332,51 @@ export function createDetailsTrackLayout(
     finishDrag(event)
   }
 
+  function applySidebarPointer(clientX: number): void {
+    const frameWidth = Math.max(0, Math.round(frame.getBoundingClientRect().width))
+    pluginSidebarWidth = clampSidebarWidth(sidebarDragBase + (clientX - sidebarDragOrigin), frameWidth)
+    reconcile()
+  }
+
+  function onSidebarPointerDown(event: PointerEvent): void {
+    if (event.button !== 0 || renderedSidebarWidth === 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    sidebarPointerId = event.pointerId
+    sidebarDragOrigin = event.clientX
+    sidebarLatestPointer = event.clientX
+    sidebarDragBase = renderedSidebarWidth
+    sidebarHandle.setPointerCapture?.(event.pointerId)
+  }
+
+  function onSidebarPointerMove(event: PointerEvent): void {
+    if (event.pointerId !== sidebarPointerId) return
+    event.stopPropagation()
+    sidebarLatestPointer = event.clientX
+    sidebarDragFrame ??= requestAnimationFrame(() => {
+      sidebarDragFrame = null
+      applySidebarPointer(sidebarLatestPointer)
+    })
+  }
+
+  function finishSidebarDrag(event: PointerEvent): void {
+    if (event.pointerId !== sidebarPointerId) return
+    event.stopPropagation()
+    if (sidebarDragFrame !== null) {
+      cancelAnimationFrame(sidebarDragFrame)
+      sidebarDragFrame = null
+    }
+    applySidebarPointer(event.clientX)
+    sidebarHandle.releasePointerCapture?.(event.pointerId)
+    sidebarPointerId = undefined
+    logger.info(`workbench-layout: resized sidebar to ${renderedSidebarWidth}px`)
+  }
+
+  sidebarHandle.addEventListener('pointerdown', onSidebarPointerDown)
+  sidebarHandle.addEventListener('pointermove', onSidebarPointerMove)
+  sidebarHandle.addEventListener('pointerup', (event) => { finishSidebarDrag(event) })
+  sidebarHandle.addEventListener('pointercancel', (event) => { finishSidebarDrag(event) })
+
   const mutationObserver = new MutationObserver(reconcile)
   mutationObserver.observe(frame, {
     childList: true,
@@ -319,6 +404,7 @@ export function createDetailsTrackLayout(
       resizeObserver?.disconnect()
       clearPresentation()
       fallbackHandle.remove()
+      sidebarHandle.remove()
     },
   }
 }

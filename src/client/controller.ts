@@ -1,17 +1,38 @@
 /** Shared browser state joining the root-scoped sidebar and Session-scoped editor. */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { GitCommit, GitEditorBaseline, GitFileDiff, GitStatus, WorkspaceFile } from '../contracts.ts'
+import type { ClientTerminals, TerminalView } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { GitCommit, GitEditorBaseline, GitFileDiff, GitStatus, WorkspaceFile, WorkspaceImageFile } from '../contracts.ts'
+import { imageMimeTypeForPath } from '../contracts.ts'
 import { WorkbenchApi } from './api.ts'
+import { isHtmlPath } from './html-preview.ts'
 import { buildGitDecorations, type GitDecorationMap } from './git-decorations.ts'
 import type { GitHunkPeekStorageOperation } from './git-hunk-peek-resize.ts'
 import type { GitFileLayout } from './git-tree.ts'
 
 export type SidebarMode = 'sessions' | 'files' | 'git' | 'terminal'
 export type DiffViewMode = 'split' | 'unified' | 'inline'
+export type MarkdownViewMode = 'preview' | 'source' | 'split'
+export type HtmlViewMode = 'preview' | 'interactive' | 'source'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
 export type DraftChangeSource = 'input' | 'git-revert'
+/** Direction of the divider between the two split editor panes. */
+export type EditorSplitOrientation = 'horizontal' | 'vertical'
+/** Identity of one editor pane; each pane owns an independent tab list. */
+export type EditorPaneId = 'primary' | 'secondary'
+
+/** One pane's tab strip: an ordered list of pool tab ids plus its own selection. */
+export interface EditorGroup {
+  tabIds: string[]
+  activeTabId?: string
+}
+
+export interface EditorPanes {
+  primary: EditorGroup
+  secondary: EditorGroup
+}
 export type WorkbenchSidebarAction =
   | 'files.newFile'
   | 'files.newDirectory'
@@ -27,9 +48,16 @@ export interface WorkbenchFileTab {
   kind: 'file'
   path: string
   file: WorkspaceFile | null
+  image: WorkspaceImageFile | null
   draft: string
   dirty: boolean
-  preview: boolean
+  markdownMode: MarkdownViewMode
+  htmlMode?: HtmlViewMode
+  /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
+  wrap: boolean
+  inlineDiff: boolean
+  /** Whether the Markdown preview shows its right-hand outline (table of contents) panel. */
+  outlineVisible?: boolean
   loading: boolean
   saving: boolean
   externalChange: ExternalFileChange | null
@@ -58,12 +86,10 @@ export interface WorkbenchTerminalTab {
   id: string
   kind: 'terminal'
   sequence: number
-  generation: number
+  /** Globally unique content identity the official terminal model binds a Session process to. */
+  contentId: string
+  /** Lightweight mirror of the official view phase for tab and rail status dots. */
   status: TerminalStatus
-  shell?: string
-  exitCode?: number
-  signal?: number
-  error: string | null
 }
 
 export type WorkbenchTab = WorkbenchFileTab | WorkbenchDiffTab | WorkbenchTerminalTab
@@ -71,7 +97,10 @@ export type WorkbenchTab = WorkbenchFileTab | WorkbenchDiffTab | WorkbenchTermin
 export interface WorkbenchState {
   sidebarMode: SidebarMode
   editorExpanded: boolean
+  conversationExpanded: boolean
   workspaceId?: string
+  /** Session the current Workspace belongs to; scopes official terminal processes. */
+  sessionId?: string
   tabs: WorkbenchTab[]
   activeTabId?: string
   diffViewMode: DiffViewMode
@@ -82,11 +111,21 @@ export interface WorkbenchState {
   gitHead?: string
   gitLineVersions?: Record<string, string>
   sidebarAction?: WorkbenchSidebarActionRequest
+  /** Second editor pane sharing the tab list, opened from the header split controls. */
+  editorSplit: boolean
+  editorSplitOrientation: EditorSplitOrientation
+  /** Share of the editor column owned by the primary pane, 0.2–0.8. */
+  editorSplitRatio: number
+  /** Pane that receives tab clicks and the next open; holds the globally active tab. */
+  activePane: EditorPaneId
+  /** Each pane's independent tab strip. `secondary` is empty while unsplit. */
+  panes: EditorPanes
 }
 
 const INITIAL_STATE: WorkbenchState = {
   sidebarMode: 'files',
   editorExpanded: true,
+  conversationExpanded: true,
   tabs: [],
   diffViewMode: 'split',
   gitView: 'changes',
@@ -94,6 +133,11 @@ const INITIAL_STATE: WorkbenchState = {
   gitGraphFileLayout: 'list',
   gitDecorations: {},
   gitLineVersions: {},
+  editorSplit: false,
+  editorSplitOrientation: 'horizontal',
+  editorSplitRatio: 0.5,
+  activePane: 'primary',
+  panes: { primary: { tabIds: [] }, secondary: { tabIds: [] } },
 }
 
 export interface WorkbenchLogger {
@@ -130,6 +174,7 @@ export class WorkbenchController {
     api: WorkbenchApi = new WorkbenchApi(),
     private readonly logger: WorkbenchLogger = console,
     private readonly editorLayout?: WorkbenchEditorLayout,
+    private readonly terminals?: ClientTerminals,
   ) {
     this.api = api
   }
@@ -269,13 +314,14 @@ export class WorkbenchController {
         ...INITIAL_STATE,
         sidebarMode: state.sidebarMode,
         editorExpanded: state.editorExpanded,
+        conversationExpanded: state.conversationExpanded,
       })
       return
     }
     const restored = this.workspaceStates.get(workspaceId)
     this.store.set(restored === undefined
-      ? { ...INITIAL_STATE, sidebarMode: state.sidebarMode, editorExpanded: state.editorExpanded, workspaceId }
-      : { ...cloneState(restored), sidebarMode: state.sidebarMode, editorExpanded: state.editorExpanded, workspaceId })
+      ? { ...INITIAL_STATE, sidebarMode: state.sidebarMode, editorExpanded: state.editorExpanded, conversationExpanded: state.conversationExpanded, workspaceId }
+      : { ...cloneState(restored), sidebarMode: state.sidebarMode, editorExpanded: state.editorExpanded, conversationExpanded: state.conversationExpanded, workspaceId })
     this.logger.info(`workbench-layout: activated workspace ${JSON.stringify(workspaceId)}`)
     if (typeof this.api.gitStatus === 'function') void this.refreshGitDecorations(workspaceId)
   }
@@ -290,6 +336,13 @@ export class WorkbenchController {
     this.setEditorExpanded(!this.store.getSnapshot().editorExpanded, 'sidebar control')
   }
 
+  /** Collapse or restore the right conversation column so the editor can take the full width. */
+  toggleConversation(): void {
+    const expanded = !this.store.getSnapshot().conversationExpanded
+    this.store.update((state) => { state.conversationExpanded = expanded })
+    this.logger.info(`workbench-layout: ${expanded ? 'expanded' : 'collapsed'} conversation column from editor header`)
+  }
+
   /** Reveal content selected from the sidebar without coupling panels to individual views. */
   revealEditor(): void {
     this.setEditorExpanded(true, 'content selection')
@@ -302,10 +355,11 @@ export class WorkbenchController {
     const current = this.store.getSnapshot()
     const existing = current.tabs.find(tab => tab.id === tabId)
     this.store.update((state) => {
-      state.activeTabId = tabId
       if (existing === undefined) state.tabs.push(emptyFileTab(path))
+      placeTabInPane(state, focusedPaneId(state), tabId)
+      selectInPanes(state, tabId)
     })
-    if (existing?.kind === 'file' && existing.file !== null) {
+    if (existing?.kind === 'file' && (existing.file !== null || existing.image !== null)) {
       this.logger.info(`workbench-layout: selected open file tab ${JSON.stringify(path)}`)
       return
     }
@@ -319,14 +373,32 @@ export class WorkbenchController {
       tab.error = null
     })
     try {
+      if (imageMimeTypeForPath(path) !== undefined) {
+        const image = await this.api.readImage(workspaceId, path)
+        if (this.fileRequests.get(requestKey) !== requestId) return
+        this.updateFileTabState(workspaceId, tabId, (tab) => {
+          tab.image = image
+          tab.loading = false
+          tab.error = null
+        })
+        this.logger.info(`workbench-layout: opened workspace image tab ${JSON.stringify(path)}`)
+        return
+      }
       const file = await this.api.readFile(workspaceId, path)
       if (this.fileRequests.get(requestKey) !== requestId) return
       this.updateFileTabState(workspaceId, tabId, (tab) => {
+        const isMarkdown = file.markdown
+        const nextMarkdownMode = tab.markdownMode === 'source' && isMarkdown
+          ? 'preview'
+          : tab.markdownMode === 'preview' && !isMarkdown
+            ? 'source'
+            : tab.markdownMode
         tab.file = file
         tab.draft = file.content
         tab.dirty = false
         tab.externalChange = null
-        tab.preview = file.markdown
+        tab.markdownMode = nextMarkdownMode
+        tab.htmlMode = isHtmlPath(path) ? 'preview' : 'source'
         tab.loading = false
         tab.error = null
       })
@@ -365,54 +437,127 @@ export class WorkbenchController {
       ? Math.max(highest, tab.sequence)
       : highest, 0) + 1
     const id = `terminal:${++this.terminalId}`
+    const contentId = `wbterm:${workspaceId}:${id}`
     this.store.update((draft) => {
-      draft.tabs.push({ id, kind: 'terminal', sequence, generation: 0, status: 'connecting', error: null })
-      draft.activeTabId = id
+      draft.tabs.push({ id, kind: 'terminal', sequence, contentId, status: 'connecting' })
+      placeTabInPane(draft, focusedPaneId(draft), id)
+      selectInPanes(draft, id)
     })
     this.logger.info(`workbench-layout: opened workspace terminal ${sequence} in ${JSON.stringify(workspaceId)}`)
     return id
   }
 
-  restartTerminal(tabId: string): void {
-    const workspaceId = this.store.getSnapshot().workspaceId
-    if (workspaceId === undefined) return
-    this.updateTerminalTabState(workspaceId, tabId, (tab) => {
-      tab.generation += 1
-      tab.status = 'connecting'
-      tab.error = null
-      delete tab.shell
-      delete tab.exitCode
-      delete tab.signal
+  /** Mirror the official view phase onto the tab so the tab and rail dots stay in sync. */
+  setTerminalStatus(tabId: string, status: TerminalStatus): void {
+    const current = this.store.getSnapshot().tabs.find(tab => tab.id === tabId)
+    if (current?.kind !== 'terminal' || current.status === status) return
+    this.store.update((state) => {
+      const tab = state.tabs.find(candidate => candidate.id === tabId)
+      if (tab?.kind === 'terminal') tab.status = status
     })
-    this.logger.info(`workbench-layout: restarted workspace terminal ${JSON.stringify(tabId)}`)
   }
 
-  terminalReady(tabId: string, shell: string): void {
-    this.updateCurrentTerminal(tabId, (tab) => {
-      tab.status = 'running'
-      tab.shell = shell
-      tab.error = null
+  /** Record the Session the active Workspace belongs to so official terminal views scope to it. */
+  setSession(sessionId: string | undefined): void {
+    if (this.store.getSnapshot().sessionId === sessionId) return
+    this.store.update((state) => {
+      if (sessionId === undefined) delete state.sessionId
+      else state.sessionId = sessionId
     })
-    this.logger.info(`workbench-layout: workspace terminal ${JSON.stringify(tabId)} is ready`)
   }
 
-  terminalExited(tabId: string, exitCode: number, signal?: number): void {
-    this.updateCurrentTerminal(tabId, (tab) => {
-      tab.status = 'exited'
-      tab.exitCode = exitCode
-      if (signal === undefined) delete tab.signal
-      else tab.signal = signal
-      tab.error = null
-    })
-    this.logger.info(`workbench-layout: workspace terminal ${JSON.stringify(tabId)} exited with code ${exitCode}`)
+  /** Resolve the official terminal model for one tab, or undefined without a Session or service. */
+  terminalView(tab: WorkbenchTerminalTab): TerminalView | undefined {
+    const { sessionId } = this.store.getSnapshot()
+    if (this.terminals === undefined || sessionId === undefined) return undefined
+    return this.terminals.view(sessionId as SessionId, tab.id, tab.contentId)
   }
 
-  terminalFailed(tabId: string, message: string): void {
-    this.updateCurrentTerminal(tabId, (tab) => {
-      tab.status = 'error'
-      tab.error = message
+  /** Ask the official model to terminate one tab's process; a missing Session or service leaves it page-live. */
+  private closeTerminalProcess(tab: WorkbenchTerminalTab): void {
+    const { sessionId } = this.store.getSnapshot()
+    if (this.terminals === undefined || sessionId === undefined) return
+    try {
+      this.terminals.close(sessionId as SessionId, tab.id, tab.contentId)
+    } catch {
+      this.logger.warn(`workbench-layout: failed to close workspace terminal ${JSON.stringify(tab.id)}`)
+    }
+  }
+
+  /** Open the second pane on the neighbouring tab, flip the divider, or close it. */
+  toggleSplit(orientation?: EditorSplitOrientation): void {
+    const state = this.store.getSnapshot()
+    if (state.editorSplit && (orientation === undefined || orientation === state.editorSplitOrientation)) {
+      this.store.update((draft) => { closeSplit(draft) })
+      this.logger.info('workbench-layout: closed split editor')
+      return
+    }
+    if (!state.editorSplit) {
+      const primary = state.panes.primary
+      const index = primary.tabIds.indexOf(primary.activeTabId ?? '')
+      const moveId = primary.tabIds[index - 1]
+        ?? primary.tabIds[index + 1]
+        ?? primary.tabIds.find(id => id !== primary.activeTabId)
+      if (moveId === undefined) {
+        this.logger.info('workbench-layout: split editor needs two tabs')
+        return
+      }
+      this.store.update((draft) => {
+        const group = draft.panes.primary
+        group.tabIds = group.tabIds.filter(id => id !== moveId)
+        draft.panes.secondary = { tabIds: [moveId], activeTabId: moveId }
+        draft.editorSplit = true
+        draft.activePane = 'primary'
+        assignActiveTab(draft, group.activeTabId)
+      })
+      this.logger.info('workbench-layout: opened split editor')
+    }
+    if (orientation !== undefined) {
+      this.store.update((draft) => { draft.editorSplitOrientation = orientation })
+      this.logger.info(`workbench-layout: split editor orientation changed to ${orientation}`)
+    }
+  }
+
+  setSplitRatio(ratio: number): void {
+    const clamped = Math.min(0.8, Math.max(0.2, ratio))
+    if (this.store.getSnapshot().editorSplitRatio === clamped) return
+    this.store.update((state) => { state.editorSplitRatio = clamped })
+  }
+
+  /** Make one pane the active one so it holds the globally focused tab. */
+  focusPane(pane: EditorPaneId): void {
+    const state = this.store.getSnapshot()
+    if (!state.editorSplit || pane === state.activePane) return
+    this.store.update((draft) => {
+      draft.activePane = pane
+      assignActiveTab(draft, draft.panes[pane].activeTabId)
     })
-    this.logger.warn(`workbench-layout: workspace terminal ${JSON.stringify(tabId)} failed`)
+  }
+
+  /** Move one tab into another pane by drag; the source pane falls back to a neighbour. */
+  moveTabToPane(tabId: string, targetPane: EditorPaneId): void {
+    const state = this.store.getSnapshot()
+    if (!state.editorSplit || !state.tabs.some(tab => tab.id === tabId)) return
+    const source = findPane(state, tabId)
+    if (source === targetPane) return
+    this.store.update((draft) => {
+      if (source !== undefined) {
+        const group = draft.panes[source]
+        const position = group.tabIds.indexOf(tabId)
+        const wasActive = group.activeTabId === tabId
+        group.tabIds = group.tabIds.filter(id => id !== tabId)
+        if (wasActive) {
+          assignGroupActive(group, group.tabIds[position] ?? group.tabIds[position - 1] ?? group.tabIds.at(-1))
+        }
+      }
+      const destination = draft.panes[targetPane]
+      if (!destination.tabIds.includes(tabId)) destination.tabIds.push(tabId)
+      destination.activeTabId = tabId
+      draft.activePane = targetPane
+      draft.activeTabId = tabId
+      reconcilePanes(draft)
+    })
+    this.logger.info(`workbench-layout: moved tab ${JSON.stringify(tabId)} into the ${targetPane} pane`)
   }
 
   selectTab(tabId: string): void {
@@ -420,7 +565,7 @@ export class WorkbenchController {
     const tab = state.tabs.find(candidate => candidate.id === tabId)
     if (tab === undefined) return
     this.revealEditor()
-    this.store.update((draft) => { draft.activeTabId = tabId })
+    this.store.update((draft) => { selectInPanes(draft, tabId) })
     this.logger.info(`workbench-layout: selected ${tab.kind} tab ${JSON.stringify(tabIdentity(tab))}`)
   }
 
@@ -429,28 +574,34 @@ export class WorkbenchController {
     const index = state.tabs.findIndex(tab => tab.id === tabId)
     const tab = state.tabs[index]
     if (tab === undefined || (tab.kind === 'file' && tab.dirty && !discardDirty)) return false
-    const nextTabId = state.activeTabId === tabId
-      ? state.tabs[index + 1]?.id ?? state.tabs[index - 1]?.id
-      : state.activeTabId
+    if (tab.kind === 'terminal') this.closeTerminalProcess(tab)
     const requestKey = tabRequestKey(state.workspaceId, tabId)
     this.fileRequests.delete(requestKey)
     this.gitBaselineRequests.delete(requestKey)
     this.diffRequests.delete(requestKey)
     this.store.update((draft) => {
       draft.tabs.splice(index, 1)
-      if (nextTabId === undefined) delete draft.activeTabId
-      else draft.activeTabId = nextTabId
+      for (const group of [draft.panes.primary, draft.panes.secondary]) {
+        if (!group.tabIds.includes(tabId)) continue
+        const position = group.tabIds.indexOf(tabId)
+        const wasActive = group.activeTabId === tabId
+        group.tabIds = group.tabIds.filter(id => id !== tabId)
+        if (wasActive) {
+          assignGroupActive(group, group.tabIds[position] ?? group.tabIds[position - 1] ?? group.tabIds.at(-1))
+        }
+      }
+      reconcilePanes(draft)
     })
     this.logger.info(`workbench-layout: closed ${tab.kind} tab ${JSON.stringify(tabIdentity(tab))}`)
     return true
   }
 
-  setDraft(value: string, source: DraftChangeSource = 'input'): void {
-    const tabId = this.store.getSnapshot().activeTabId
-    if (tabId === undefined) return
+  setDraft(value: string, source: DraftChangeSource = 'input', tabId?: string): void {
+    const focusedTabId = tabId ?? this.store.getSnapshot().activeTabId
+    if (focusedTabId === undefined) return
     let path: string | undefined
     this.store.update((state) => {
-      const tab = state.tabs.find(candidate => candidate.id === tabId)
+      const tab = state.tabs.find(candidate => candidate.id === focusedTabId)
       if (tab?.kind !== 'file' || tab.file === null) return
       path = tab.path
       tab.draft = value
@@ -548,12 +699,44 @@ export class WorkbenchController {
     return refresh
   }
 
-  setPreview(preview: boolean): void {
-    const tabId = this.store.getSnapshot().activeTabId
+  setMarkdownMode(mode: MarkdownViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     if (tabId === undefined) return
     this.store.update((state) => {
       const tab = state.tabs.find(candidate => candidate.id === tabId)
-      if (tab?.kind === 'file') tab.preview = preview
+      if (tab?.kind === 'file') tab.markdownMode = mode
+    })
+  }
+
+  /** Toggle word wrap for one file tab, independent of any sibling split pane. */
+  setEditorWrap(tabId: string, wrap: boolean): void {
+    this.store.update((state) => {
+      const tab = state.tabs.find(candidate => candidate.id === tabId)
+      if (tab?.kind === 'file') tab.wrap = wrap
+    })
+  }
+
+  /** Toggle the Markdown outline panel for one file tab, independent of sibling panes. */
+  toggleMarkdownOutline(tabId = this.store.getSnapshot().activeTabId): void {
+    if (tabId === undefined) return
+    this.store.update((state) => {
+      const tab = state.tabs.find(candidate => candidate.id === tabId)
+      if (tab?.kind === 'file') tab.outlineVisible = tab.outlineVisible !== true
+    })
+  }
+
+  /** Toggle the inline Git diff overlay for one file tab. */
+  setEditorInlineDiff(tabId: string, inlineDiff: boolean): void {
+    this.store.update((state) => {
+      const tab = state.tabs.find(candidate => candidate.id === tabId)
+      if (tab?.kind === 'file') tab.inlineDiff = inlineDiff
+    })
+  }
+
+  setHtmlMode(mode: HtmlViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    if (tabId === undefined) return
+    this.store.update((state) => {
+      const tab = state.tabs.find(candidate => candidate.id === tabId)
+      if (tab?.kind === 'file') tab.htmlMode = mode
     })
   }
 
@@ -635,15 +818,8 @@ export class WorkbenchController {
   closeDiffTabs(workspaceId = this.store.getSnapshot().workspaceId): void {
     if (workspaceId === undefined) return
     this.updateWorkspaceState(workspaceId, (state) => {
-      const activeIndex = state.tabs.findIndex(tab => tab.id === state.activeTabId)
-      const retained = state.tabs.filter(tab => tab.kind !== 'diff')
-      const activeStillExists = retained.some(tab => tab.id === state.activeTabId)
-      state.tabs = retained
-      if (!activeStillExists) {
-        const next = retained[Math.min(Math.max(0, activeIndex), retained.length - 1)]
-        if (next === undefined) delete state.activeTabId
-        else state.activeTabId = next.id
-      }
+      state.tabs = state.tabs.filter(tab => tab.kind !== 'diff')
+      reconcilePanes(state)
     })
     this.logger.info(`workbench-layout: closed stale Diff tabs for workspace ${JSON.stringify(workspaceId)}`)
   }
@@ -652,13 +828,8 @@ export class WorkbenchController {
   resetWorkspaceView(workspaceId = this.store.getSnapshot().workspaceId): void {
     if (workspaceId === undefined) return
     this.updateWorkspaceState(workspaceId, (state) => {
-      const retained = state.tabs.filter(tab => tab.kind === 'terminal')
-      state.tabs = retained
-      if (!retained.some(tab => tab.id === state.activeTabId)) {
-        const next = retained.at(-1)
-        if (next === undefined) delete state.activeTabId
-        else state.activeTabId = next.id
-      }
+      state.tabs = state.tabs.filter(tab => tab.kind === 'terminal')
+      reconcilePanes(state)
     })
     this.logger.info(`workbench-layout: cleared editor tabs after Git changed workspace ${JSON.stringify(workspaceId)}`)
   }
@@ -667,18 +838,12 @@ export class WorkbenchController {
   closeWorkspaceEntries(workspaceId: string, path: string): void {
     const removedIds: string[] = []
     this.updateWorkspaceState(workspaceId, (state) => {
-      const activeIndex = state.tabs.findIndex(tab => tab.id === state.activeTabId)
-      const retained = state.tabs.filter((tab) => {
+      state.tabs = state.tabs.filter((tab) => {
         if (tab.kind === 'terminal' || !isSameOrDescendantPath(tab.path, path)) return true
         removedIds.push(tab.id)
         return false
       })
-      state.tabs = retained
-      if (!retained.some(tab => tab.id === state.activeTabId)) {
-        const next = retained[Math.min(Math.max(0, activeIndex), retained.length - 1)]
-        if (next === undefined) delete state.activeTabId
-        else state.activeTabId = next.id
-      }
+      reconcilePanes(state)
     })
     for (const id of removedIds) {
       const key = tabRequestKey(workspaceId, id)
@@ -703,8 +868,9 @@ export class WorkbenchController {
     const current = this.store.getSnapshot()
     const existing = current.tabs.find(tab => tab.id === descriptor.id)
     this.store.update((state) => {
-      state.activeTabId = descriptor.id
       if (existing === undefined) state.tabs.push(emptyDiffTab(descriptor))
+      placeTabInPane(state, focusedPaneId(state), descriptor.id)
+      selectInPanes(state, descriptor.id)
     })
     if (existing?.kind === 'diff' && existing.diff !== null) {
       this.logger.info(`workbench-layout: selected open ${logLabel} tab`)
@@ -852,18 +1018,6 @@ export class WorkbenchController {
     })
   }
 
-  private updateTerminalTabState(workspaceId: string, tabId: string, update: (tab: WorkbenchTerminalTab) => void): void {
-    this.updateWorkspaceState(workspaceId, (state) => {
-      const tab = state.tabs.find(candidate => candidate.id === tabId)
-      if (tab?.kind === 'terminal') update(tab)
-    })
-  }
-
-  private updateCurrentTerminal(tabId: string, update: (tab: WorkbenchTerminalTab) => void): void {
-    const workspaceId = this.store.getSnapshot().workspaceId
-    if (workspaceId !== undefined) this.updateTerminalTabState(workspaceId, tabId, update)
-  }
-
   private setEditorExpanded(expanded: boolean, source: string): void {
     const current = this.store.getSnapshot().editorExpanded
     if (current !== expanded) {
@@ -881,9 +1035,12 @@ function emptyFileTab(path: string): WorkbenchFileTab {
     kind: 'file',
     path,
     file: null,
+    image: null,
     draft: '',
     dirty: false,
-    preview: false,
+    markdownMode: 'source',
+    wrap: true,
+    inlineDiff: true,
     loading: true,
     saving: false,
     externalChange: null,
@@ -908,6 +1065,10 @@ function cloneState(state: WorkbenchState): WorkbenchState {
     ...state,
     gitDecorations: { ...state.gitDecorations },
     gitLineVersions: { ...state.gitLineVersions },
+    panes: {
+      primary: { ...state.panes.primary, tabIds: [...state.panes.primary.tabIds] },
+      secondary: { ...state.panes.secondary, tabIds: [...state.panes.secondary.tabIds] },
+    },
     tabs: state.tabs.map((tab) => {
       if (tab.kind === 'file') return {
         ...tab,
@@ -954,11 +1115,7 @@ function gitBaselineKey(state: WorkbenchState, tab: WorkbenchFileTab): string {
 function stripTerminalTabs(state: WorkbenchState): WorkbenchState {
   const cloned = cloneState(state)
   cloned.tabs = cloned.tabs.filter(tab => tab.kind !== 'terminal')
-  if (!cloned.tabs.some(tab => tab.id === cloned.activeTabId)) {
-    const next = cloned.tabs.at(-1)
-    if (next === undefined) delete cloned.activeTabId
-    else cloned.activeTabId = next.id
-  }
+  reconcilePanes(cloned)
   return cloned
 }
 
@@ -991,4 +1148,80 @@ function isSameOrDescendantPath(candidate: string, parent: string): boolean {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Assign-or-delete an optional active tab id under `exactOptionalPropertyTypes`. */
+function assignGroupActive(group: EditorGroup, tabId: string | undefined): void {
+  if (tabId === undefined) delete group.activeTabId
+  else group.activeTabId = tabId
+}
+
+function assignActiveTab(state: WorkbenchState, tabId: string | undefined): void {
+  if (tabId === undefined) delete state.activeTabId
+  else state.activeTabId = tabId
+}
+
+function focusedPaneId(state: WorkbenchState): EditorPaneId {
+  return state.editorSplit ? state.activePane : 'primary'
+}
+
+function findPane(state: WorkbenchState, tabId: string): EditorPaneId | undefined {
+  if (state.panes.primary.tabIds.includes(tabId)) return 'primary'
+  if (state.panes.secondary.tabIds.includes(tabId)) return 'secondary'
+  return undefined
+}
+
+/** Move a tab into a pane (leaving any other pane) without changing selection. */
+function placeTabInPane(state: WorkbenchState, pane: EditorPaneId, tabId: string): void {
+  for (const id of ['primary', 'secondary'] as EditorPaneId[]) {
+    if (id !== pane) state.panes[id].tabIds = state.panes[id].tabIds.filter(existing => existing !== tabId)
+  }
+  const group = state.panes[pane]
+  if (!group.tabIds.includes(tabId)) group.tabIds.push(tabId)
+}
+
+/** Select a tab in the pane that already holds it (or the focused pane) and focus that pane. */
+function selectInPanes(state: WorkbenchState, tabId: string): void {
+  const pane = findPane(state, tabId) ?? focusedPaneId(state)
+  placeTabInPane(state, pane, tabId)
+  const group = state.panes[pane]
+  group.activeTabId = tabId
+  state.activePane = pane
+  state.activeTabId = tabId
+}
+
+/** Merge the secondary pane back into the primary and drop the split. */
+function closeSplit(state: WorkbenchState): void {
+  const merged = [...state.panes.primary.tabIds]
+  for (const id of state.panes.secondary.tabIds) if (!merged.includes(id)) merged.push(id)
+  state.panes.primary.tabIds = merged
+  state.panes.secondary = { tabIds: [] }
+  state.editorSplit = false
+  state.activePane = 'primary'
+  const primary = state.panes.primary
+  if (primary.activeTabId === undefined || !merged.includes(primary.activeTabId)) {
+    assignGroupActive(primary, merged[0])
+  }
+  assignActiveTab(state, primary.activeTabId)
+}
+
+/** Keep panes a clean partition of the tab pool after the pool changed. */
+function reconcilePanes(state: WorkbenchState): void {
+  const valid = new Set(state.tabs.map(tab => tab.id))
+  for (const group of [state.panes.primary, state.panes.secondary]) {
+    group.tabIds = group.tabIds.filter(id => valid.has(id))
+    if (group.activeTabId === undefined || !group.tabIds.includes(group.activeTabId)) {
+      assignGroupActive(group, group.tabIds[0])
+    }
+  }
+  for (const tab of state.tabs) {
+    if (!state.panes.primary.tabIds.includes(tab.id) && !state.panes.secondary.tabIds.includes(tab.id)) {
+      state.panes.primary.tabIds.push(tab.id)
+    }
+  }
+  if (state.editorSplit && (state.panes.secondary.tabIds.length === 0 || state.panes.primary.tabIds.length === 0)) {
+    closeSplit(state)
+    return
+  }
+  assignActiveTab(state, state.panes[focusedPaneId(state)].activeTabId)
 }

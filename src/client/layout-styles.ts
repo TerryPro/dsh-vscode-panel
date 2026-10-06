@@ -11,7 +11,6 @@ import {
   FLOATING_MENU_LEFT_PROPERTY,
   FLOATING_MENU_TOP_PROPERTY,
   FLOATING_MODEL_MENU_ATTRIBUTE,
-  SESSION_LOG_BUTTON_ATTRIBUTE,
   type ConversationLayout,
 } from './conversation-layout.ts'
 import {
@@ -24,6 +23,7 @@ import {
   type EditorTrackTransition,
 } from './editor-track-transition.ts'
 import {
+  CONVERSATION_COLLAPSED_ATTRIBUTE,
   EDITOR_COLLAPSED_ATTRIBUTE,
   EDITOR_RELEASE_ATTRIBUTE,
   EDITOR_TRANSITION_ATTRIBUTE,
@@ -41,13 +41,14 @@ import {
   DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE,
   DETAILS_TRACK_SIDEBAR_WIDTH,
   DETAILS_TRACK_WIDTH,
+  SIDEBAR_TRACK_HANDLE_ATTRIBUTE,
   type DetailsTrackLayout,
 } from './details-track-layout.ts'
 
 export { EDITOR_COLLAPSED_ATTRIBUTE } from './editor-layout-contract.ts'
 
 export interface WorkbenchEditorVisibilityStore {
-  getSnapshot(): { editorExpanded: boolean }
+  getSnapshot(): { editorExpanded: boolean; conversationExpanded: boolean }
   subscribe(listener: () => void): () => void
 }
 
@@ -76,6 +77,10 @@ const CSS = `
   grid-column: 3;
   grid-row: 1;
   border-left: 1px solid var(--dsw-alias-border-l1);
+  /* The Windows titlebar rounds the CenterColumn's top-left corner for the
+     native center layout; once relocated to the right edge that curve becomes
+     a notch at the editor|conversation seam, so square it off. */
+  border-radius: 0;
   background: var(--dsw-specific-sidebar-fill);
 }
 
@@ -105,7 +110,26 @@ const CSS = `
 [${FRAME_ATTRIBUTE}][${EDITOR_TRANSITION_ATTRIBUTE}] > :nth-child(3) {
   grid-column: 2;
   grid-row: 1;
-  border-left: none !important;
+  /* The relocated editor becomes the middle column's left edge, so it owns the
+     divider against the sidebar (the native sidebar border-right is dropped
+     below to keep a single line on every platform). */
+  border-left: 1px solid var(--dsw-alias-border-l1) !important;
+}
+
+[${FRAME_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}]):not([data-rightbar-collapsed]):not([data-rightbar-fullscreen]) > :nth-child(1),
+[${FRAME_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}])[${DETAILS_TRACK_FALLBACK_ATTRIBUTE}] > :nth-child(1),
+[${FRAME_ATTRIBUTE}][${EDITOR_TRANSITION_ATTRIBUTE}] > :nth-child(1) {
+  border-right: none;
+}
+
+/* The app menu bar lives in the frame's top padding (the titlebar strip), so
+   the content columns begin below it (top = padding-top). Draw the divider on
+   each column's top edge so it lands at the menu bar's bottom on every
+   platform, instead of the frame's own top edge (which sits behind the bar). */
+[${FRAME_ATTRIBUTE}] > :nth-child(1),
+[${FRAME_ATTRIBUTE}] > :nth-child(2),
+[${FRAME_ATTRIBUTE}] > :nth-child(3) {
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
 [${FRAME_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}])[${DETAILS_TRACK_ATTRIBUTE}]:not([data-rightbar-collapsed]):not([data-rightbar-fullscreen]),
@@ -136,6 +160,17 @@ const CSS = `
   transition: none !important;
 }
 
+/* Collapsing the conversation column zeroes the workbench right track so the
+   middle editor takes the freed width; the resize handles hide with it. */
+[${FRAME_ATTRIBUTE}][${CONVERSATION_COLLAPSED_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}]) {
+  ${DETAILS_TRACK_WIDTH}: 0px !important;
+}
+
+[${FRAME_ATTRIBUTE}][${CONVERSATION_COLLAPSED_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}]) > [${DETAILS_TRACK_HANDLE_ATTRIBUTE}],
+[${FRAME_ATTRIBUTE}][${CONVERSATION_COLLAPSED_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}]) > [${DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE}] {
+  display: none;
+}
+
 [${FRAME_ATTRIBUTE}][${DETAILS_TRACK_DRAGGING_ATTRIBUTE}] {
   transition: none !important;
 }
@@ -156,10 +191,61 @@ const CSS = `
   touch-action: none;
   transition: left var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
-
 [${FRAME_ATTRIBUTE}][${DETAILS_TRACK_DRAGGING_ATTRIBUTE}] > [${DETAILS_TRACK_HANDLE_ATTRIBUTE}],
 [${FRAME_ATTRIBUTE}][${DETAILS_TRACK_DRAGGING_ATTRIBUTE}] > [${DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE}] {
   transition: none;
+}
+
+/* Plugin-owned sidebar divider: the AppFrame native handle is not surfaced in
+   the workbench, so this drives the first track via the mirrored width variable.
+   The frame reserves the dock width as inline padding, and the absolute left is
+   measured from the frame padding edge (x=0), so the track boundary sits at
+   dock width + sidebar width. */
+[${FRAME_ATTRIBUTE}] > [${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}] {
+  position: absolute;
+  top: var(--dsh-windows-titlebar-height, 0px);
+  bottom: 0;
+  left: calc(48px + var(${DETAILS_TRACK_SIDEBAR_WIDTH}));
+  width: 8px;
+  margin-left: -4px;
+  cursor: col-resize;
+  z-index: 12;
+  touch-action: none;
+}
+
+[${FRAME_ATTRIBUTE}] > [${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+}
+
+[${FRAME_ATTRIBUTE}] > [${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]:hover::after,
+[${FRAME_ATTRIBUTE}] > [${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]:active::after {
+  background: var(--dsw-alias-brand-primary);
+}
+
+/* Give the editor|conversation divider the same hover highlight as the sidebar
+   handle, on both the adopted native handle and the blank-session fallback. */
+[${FRAME_ATTRIBUTE}] > [${DETAILS_TRACK_HANDLE_ATTRIBUTE}]::after,
+[${FRAME_ATTRIBUTE}] > [${DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE}]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+}
+
+[${FRAME_ATTRIBUTE}] > [${DETAILS_TRACK_HANDLE_ATTRIBUTE}]:hover::after,
+[${FRAME_ATTRIBUTE}] > [${DETAILS_TRACK_HANDLE_ATTRIBUTE}]:active::after,
+[${FRAME_ATTRIBUTE}] > [${DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE}]:hover::after,
+[${FRAME_ATTRIBUTE}] > [${DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE}]:active::after {
+  background: var(--dsw-alias-brand-primary);
 }
 
 [${FRAME_ATTRIBUTE}] > [data-rightbar-col]::after {
@@ -257,27 +343,6 @@ const CSS = `
   display: none;
 }
 
-/* Match the composer's compact icon buttons only after the right column is
-   narrow. At normal widths the official Session-log capsule is untouched. */
-[${FRAME_ATTRIBUTE}] > :nth-child(2)[${CONVERSATION_NARROW_ATTRIBUTE}] [${SESSION_LOG_BUTTON_ATTRIBUTE}] {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
-  gap: 0;
-  border: 0;
-  border-radius: 999px;
-}
-
-[${FRAME_ATTRIBUTE}] > :nth-child(2)[${CONVERSATION_NARROW_ATTRIBUTE}] [${SESSION_LOG_BUTTON_ATTRIBUTE}] > span {
-  display: none;
-}
-
-[${FRAME_ATTRIBUTE}] > :nth-child(2)[${CONVERSATION_NARROW_ATTRIBUTE}] [${SESSION_LOG_BUTTON_ATTRIBUTE}] > svg {
-  width: 16px;
-  height: 16px;
-}
-
 /* Fixed positioning escapes the native conversation scroll/root clipping
    chain while the node remains in its official React tree for focus, outside
    click, keyboard navigation, and unmount ownership. */
@@ -314,6 +379,7 @@ export function installWorkbenchLayout(
       editorTransition?.setExpanded(nextExpanded)
       editorExpanded = nextExpanded
       frame?.toggleAttribute(EDITOR_COLLAPSED_ATTRIBUTE, !nextExpanded)
+      frame?.toggleAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE, !visibility.getSnapshot().conversationExpanded)
       detailsTrack?.setEnabled(nextExpanded)
     }
     const attach = (): void => {
@@ -329,10 +395,12 @@ export function installWorkbenchLayout(
       detailsTrack = undefined
       frame?.removeAttribute(FRAME_ATTRIBUTE)
       frame?.removeAttribute(EDITOR_COLLAPSED_ATTRIBUTE)
+      frame?.removeAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)
       frame = next
       if (frame === null) return
       frame.setAttribute(FRAME_ATTRIBUTE, '')
       frame.toggleAttribute(EDITOR_COLLAPSED_ATTRIBUTE, !editorExpanded)
+      frame.toggleAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE, !visibility.getSnapshot().conversationExpanded)
       detailsTrack = createDetailsTrackLayout(frame, ctx.logger, editorExpanded)
       editorTransition = createEditorTrackTransition(
         frame,
@@ -360,6 +428,7 @@ export function installWorkbenchLayout(
       detailsTrack?.dispose()
       frame?.removeAttribute(FRAME_ATTRIBUTE)
       frame?.removeAttribute(EDITOR_COLLAPSED_ATTRIBUTE)
+      frame?.removeAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)
       style.remove()
     }
   }, 'workbench-layout: AppFrame column presentation')

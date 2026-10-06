@@ -1,9 +1,9 @@
 import {
-  IconCopyOutline16,
-  IconEditOutline16,
-  IconFolderOpenOutline16,
-  IconRefreshOutline16,
-  IconTrashOutline16,
+  IconCopyOutlineMedium,
+  IconEditOutlineMedium,
+  IconFolderOpenOutlineMedium,
+  IconRefreshOutlineMedium,
+  IconTrashOutlineMedium,
   Menu,
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -63,7 +63,7 @@ function rootItems(t: TranslateNS<'workbench'>): MenuEntry[] {
     { id: 'new-file', label: t('files.newFile'), icon: <IconFileAddOutline16 size={14} /> },
     { id: 'new-directory', label: t('files.newDirectory'), icon: <IconFolderAddOutline16 size={14} /> },
     { type: 'separator', id: 'root-refresh-separator' },
-    { id: 'refresh', label: t('files.refresh'), icon: <IconRefreshOutline16 size={14} /> },
+    { id: 'refresh', label: t('files.refresh'), icon: <IconRefreshOutlineMedium size={14} /> },
   ]
 }
 
@@ -76,23 +76,23 @@ function entryItems(entry: WorkspaceEntry, expanded: boolean, t: TranslateNS<'wo
     {
       id: 'open',
       label: openLabel,
-      icon: entry.kind === 'directory' ? <IconFolderOpenOutline16 size={14} /> : <IconFileOutline16 size={14} />,
+      icon: entry.kind === 'directory' ? <IconFolderOpenOutlineMedium size={14} /> : <IconFileOutline16 size={14} />,
       disabled: entry.kind !== 'file' && entry.kind !== 'directory',
     },
     ...(entry.kind === 'directory' ? [
       { type: 'separator' as const, id: 'entry-expand-separator' },
-      { id: 'expand-all', label: t('files.expandAll'), icon: <IconFolderOpenOutline16 size={14} /> },
-      { id: 'collapse-all', label: t('files.collapseAll'), icon: <IconFolderOpenOutline16 size={14} /> },
+      { id: 'expand-all', label: t('files.expandAll'), icon: <IconFolderOpenOutlineMedium size={14} /> },
+      { id: 'collapse-all', label: t('files.collapseAll'), icon: <IconFolderOpenOutlineMedium size={14} /> },
       { type: 'separator' as const, id: 'entry-create-separator' },
       { id: 'new-file', label: t('files.newFile'), icon: <IconFileAddOutline16 size={14} /> },
       { id: 'new-directory', label: t('files.newDirectory'), icon: <IconFolderAddOutline16 size={14} /> },
     ] : []),
     { type: 'separator', id: 'entry-edit-separator' },
-    { id: 'rename', label: t('files.rename'), icon: <IconEditOutline16 size={14} />, disabled: !mutable },
-    { id: 'delete', label: t('files.delete'), icon: <IconTrashOutline16 size={14} />, danger: true, disabled: !mutable },
+    { id: 'rename', label: t('files.rename'), icon: <IconEditOutlineMedium size={14} />, disabled: !mutable },
+    { id: 'delete', label: t('files.delete'), icon: <IconTrashOutlineMedium size={14} />, danger: true, disabled: !mutable },
     { type: 'separator', id: 'entry-copy-separator' },
-    { id: 'copy-relative-path', label: t('files.copyRelativePath'), icon: <IconCopyOutline16 size={14} /> },
-    { id: 'copy-absolute-path', label: t('files.copyAbsolutePath'), icon: <IconCopyOutline16 size={14} /> },
+    { id: 'copy-relative-path', label: t('files.copyRelativePath'), icon: <IconCopyOutlineMedium size={14} /> },
+    { id: 'copy-absolute-path', label: t('files.copyAbsolutePath'), icon: <IconCopyOutlineMedium size={14} /> },
   ]
 }
 

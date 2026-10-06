@@ -77,7 +77,13 @@ describe('Git output parsers', () => {
   })
 })
 
-describe('GitBackend single-file diffs', () => {
+/**
+ * Real Git integration: every case spawns several child processes (init, clone,
+ * fetch, pull, push) against temporary repositories. Under a fully parallel
+ * run that comfortably exceeds the 5s default, so the block states the same
+ * ceiling the plugin's own Git operations use.
+ */
+describe('GitBackend single-file diffs', { timeout: 30_000 }, () => {
   it('loads editable line-decoration baselines from HEAD for tracked, untracked, ignored, and binary files', async () => {
     const fixture = await createRepository()
     await writeFile(join(fixture.root, '.gitignore'), '*.ignored\n')
@@ -520,12 +526,19 @@ async function createBareRepository(): Promise<string> {
 function configureIdentity(root: string): void {
   git(root, ['config', 'user.email', 'workbench@example.invalid'])
   git(root, ['config', 'user.name', 'Workbench Test'])
+  // Pin line-ending conversion per repository: a host-level core.autocrlf
+  // would otherwise rewrite every checkout and make these fixtures host-dependent.
+  git(root, ['config', 'core.autocrlf', 'false'])
+  git(root, ['config', 'core.eol', 'lf'])
 }
 
+/** Host-independent Git invocation: line-ending conversion is pinned per command. */
+const GIT_OVERRIDES = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf'] as const
+
 function git(root: string, args: string[]): void {
-  execFileSync('git', args, { cwd: root })
+  execFileSync('git', [...GIT_OVERRIDES, ...args], { cwd: root })
 }
 
 function gitOutput(root: string, args: string[]): string {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+  return execFileSync('git', [...GIT_OVERRIDES, ...args], { cwd: root, encoding: 'utf8' }).trim()
 }

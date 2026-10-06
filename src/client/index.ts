@@ -1,12 +1,14 @@
 /** Browser half: additive mode switch plus shadowed sidebar/details occupants. */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-terminal-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { WorkbenchApi } from './api.ts'
 import { WorkbenchController } from './controller.ts'
@@ -19,14 +21,14 @@ import { createWorkbenchWorkspaceActivator } from './workspace-layout.ts'
 import { WorkbenchEditor } from './WorkbenchEditor.tsx'
 import { WorkbenchSidebar } from './WorkbenchSidebar.tsx'
 
-export const inject = ['slots', 'locale', 'layout']
+export const inject = ['slots', 'locale', 'layout', 'webTerminals']
 
 /** Register the workbench UI without replacing DSH's AppFrame or conversation component. */
 export function apply(ctx: ClientContext): void {
   const controller = new WorkbenchController(new WorkbenchApi(), {
     info: message => { ctx.logger.info(message) },
     warn: message => { ctx.logger.warn(message) },
-  }, ctx.layout)
+  }, ctx.layout, ctx.webTerminals)
   const activateWorkspace = createWorkbenchWorkspaceActivator(controller, ctx.logger)
   ctx.effect(() => ctx.locale.register('workbench', { zh, en }), 'workbench-layout: dictionaries')
   ctx.effect(() => installOpenFileRefresh(controller), 'workbench-layout: open file refresh')

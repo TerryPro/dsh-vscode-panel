@@ -25,6 +25,37 @@ export interface WorkspaceFile {
   markdown: boolean
 }
 
+/** A workspace image read as raw bytes and carried to the browser as base64. */
+export interface WorkspaceImageFile {
+  path: string
+  /** Base64-encoded bytes without a data-URL prefix. */
+  content: string
+  mimeType: string
+  version: string
+  size: number
+}
+
+/** Lowercase file extensions the workbench previews as inline images. */
+export const IMAGE_MIME_TYPES: Record<string, string> = {
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  gif: 'image/gif',
+  ico: 'image/vnd.microsoft.icon',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  svg: 'image/svg+xml',
+  webp: 'image/webp',
+}
+
+/** Resolve the preview MIME type for a workspace path, or `undefined` for non-images. */
+export function imageMimeTypeForPath(path: string): string | undefined {
+  const name = path.replace(/\\/gu, '/').split('/').pop()?.toLowerCase() ?? ''
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) return undefined
+  return IMAGE_MIME_TYPES[name.slice(dot + 1)]
+}
+
 export interface WorkspaceFileObservation {
   path: string
   version: string

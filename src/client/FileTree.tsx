@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  IconRefreshOutline14,
+  IconRefreshOutlineRegular,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DirectoryListing, WorkspaceEntry } from '../contracts.ts'
@@ -365,7 +365,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
           </Tooltip>
           <Tooltip label={t('files.refresh')} delayMs={500}>
             <button type="button" className={css.iconButton} aria-label={t('files.refresh')} onClick={() => { void refreshAllExpanded() }}>
-              <IconRefreshOutline14 size={14} />
+              <IconRefreshOutlineRegular size={14} />
             </button>
           </Tooltip>
         </div>

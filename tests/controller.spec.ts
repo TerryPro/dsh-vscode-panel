@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+import type { ClientTerminals } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import type { WorkbenchTerminalTab } from '../src/client/controller.ts'
 import { resolveWorkbenchWorkspaceId } from '../src/client/workspace-binding.ts'
 
 vi.mock('@deepseek-ai/dsh-client-store', () => ({
@@ -34,12 +36,29 @@ describe('WorkbenchController', () => {
     const controller = createController(api)
     await controller.openFile('workspace-1', 'README.md')
 
-    expect(activeTab(controller)).toMatchObject({ path: 'README.md', preview: true, dirty: false, draft: '# Title' })
+    expect(activeTab(controller)).toMatchObject({ path: 'README.md', markdownMode: 'preview', dirty: false, draft: '# Title' })
     controller.setDraft('# Title!')
     expect(activeTab(controller)?.dirty).toBe(true)
     await controller.save()
     expect(api.saveFile).toHaveBeenCalledWith('workspace-1', 'README.md', '# Title!', 'v1')
     expect(activeTab(controller)).toMatchObject({ dirty: false, saving: false, file: { version: 'v2' } })
+  })
+
+  it('loads image files through the binary endpoint without a text read', async () => {
+    const image = { path: 'assets/logo.png', content: 'AQID', mimeType: 'image/png', version: 'v1', size: 3 }
+    const api = {
+      readFile: vi.fn(() => Promise.reject(new Error('should not read text'))),
+      readImage: vi.fn(() => Promise.resolve(image)),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'assets/logo.png')
+
+    expect(api.readImage).toHaveBeenCalledWith('workspace-1', 'assets/logo.png')
+    expect(api.readFile).not.toHaveBeenCalled()
+    expect(activeTab(controller)).toMatchObject({ path: 'assets/logo.png', image, loading: false, file: null })
+
+    await controller.openFile('workspace-1', 'assets/logo.png')
+    expect(api.readImage).toHaveBeenCalledOnce()
   })
 
   it('logs local Git hunk interactions without logging normal typing', async () => {
@@ -173,6 +192,214 @@ describe('WorkbenchController', () => {
     expect(controller.closeTab(firstTabId)).toBe(false)
     expect(controller.closeTab(firstTabId, true)).toBe(true)
     expect(controller.store.getSnapshot().tabs.map(tab => tab.path)).toEqual(['second.ts'])
+    expect(activeTab(controller)?.path).toBe('second.ts')
+  })
+
+  it('opens a split by moving the neighbouring tab into an independent secondary pane', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2'))
+        .mockResolvedValueOnce(file('third.ts', 'three', '3')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    await controller.openFile('workspace-1', 'third.ts')
+
+    controller.toggleSplit('horizontal')
+    const panes = controller.store.getSnapshot().panes
+    expect(controller.store.getSnapshot().editorSplit).toBe(true)
+    // The previous neighbour of the active tab moves out; the primary keeps the rest.
+    expect(panes.secondary.tabIds).toEqual(['file:second.ts'])
+    expect(panes.primary.tabIds).toEqual(['file:first.ts', 'file:third.ts'])
+    expect(panes.primary.activeTabId).toBe('file:third.ts')
+    expect(panes.secondary.activeTabId).toBe('file:second.ts')
+  })
+
+  it('opens files into the focused pane while each pane keeps its own selection', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2'))
+        .mockResolvedValueOnce(file('third.ts', 'three', '3')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    controller.toggleSplit()
+    // Secondary now pins first.ts; primary keeps second.ts and stays focused.
+    controller.focusPane('secondary')
+    expect(activeTab(controller)?.path).toBe('first.ts')
+
+    await controller.openFile('workspace-1', 'third.ts')
+    const afterOpen = controller.store.getSnapshot().panes
+    expect(afterOpen.secondary.tabIds).toEqual(['file:first.ts', 'file:third.ts'])
+    expect(afterOpen.secondary.activeTabId).toBe('file:third.ts')
+    expect(afterOpen.primary.tabIds).toEqual(['file:second.ts'])
+
+    // Clicking a tab selects it in its own pane and focuses that pane, without losing the other selection.
+    controller.selectTab('file:second.ts')
+    const afterSelect = controller.store.getSnapshot().panes
+    expect(controller.store.getSnapshot().activeTabId).toBe('file:second.ts')
+    expect(afterSelect.secondary.activeTabId).toBe('file:third.ts')
+  })
+
+  it('collapses the split and merges tabs back when the secondary pane empties', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    controller.toggleSplit()
+    expect(controller.store.getSnapshot().editorSplit).toBe(true)
+
+    expect(controller.closeTab('file:first.ts', true)).toBe(true)
+    const state = controller.store.getSnapshot()
+    expect(state.editorSplit).toBe(false)
+    expect(state.panes.secondary.tabIds).toEqual([])
+    expect(state.tabs.map(tab => tab.path)).toEqual(['second.ts'])
+    expect(activeTab(controller)?.path).toBe('second.ts')
+  })
+
+  it('refuses to split when there is no second non-terminal tab', async () => {
+    const api = { readFile: vi.fn(() => Promise.resolve(file('only.ts', 'x', '1'))) }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'only.ts')
+    controller.toggleSplit()
+    expect(controller.store.getSnapshot().editorSplit).toBe(false)
+  })
+
+  it('splits a terminal beside a file by pinning the file into the secondary pane', async () => {
+    const api = { readFile: vi.fn(() => Promise.resolve(file('a.ts', 'x', '1'))) }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'a.ts')
+    const terminalId = controller.openTerminal()
+
+    // Active is the terminal; its previous neighbour (the file) moves to the secondary pane.
+    controller.toggleSplit()
+    const panes = controller.store.getSnapshot().panes
+    expect(controller.store.getSnapshot().editorSplit).toBe(true)
+    expect(panes.secondary.tabIds).toEqual(['file:a.ts'])
+    expect(panes.primary.tabIds).toEqual([terminalId])
+    expect(controller.store.getSnapshot().activeTabId).toBe(terminalId)
+  })
+
+  it('moves a dragged tab into another pane and reselects the source pane', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2'))
+        .mockResolvedValueOnce(file('third.ts', 'three', '3')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    await controller.openFile('workspace-1', 'third.ts')
+    controller.toggleSplit() // secondary pins second.ts, primary keeps first/third (active third)
+
+    controller.moveTabToPane('file:first.ts', 'secondary')
+    const panes = controller.store.getSnapshot().panes
+    expect(panes.primary.tabIds).toEqual(['file:third.ts'])
+    expect(panes.secondary.tabIds).toEqual(['file:second.ts', 'file:first.ts'])
+    expect(panes.secondary.activeTabId).toBe('file:first.ts')
+    expect(controller.store.getSnapshot().activeTabId).toBe('file:first.ts')
+  })
+
+  it('collapses the split when a drag empties the secondary pane', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    controller.toggleSplit() // secondary pins first.ts
+    controller.focusPane('secondary')
+
+    // Dragging first.ts back to the primary leaves the secondary pane empty.
+    controller.moveTabToPane('file:first.ts', 'primary')
+    const state = controller.store.getSnapshot()
+    expect(state.editorSplit).toBe(false)
+    expect(state.panes.secondary.tabIds).toEqual([])
+    expect(state.panes.primary.tabIds).toEqual(['file:second.ts', 'file:first.ts'])
+  })
+
+  it('clamps the split ratio to the 0.2–0.8 range', () => {
+    const controller = createController({ readFile: vi.fn() })
+    controller.setSplitRatio(0.95)
+    expect(controller.store.getSnapshot().editorSplitRatio).toBe(0.8)
+    controller.setSplitRatio(0.01)
+    expect(controller.store.getSnapshot().editorSplitRatio).toBe(0.2)
+    controller.setSplitRatio(0.5)
+    expect(controller.store.getSnapshot().editorSplitRatio).toBe(0.5)
+  })
+
+  it('keeps view toggles independent per file tab', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2'))
+        .mockResolvedValueOnce(file('doc.md', '# Doc', '1', true)),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    await controller.openFile('workspace-1', 'doc.md')
+
+    controller.setEditorWrap('file:first.ts', false)
+    controller.setEditorInlineDiff('file:second.ts', false)
+    controller.setMarkdownMode('source', 'file:doc.md')
+
+    const state = controller.store.getSnapshot()
+    const [first, second, doc] = state.tabs
+    expect(first?.kind === 'file' && first.wrap).toBe(false)
+    expect(first?.kind === 'file' && first.inlineDiff).toBe(true)
+    expect(second?.kind === 'file' && second.wrap).toBe(true)
+    expect(second?.kind === 'file' && second.inlineDiff).toBe(false)
+    expect(doc?.kind === 'file' && doc.markdownMode).toBe('source')
+    // The active tab is untouched by these targeted toggles.
+    expect(activeTab(controller)?.path).toBe('doc.md')
+  })
+
+  it('toggles the outline panel independently per Markdown file tab', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.md', '# One', '1', true))
+        .mockResolvedValueOnce(file('second.md', '# Two', '2', true)),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.md')
+    await controller.openFile('workspace-1', 'second.md')
+
+    controller.toggleMarkdownOutline('file:first.md')
+
+    const [first, second] = controller.store.getSnapshot().tabs
+    expect(first?.kind === 'file' && first.outlineVisible).toBe(true)
+    expect(second?.kind === 'file' && second.outlineVisible).toBeUndefined()
+
+    controller.toggleMarkdownOutline('file:first.md')
+    const toggled = controller.store.getSnapshot().tabs[0]
+    expect(toggled?.kind === 'file' && toggled.outlineVisible).toBe(false)
+  })
+
+  it('routes drafts to the pane that owns the edited tab while split is active', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    controller.toggleSplit()
+
+    controller.setDraft('edited-secondary', 'input', 'file:first.ts')
+    expect(fileTab(controller, 'first.ts')?.draft).toBe('edited-secondary')
     expect(activeTab(controller)?.path).toBe('second.ts')
   })
 
@@ -618,21 +845,32 @@ describe('WorkbenchController', () => {
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('expanded middle editor from content selection'))
   })
 
-  it('opens a Workspace-bound terminal from the Terminal mode and tracks its lifecycle', () => {
+  it('opens a Workspace-bound terminal and mirrors the official view phase onto its tab', () => {
     const logger = { info: vi.fn(), warn: vi.fn() }
-    const controller = new WorkbenchController({} as never, logger)
+    const view = { id: 'term-1' }
+    const terminals = { view: vi.fn(() => view), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, logger, undefined, terminals)
     controller.setWorkspace('workspace-1')
     controller.setSidebarMode('terminal')
     const terminal = activeTab(controller)
+    expect(terminal?.kind).toBe('terminal')
+    const tab = terminal as WorkbenchTerminalTab
+    expect(tab).toMatchObject({ kind: 'terminal', sequence: 1, status: 'connecting' })
+    expect(tab.contentId).toBeTruthy()
 
-    expect(terminal).toMatchObject({ kind: 'terminal', sequence: 1, generation: 0, status: 'connecting' })
-    controller.terminalReady(terminal!.id, 'zsh')
-    expect(activeTab(controller)).toMatchObject({ kind: 'terminal', status: 'running', shell: 'zsh' })
-    controller.terminalExited(terminal!.id, 7, 15)
-    expect(activeTab(controller)).toMatchObject({ kind: 'terminal', status: 'exited', exitCode: 7, signal: 15 })
-    controller.restartTerminal(terminal!.id)
-    expect(activeTab(controller)).toMatchObject({ kind: 'terminal', generation: 1, status: 'connecting' })
-    expect(activeTab(controller)).not.toHaveProperty('exitCode')
+    // The official model is only reachable once a Session is bound.
+    expect(controller.terminalView(tab)).toBeUndefined()
+    controller.setSession('session-1')
+    expect(controller.terminalView(tab)).toBe(view)
+    expect(terminals.view).toHaveBeenCalledWith('session-1', tab.id, tab.contentId)
+
+    controller.setTerminalStatus(tab.id, 'running')
+    expect(activeTab(controller)).toMatchObject({ kind: 'terminal', status: 'running' })
+    controller.setTerminalStatus(tab.id, 'exited')
+    expect(activeTab(controller)).toMatchObject({ kind: 'terminal', status: 'exited' })
+
+    controller.closeTab(tab.id)
+    expect(terminals.close).toHaveBeenCalledWith('session-1', tab.id, tab.contentId)
   })
 
   it('keeps multiple terminals in one Workspace but terminates their state on Workspace switch', async () => {

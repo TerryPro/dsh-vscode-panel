@@ -4,6 +4,7 @@ export const FRAME_ATTRIBUTE = 'data-dsh-workbench-frame'
 export const EDITOR_COLLAPSED_ATTRIBUTE = 'data-dsh-workbench-editor-collapsed'
 export const EDITOR_TRANSITION_ATTRIBUTE = 'data-dsh-workbench-editor-transition'
 export const EDITOR_RELEASE_ATTRIBUTE = 'data-dsh-workbench-editor-release'
+export const CONVERSATION_COLLAPSED_ATTRIBUTE = 'data-dsh-workbench-conversation-collapsed'
 
 export const TRANSITION_SIDEBAR_WIDTH = '--dsh-workbench-transition-sidebar-width'
 export const TRANSITION_EDITOR_WIDTH = '--dsh-workbench-transition-editor-width'

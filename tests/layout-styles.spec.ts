@@ -19,12 +19,14 @@ import {
   DETAILS_TRACK_NATIVE_HANDLE_ATTRIBUTE,
   DETAILS_TRACK_SIDEBAR_WIDTH,
   DETAILS_TRACK_WIDTH,
+  SIDEBAR_TRACK_HANDLE_ATTRIBUTE,
   readNativeSidebarWidth,
   resolveDetailsTrackMaximum,
   resolveDetailsTrackWidth,
   resolveResponsiveDetailsDefault,
 } from '../src/client/details-track-layout.ts'
 import { EDITOR_COLLAPSED_ATTRIBUTE, installWorkbenchLayout } from '../src/client/layout-styles.ts'
+import { CONVERSATION_COLLAPSED_ATTRIBUTE } from '../src/client/editor-layout-contract.ts'
 
 afterEach(() => {
   document.head.innerHTML = ''
@@ -51,6 +53,15 @@ describe('workbench layout presentation', () => {
     expect(readNativeSidebarWidth(frame, sidebar)).toBe(56)
   })
 
+  it('treats a parsed zero sidebar track as collapsed instead of falling back', () => {
+    const frame = document.createElement('div')
+    const sidebar = document.createElement('div')
+    frame.style.gridTemplateColumns = '0px minmax(0, 1fr) 360px'
+    vi.spyOn(sidebar, 'getBoundingClientRect').mockReturnValue(rect(280))
+
+    expect(readNativeSidebarWidth(frame, sidebar)).toBe(0)
+  })
+
   it('keeps the native active-Session divider while widening its workbench track', () => {
     const { frame, detailsHandle } = appFrameFixture('active', 312)
     document.body.appendChild(frame)
@@ -71,6 +82,10 @@ describe('workbench layout presentation', () => {
     expect(style).not.toBeNull()
     expect(style?.textContent).toContain(':not([data-rightbar-collapsed])')
     expect(style?.textContent).toContain("[data-rightbar-col]::after")
+    expect(style?.textContent).toContain('border-top: 1px solid var(--dsw-alias-border-l1)')
+    expect(style?.textContent).toContain(`> :nth-child(3) {`)
+    expect(style?.textContent).toContain('border-left: 1px solid var(--dsw-alias-border-l1) !important')
+    expect(style?.textContent).toContain(`[${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]`)
     expect(style?.textContent).toContain('data-dsh-workbench-conversation-narrow')
     expect(style?.textContent).toContain("[role='status']:has(> code) > code")
     expect(style?.textContent).toContain(`[${ASSISTANT_ACTIONS_ATTRIBUTE}]`)
@@ -94,7 +109,6 @@ describe('workbench layout presentation', () => {
     expect(style?.textContent).not.toContain('[data-composer-card]')
     expect(style?.textContent).not.toContain('--dsw-alias-bg-base: var(--dsw-specific-sidebar-fill)')
     expect(style?.textContent).toContain(EDITOR_COLLAPSED_ATTRIBUTE)
-    expect(style?.textContent).toContain('data-dsh-workbench-session-log-button')
     expect(style?.textContent).toContain('> span[aria-hidden]:last-child')
     expect(style?.textContent).toContain("button[aria-haspopup='menu'] > svg:last-child")
     expect(style?.textContent).toContain('data-dsh-workbench-floating-model-menu')
@@ -206,6 +220,47 @@ describe('workbench layout presentation', () => {
     dispose?.()
   })
 
+  it('marks the frame when the conversation column is collapsed', () => {
+    const { frame } = appFrameFixture('active', 312)
+    document.body.appendChild(frame)
+    let dispose: (() => void) | undefined
+    const ctx = contextWithDispose(value => { dispose = value })
+    const visibility = editorVisibility()
+
+    installWorkbenchLayout(ctx, visibility, fileController())
+    expect(frame.hasAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)).toBe(false)
+
+    visibility.setConversationExpanded(false)
+    expect(frame.hasAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)).toBe(true)
+
+    visibility.setConversationExpanded(true)
+    expect(frame.hasAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)).toBe(false)
+
+    dispose?.()
+    expect(frame.hasAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)).toBe(false)
+  })
+
+  it('drags the plugin sidebar handle to resize the left panel', () => {
+    const { frame } = appFrameFixture('active', 280, 1400)
+    document.body.appendChild(frame)
+    let dispose: (() => void) | undefined
+    const ctx = contextWithDispose(value => { dispose = value })
+
+    installWorkbenchLayout(ctx, editorVisibility(), fileController())
+    const handle = frame.querySelector(`[${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]`)
+    expect(handle).not.toBeNull()
+    expect(frame.style.getPropertyValue(DETAILS_TRACK_SIDEBAR_WIDTH)).toBe('280px')
+
+    dispatchPointer(handle as HTMLElement, 'pointerdown', 280)
+    dispatchPointer(handle as HTMLElement, 'pointermove', 360)
+    dispatchPointer(handle as HTMLElement, 'pointerup', 360)
+    expect(frame.style.getPropertyValue(DETAILS_TRACK_SIDEBAR_WIDTH)).toBe('360px')
+    expect(ctx.logger.info).toHaveBeenCalledWith(expect.stringContaining('resized sidebar to 360px'))
+
+    dispose?.()
+    expect(frame.querySelector(`[${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]`)).toBeNull()
+  })
+
   it('drags the native divider past the former 520px ceiling on a large screen', () => {
     const { frame, detailsHandle } = appFrameFixture('active', 280, 1920)
     document.body.appendChild(frame)
@@ -276,15 +331,20 @@ function contextWithDispose(onDispose: (dispose: () => void) => void): ClientCon
 
 function editorVisibility(initial = true) {
   let editorExpanded = initial
+  let conversationExpanded = true
   const listeners = new Set<() => void>()
   return {
-    getSnapshot: () => ({ editorExpanded }),
+    getSnapshot: () => ({ editorExpanded, conversationExpanded }),
     subscribe: (listener: () => void) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
     setExpanded: (next: boolean) => {
       editorExpanded = next
+      listeners.forEach(listener => { listener() })
+    },
+    setConversationExpanded: (next: boolean) => {
+      conversationExpanded = next
       listeners.forEach(listener => { listener() })
     },
   }

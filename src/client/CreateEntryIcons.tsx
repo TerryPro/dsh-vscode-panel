@@ -1,6 +1,6 @@
 import {
-  IconFolderClose16,
-  IconPlusOutline16,
+  IconFolderCloseMedium,
+  IconPlusOutlineMedium,
   type IconProps,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './CreateEntryIcons.module.css'
@@ -46,7 +46,7 @@ export function IconFileAddOutline16({ size = 16, className }: IconProps) {
       data-icon="file-add"
     >
       <IconFileOutline16 size={size} />
-      <IconPlusOutline16 className={css.addGlyph} size={Math.max(8, Math.round(size / 2))} />
+      <IconPlusOutlineMedium className={css.addGlyph} size={Math.max(8, Math.round(size / 2))} />
     </span>
   )
 }
@@ -60,8 +60,8 @@ export function IconFolderAddOutline16({ size = 16, className }: IconProps) {
       aria-hidden="true"
       data-icon="folder-add"
     >
-      <IconFolderClose16 size={size} />
-      <IconPlusOutline16 className={css.addGlyph} size={Math.max(8, Math.round(size / 2))} />
+      <IconFolderCloseMedium size={size} />
+      <IconPlusOutlineMedium className={css.addGlyph} size={Math.max(8, Math.round(size / 2))} />
     </span>
   )
 }

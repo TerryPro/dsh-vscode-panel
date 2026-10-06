@@ -5,6 +5,13 @@ export const SIDEBAR_FOOT_ACTIONS_ATTRIBUTE = 'data-dsh-workbench-sidebar-foot-a
 export const SIDEBAR_SETTINGS_AREA_ATTRIBUTE = 'data-dsh-workbench-sidebar-settings-area'
 export const SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE = 'data-dsh-workbench-sidebar-settings-trigger'
 
+/**
+ * The official Settings launcher is the single dialog-popup button in the
+ * settings seat. It is not the seat's direct child — the registrant renders a
+ * trigger row around it — so match the semantic control, not the position.
+ */
+const SETTINGS_TRIGGER_SELECTOR = "button[aria-haspopup='dialog']"
+
 export interface SidebarFooterLogger {
   info(message: string): void
 }
@@ -46,7 +53,7 @@ export function createSidebarFooterLayout(
     const nextActions = actionSeat?.parentElement ?? null
     const nextSettings = settingsSeat?.parentElement ?? null
     const nextFoot = nextSettings?.parentElement ?? null
-    const nextSettingsTrigger = settingsSeat?.querySelector<HTMLButtonElement>(':scope > button') ?? null
+    const nextSettingsTrigger = settingsSeat?.querySelector<HTMLButtonElement>(SETTINGS_TRIGGER_SELECTOR) ?? null
     if (nextFoot === null || nextActions === null || nextSettings === null || nextActions.parentElement !== nextFoot) {
       clear()
       return

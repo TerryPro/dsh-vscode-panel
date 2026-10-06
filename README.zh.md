@@ -1,12 +1,12 @@
 # DSH 工作台布局
 
-简体中文 | [English](README.md)
+**简体中文**| [English](README.md)
 
 为 DeepSeek Harness Web 提供三栏工作区：左侧导航、中间文件与终端、右侧 DSH 原生对话。
 
-![DSH 工作台布局：文件目录、编辑器与原生对话](https://raw.githubusercontent.com/lsq-dsh-plugins/dsh-workbench-layout/main/assets/workbench-files-and-chat.png)
+![DSH 工作台布局：文件目录、编辑器与原生对话](https://raw.githubusercontent.com/TerryPro/dsh-vscode-panel/main/assets/workbench-files-and-chat.png)
 
-![DSH 工作台布局：Git 更改视图、左右对照 Diff 与原生对话](https://raw.githubusercontent.com/lsq-dsh-plugins/dsh-workbench-layout/main/assets/workbench-git-diff.png)
+![DSH 工作台布局：Git 更改视图、左右对照 Diff 与原生对话](https://raw.githubusercontent.com/TerryPro/dsh-vscode-panel/main/assets/workbench-git-diff.png)
 
 ## 概览
 
@@ -60,7 +60,7 @@ DSH 工作台布局在不替换原生对话和输入框的前提下重排官方 
 - 沿用官方 AppFrame 分隔线行为调整中栏与右栏宽度；右栏默认宽度随窗口变化，大屏下可继续向宽处拖动，同时为中栏保留可用空间。
 - 可从左栏底部收起中栏；选择文件、Diff 或终端时会自动重新展开。
 - 即使工作区会话还没有消息，也能访问该工作区的文件与 Git。
-- 对话栏变窄时会适配输入工具栏、菜单、失败信息、Session Log 操作和助手消息统计。
+- 对话栏变窄时会适配输入工具栏、菜单、失败信息和助手消息统计。
 - 收起中栏后，对话会回到官方中间位置和原始表面颜色。
 
 ## 安装
@@ -72,6 +72,8 @@ dsh plugin --profile web add @lsq64737/dsh-workbench-layout
 ```
 
 如果 DSH Web 正在运行，请在安装后重启。
+
+本版本针对 DSH Web 0.2.0-rc.2 构建并测试。peer 范围同时接受 0.1.5-rc.1，两者的侧栏、右栏与底栏 slot 契约一致。
 
 终端功能依赖原生模块 `node-pty`。如果 pnpm 报错 `ERR_PNPM_IGNORED_BUILDS`，请在 DSH Web 配置目录中运行 `pnpm approve-builds`，批准 `node-pty`，然后重新安装插件或重启 DSH Web。
 
@@ -109,6 +111,7 @@ Git 功能要求所选工作区根目录本身就是 Git 仓库。远端操作�
 - 文件编辑器只读取文本；二进制文件只显示二进制变更提示，不渲染内容。
 - 关闭标签、刷新页面、连接断开、切换工作区或停止插件都会结束终端进程；默认组合最多允许八个终端同时运行。
 - DSH 目前没有公开的对话栏位置 API，因此插件通过官方 AppFrame 的稳定标记调整列顺序。未来 AppFrame 重构后可能需要同步更新插件。
+- 在 Windows 桌面版中，收起后的侧栏宽度为零，DSH 会隐藏侧栏的浏览区和底栏；此时模式切换与中栏开关不可用，重新展开侧栏即可恢复。macOS、浏览器和 Linux 下收起侧栏仍保留图标栏，两个控件都可继续使用。
 - 窗口非常窄时，AppFrame 官方让步规则会暂时关闭中栏，宽度恢复后再自动打开。
 
 ## 开发
@@ -122,6 +125,8 @@ npm test
 npm run build
 npm run test:bundle
 ```
+
+`npm run typecheck` 除了插件源码，还检查三个模拟 DSH 快照的测试桩（`workspace-binding`、`workbench-sidebar`、`workbench-editor`）：宿主类型变更会直接让构建失败，而不是静默关掉这些检查。其余测试文件暂未做类型检查。
 
 ## 许可证
 

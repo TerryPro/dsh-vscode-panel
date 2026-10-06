@@ -81,6 +81,7 @@ export function GitDiffEditor(props: GitDiffEditorProps) {
                   originalLabel={labels.original}
                   modifiedLabel={labels.modified}
                   mode={effectiveMode}
+                  path={props.diff.path}
                 />
               </div>
             </div>

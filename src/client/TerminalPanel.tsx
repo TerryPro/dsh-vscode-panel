@@ -1,7 +1,7 @@
-/** 左栏终端实例管理，与工作区而非会话绑定。 */
+/** 左栏终端实例管理，与工作区而非会话绑定；状态取自官方终端模型镜像。 */
 
 import { useEffect, useRef } from 'react'
-import { IconCloseOutline16, IconPlusOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineMedium, IconPlusOutlineMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchController, WorkbenchTerminalTab } from './controller.ts'
 import type { WorkbenchKey } from './locales.ts'
@@ -38,7 +38,7 @@ export function TerminalPanel({ controller, workspaceId, t }: TerminalPanelProps
             aria-label={t('terminal.new')}
             onClick={() => { controller.openTerminal(workspaceId) }}
           >
-            <IconPlusOutline16 size={16} />
+            <IconPlusOutlineMedium size={16} />
           </button>
         </Tooltip>
       </header>
@@ -60,7 +60,7 @@ export function TerminalPanel({ controller, workspaceId, t }: TerminalPanelProps
               >
                 <span className={css.terminalStatusDot} data-status={terminal.status} aria-hidden />
                 <span className={css.terminalRowName}>{name}</span>
-                <span className={css.terminalRowStatus}>{terminalStatus(terminal, t)}</span>
+                <span className={css.terminalRowStatus}>{terminalStatus(terminal.status, t)}</span>
               </button>
               <button
                 type="button"
@@ -68,7 +68,7 @@ export function TerminalPanel({ controller, workspaceId, t }: TerminalPanelProps
                 aria-label={t('terminal.close', { name })}
                 onClick={() => { controller.closeTab(terminal.id) }}
               >
-                <IconCloseOutline16 size={13} />
+                <IconCloseOutlineMedium size={13} />
               </button>
             </div>
           )
@@ -78,11 +78,17 @@ export function TerminalPanel({ controller, workspaceId, t }: TerminalPanelProps
   )
 }
 
-function terminalStatus(tab: WorkbenchTerminalTab, t: TranslateNS<'workbench'>): string {
-  switch (tab.status) {
+function terminalStatus(status: WorkbenchTerminalTab['status'], t: TranslateNS<'workbench'>): string {
+  switch (status) {
     case 'connecting': return t('terminal.connecting')
-    case 'running': return tab.shell ?? t('terminal.running')
+    case 'running': return t('terminal.running')
     case 'exited': return t('terminal.exited')
     case 'error': return t('terminal.failed')
+  }
+}
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    workbench: WorkbenchKey
   }
 }

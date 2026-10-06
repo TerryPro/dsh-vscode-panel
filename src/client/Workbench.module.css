@@ -1,85 +1,5 @@
-.sidebarTopHost {
-  flex: none;
-  width: 100%;
-  margin-bottom: 8px;
-}
-
-.sidebarTopHost:not([data-wide]) {
-  width: 36px;
-  margin-bottom: 12px;
-}
-
-/* The native New Session action keeps its official behavior, but joins the
-   same circular rail geometry as every plugin action while the sidebar is collapsed. */
-.sidebarTopHost:not([data-wide]) + [data-dsh-workbench-new-session] {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  margin: 0 0 12px;
-  border-color: transparent;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-}
-
-.sidebarTopHost:not([data-wide]) + [data-dsh-workbench-new-session]:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.sidebarTopHost[data-wide] + [data-dsh-workbench-new-session] {
-  display: none !important;
-}
-
-/* Keep the native control rendered while another collapsed mode is active.
-   Removing it with display:none would replay DSH's completed rail-in animation
-   every time Sessions makes the control render again. */
-.sidebarTopHost:not([data-wide]):not([data-mode='sessions']) + [data-dsh-workbench-new-session] {
-  visibility: hidden;
-  height: 0;
-  min-height: 0;
-  padding: 0;
-  margin: 0;
-  overflow: hidden;
-  border-width: 0;
-  pointer-events: none;
-}
-
 .modeSwitchAnchor {
   display: none;
-}
-
-.editorToggle {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-left: auto;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-}
-
-.editorToggle:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.editorToggle:not([data-wide]) {
-  width: 36px;
-  height: 36px;
-  margin-left: 0;
-  color: var(--dsw-alias-label-primary);
-}
-
-/* DSH currently exposes one panel glyph; mirroring its official geometry
-   produces the secondary-panel symbol used for the middle editor track. */
-.editorToggleIcon {
-  transform: scaleX(-1);
 }
 
 /* The official footer owns separate action and Settings seats. In the wide
@@ -113,20 +33,77 @@
   margin: 0;
 }
 
+/* The independent activity dock: a viewport-fixed left column that lives
+   outside the AppFrame grid and the collapsible sidebar, so it is present in
+   every fold state. The AppFrame grid reserves the same width as inline
+   padding (see activity-dock-layout.ts) so its columns clear the dock. */
+.activityDock {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 60;
+  width: 48px;
+  box-sizing: border-box;
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-specific-sidebar-fill);
+}
+
+/* Brand mark pinned to the dock's title-bar band (top-left corner). */
+.dockBrand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--dsh-windows-titlebar-height, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dockBrand svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Hide the sidebar's large "deepseek HARNESS" brand row; the mark now lives in
+   the activity dock's top-left corner instead. The brand is rendered through
+   CSS-module classes (`<hash>_logoRow` wrapping `_brandIdentity` → `_brandMark`
+   + `_brandName`), not `data-slot` wrappers, so match the stable local-name
+   suffixes. The collapse toggle is `position: fixed` and stays clickable via
+   programmatic .click() even while its row is hidden. */
+[class*="_logoRow"],
+[data-slot="sidebar.brand.mark"],
+[data-slot="sidebar.brand.name"],
+[class*="_brandIdentity"],
+[class*="_brandMark"],
+[class*="_brandName"] {
+  display: none;
+}
+
 .modeSwitch {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: 36px;
-  padding: 0;
-}
-
-.modeSwitch[data-wide] {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
   gap: 3px;
   width: 100%;
-  padding: 0 2px;
+  height: 100%;
+  /* Start the icon column below the titlebar so the first icon aligns with the
+     sidebar's content row, leaving the brand mark room in the top band. */
+  padding: calc(var(--dsh-windows-titlebar-height, 40px) + 8px) 0 8px;
+  box-sizing: border-box;
+}
+
+.activitySpacer {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The dock owns the Settings affordance; hide the duplicated foot trigger while
+   keeping it mounted and programmatically clickable for the gear button. */
+[data-dsh-workbench-activity-dock] [data-dsh-workbench-sidebar-settings-trigger] {
+  display: none;
 }
 
 .modeButton {
@@ -141,18 +118,9 @@
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-secondary);
   font: var(--dsw-font-xxs-12);
   cursor: pointer;
-}
-
-.modeSwitch[data-wide] .modeButton {
-  width: auto;
-  height: 32px;
-  padding: 0 4px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--dsw-alias-label-secondary);
 }
 
 .modeButton > span {
@@ -170,12 +138,6 @@
 .modeButton[data-active] {
   background: var(--dsw-alias-interactive-bg-active, var(--dsw-alias-interactive-bg-hover));
   color: var(--dsw-alias-button-info-fill);
-}
-
-.modeSwitch[data-wide] .modeButton[data-active] {
-  border-color: var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-button-elevated-fill);
-  color: var(--dsw-alias-brand-text);
 }
 
 .sidebarBody,
@@ -231,7 +193,7 @@
 }
 
 .railButton:disabled {
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   cursor: not-allowed;
 }
 
@@ -593,7 +555,7 @@
   flex: 1;
   box-sizing: border-box;
   padding: 0 5px;
-  border: 1px solid var(--dsw-alias-brand-border);
+  border: 1px solid var(--dsw-alias-state-business-primary);
   border-radius: 5px;
   outline: none;
   background: var(--dsw-alias-bg-layer-1);
@@ -624,11 +586,15 @@
   color: var(--dsw-alias-state-warn-label);
 }
 
-.chevron {
-  display: inline-flex;
-  flex: none;
-  width: 12px;
+/* Row glyphs keep their 16px box. Folders ride the neutral tertiary ink like the
+   official tree (Git status stays on the name); files own their type colour. */
+.treeIcon {
+  flex: 0 0 auto;
   color: var(--dsw-alias-label-tertiary);
+}
+
+.fileIcon {
+  flex: 0 0 auto;
 }
 
 .rowName {
@@ -665,7 +631,7 @@
   padding: 8px 10px;
   border-radius: 9px;
   background: var(--dsw-alias-state-error-secondary);
-  color: var(--dsw-alias-label-error);
+  color: var(--dsw-alias-state-error-primary);
   font: var(--dsw-font-xxs-12);
   line-height: 1.45;
 }
@@ -764,7 +730,7 @@
 
 .gitSectionEmpty {
   padding: 5px 7px 7px;
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   font: var(--dsw-font-xxs-12);
 }
 
@@ -862,7 +828,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   font: var(--dsw-font-xxs-12);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -943,7 +909,7 @@
   justify-content: center;
   min-height: 1px;
   padding: 3px 8px;
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   font: var(--dsw-font-xxs-12);
   text-align: center;
 }
@@ -953,7 +919,7 @@
 }
 
 .gitGraphSentinel [role='alert'] {
-  color: var(--dsw-alias-label-error);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 :global(body[data-ds-dark-theme]) .gitGraph {
@@ -1085,7 +1051,7 @@
   flex: none;
   max-width: 64px;
   overflow: hidden;
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   font: var(--dsw-font-xxs-12);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1232,7 +1198,7 @@
 }
 
 .editorEmpty svg {
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
 }
 
 .editorHeader {
@@ -1351,7 +1317,7 @@
 
 .editorTabKind {
   flex: none;
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   font: var(--dsw-font-xxs-12);
 }
 
@@ -1437,13 +1403,16 @@
 }
 
 .previewSwitch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
   height: 22px;
-  padding: 0 7px;
+  padding: 0;
   border: none;
   border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
   cursor: pointer;
 }
 
@@ -1514,12 +1483,276 @@
   overflow: hidden;
 }
 
+.editorPanes {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editorPanes:not([data-split]) {
+  flex-direction: column;
+}
+
+.editorPanes[data-split] {
+  flex-direction: row;
+}
+
+.editorPanes[data-split-orientation='vertical'][data-split] {
+  flex-direction: column;
+}
+
+.editorPanePrimary,
+.editorPaneSecondary {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.editorPaneSecondary {
+  flex: 1 1 0;
+}
+
+/* Soft drop-target feedback while dragging a tab over a pane. */
+.editorPaneDropOverlay {
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, transparent);
+  pointer-events: none;
+}
+
+.editorTab[draggable='true'] {
+  cursor: grab;
+}
+
+.editorTab[draggable='true']:active {
+  cursor: grabbing;
+}
+
+.editorSplitDivider {
+  flex: 0 0 5px;
+  position: relative;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.editorPanes[data-split-orientation='vertical'] .editorSplitDivider {
+  cursor: row-resize;
+}
+
+/* Thin 1px visible line centered inside the wider (5px) invisible grab zone. */
+.editorSplitDivider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--dsw-alias-border-l1);
+  transform: translateX(-50%);
+  transition: background 120ms ease;
+}
+
+.editorPanes[data-split-orientation='vertical'] .editorSplitDivider::before {
+  top: 50%;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: auto;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.editorSplitDivider:hover::before,
+.editorSplitDivider:focus-visible::before {
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.editorSplitDivider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--dsw-alias-state-business-primary);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease;
+}
+
+.editorPanes[data-split-orientation='vertical'] .editorSplitDivider::after {
+  width: 22px;
+  height: 3px;
+}
+
+.editorSplitDivider:hover::after,
+.editorSplitDivider:focus-visible::after {
+  opacity: 1;
+}
+
+.editorSplitDivider:focus-visible {
+  outline: none;
+}
+
+:global(html[data-dsh-split-dragging]),
+:global(html[data-dsh-split-dragging] *) {
+  user-select: none !important;
+}
+
+:global(html[data-dsh-split-dragging='horizontal']),
+:global(html[data-dsh-split-dragging='horizontal'] *) {
+  cursor: col-resize !important;
+}
+
+:global(html[data-dsh-split-dragging='vertical']),
+:global(html[data-dsh-split-dragging='vertical'] *) {
+  cursor: row-resize !important;
+}
+
+.editorSplitControls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: 4px;
+}
+
+.editorSplitAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.editorSplitAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.editorSplitAction[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.editorSplitAction:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
 .codeEditorHost {
   flex: 1;
   width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.editorFileArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editorFileBody {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editorStatusBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background-color: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  line-height: 1;
+  user-select: none;
+}
+
+.editorStatusBarItem {
+  white-space: nowrap;
+}
+
+.editorStatusBarSpacer {
+  flex: 1 1 auto;
+}
+
+.editorStatusBarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: 6px;
+}
+
+.editorStatusBarSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-inline-end: 4px;
+}
+
+.editorStatusBarAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.editorStatusBarAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.editorStatusBarAction[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.editorStatusBarAction[data-active] {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.editorStatusBarAction:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
 }
 
 .terminalTabBody {
@@ -1668,7 +1901,7 @@
 }
 
 .diffEmpty svg {
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
 }
 
 .markdownPreview {
@@ -1681,6 +1914,162 @@
   box-sizing: border-box;
   padding: 28px clamp(24px, 6%, 64px) 100px;
   scrollbar-gutter: stable;
+}
+
+.markdownPreviewPane {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 20px clamp(16px, 4%, 40px) 80px;
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  scrollbar-gutter: stable;
+}
+
+.markdownOutline {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 224px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 16px 8px 24px;
+  overflow: auto;
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  scrollbar-gutter: stable;
+}
+
+.markdownOutlineTitle {
+  flex: none;
+  padding: 0 10px 8px;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.markdownOutlineList {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.markdownOutlineItem {
+  display: block;
+  width: 100%;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.markdownOutlineItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.markdownOutlineItem[data-level="1"] {
+  font-weight: 600;
+}
+
+.markdownOutlineEmpty {
+  padding: 4px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xs-13);
+}
+
+.htmlFrame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  border: none;
+  background: var(--dsw-alias-bg-base);
+}
+
+.htmlStatus {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+.markdownToolbar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 1px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+}
+
+.markdownToolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 24px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.markdownToolbar button:hover {
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+}
+
+.markdownToolbarGlyph {
+  font-weight: 600;
+}
+
+.imagePreview {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.imagePreviewImage {
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
 }
 
 @media (hover: none) {

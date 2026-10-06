@@ -197,6 +197,22 @@ describe('WorkspaceBackend', () => {
     await expect(backend.read('workspace-1', 'linked.txt')).rejects.toMatchObject({ code: 'SYMLINK_UNSUPPORTED' })
   })
 
+  it('reads a workspace image as base64 with its preview MIME type', async () => {
+    const readBytes = vi.fn(() => Promise.resolve(Uint8Array.from([1, 2, 3])))
+    const { backend } = harness({ readBytes })
+    await expect(backend.readImage('workspace-1', 'assets/logo.png')).resolves.toEqual({
+      path: 'assets/logo.png', content: 'AQID', mimeType: 'image/png', version: 'v1', size: 3,
+    })
+    expect(readBytes).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a non-image path before reading any bytes', async () => {
+    const readBytes = vi.fn(() => Promise.resolve(Uint8Array.from([0])))
+    const { backend } = harness({ readBytes })
+    await expect(backend.readImage('workspace-1', 'notes.txt')).rejects.toMatchObject({ code: 'IMAGE_UNSUPPORTED' })
+    expect(readBytes).not.toHaveBeenCalled()
+  })
+
   it('identifies binary Git content without returning its bytes', async () => {
     const { backend } = harness({
       readText: vi.fn(() => Promise.reject(Object.assign(new Error('binary'), { code: 'FS_NOT_TEXT' }))),

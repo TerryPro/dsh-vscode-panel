@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "files": [
+    "tests/workspace-binding.spec.ts",
+    "tests/workbench-sidebar.spec.tsx",
+    "tests/workbench-editor.spec.tsx"
+  ]
+}

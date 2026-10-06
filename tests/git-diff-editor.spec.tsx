@@ -17,7 +17,7 @@ vi.mock('../src/client/DiffSurface.tsx', () => ({
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>,
   FishLogo: () => <span />,
-  IconCodeOutline16: () => <span />,
+  IconCodeOutlineMedium: () => <span />,
   Pill: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }))
 

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorTabs } from '../src/client/EditorTabs.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  IconCloseOutline16: () => <span />,
+  IconCloseOutlineMedium: () => <span />,
 }))
 
 afterEach(() => { cleanup() })

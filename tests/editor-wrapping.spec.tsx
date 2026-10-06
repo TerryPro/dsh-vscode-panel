@@ -20,6 +20,13 @@ describe('中栏长行自动换行', () => {
     expect(view.container.querySelectorAll('.cm-lineWrapping')).toHaveLength(1)
   })
 
+  it('wrap=false 时不启用换行扩展', () => {
+    const view = render(
+      <CodeEditor value={'x'.repeat(500)} onChange={() => {}} ariaLabel="long-file.txt" wrap={false} />,
+    )
+    expect(view.container.querySelectorAll('.cm-lineWrapping')).toHaveLength(0)
+  })
+
   it('把普通编辑器与 Markdown 预览约束在弹性中栏内', () => {
     const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/Workbench.module.css'), 'utf8')
     expect(stylesheet).toMatch(/\.editorBody\s*\{[^}]*min-width: 0[^}]*overflow: hidden/u)

@@ -2,24 +2,20 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  EDITOR_COLLAPSED_ATTRIBUTE,
-  EDITOR_TRANSITION_ATTRIBUTE,
-  EDITOR_TRANSITION_END_EVENT,
-  EDITOR_TRANSITION_START_EVENT,
-  FRAME_ATTRIBUTE,
-} from '../src/client/editor-layout-contract.ts'
 import { zh } from '../src/client/locales.ts'
+import type { WorkbenchTerminalTab } from '../src/client/controller.ts'
 import { TerminalSurface } from '../src/client/TerminalSurface.tsx'
 
 const terminalHarness = vi.hoisted(() => ({
   instances: [] as Array<{
     write: ReturnType<typeof vi.fn>
+    resize: ReturnType<typeof vi.fn>
+    reset: ReturnType<typeof vi.fn>
     focus: ReturnType<typeof vi.fn>
     dispose: ReturnType<typeof vi.fn>
     emitData(data: string): void
   }>,
-  fitInstances: [] as Array<{ fit: ReturnType<typeof vi.fn> }>,
+  fitInstances: [] as Array<{ proposeDimensions: ReturnType<typeof vi.fn> }>,
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -27,7 +23,9 @@ vi.mock('@xterm/xterm', () => ({
     readonly cols = 80
     readonly rows = 24
     readonly options: Record<string, unknown> = {}
-    readonly write = vi.fn()
+    readonly write = vi.fn((_data: string, callback?: () => void) => { callback?.() })
+    readonly resize = vi.fn()
+    readonly reset = vi.fn()
     readonly focus = vi.fn()
     readonly dispose = vi.fn()
     private dataListener: ((data: string) => void) | undefined
@@ -44,7 +42,7 @@ vi.mock('@xterm/xterm', () => ({
 }))
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
-    readonly fit = vi.fn()
+    readonly proposeDimensions = vi.fn(() => ({ cols: 120, rows: 50 }))
     constructor() { terminalHarness.fitInstances.push(this) }
   },
 }))
@@ -55,9 +53,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 beforeEach(() => {
   terminalHarness.instances.length = 0
   terminalHarness.fitInstances.length = 0
-  FakeWebSocket.instances.length = 0
   FakeResizeObserver.instances.length = 0
-  vi.stubGlobal('WebSocket', FakeWebSocket)
   vi.stubGlobal('ResizeObserver', FakeResizeObserver)
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
@@ -69,159 +65,159 @@ afterEach(() => {
 })
 
 describe('中栏终端画布', () => {
-  it('通过工作区 WebSocket 发送启动和输入，并渲染服务端输出', () => {
-    const controller = controllerFake()
-    const view = render(
+  it('挂载官方 TerminalView，转发输入并回写服务端帧', () => {
+    const view = makeView({ render: { revision: 3, frame: { type: 'output', sequence: 3, data: '\u001b[32mok\u001b[0m' } } })
+    const controller = controllerFake(view)
+    const rendered = render(
       <TerminalSurface
-        tab={{ id: 'terminal:1', kind: 'terminal', sequence: 1, generation: 0, status: 'connecting', error: null }}
-        workspaceId="workspace-1"
+        tab={terminalTab(1)}
+        sessionId="session-1"
         active
         controller={controller as never}
         t={translate}
       />,
     )
-    const socket = FakeWebSocket.instances[0]!
+
+    expect(view.mount).toHaveBeenCalled()
     const terminal = terminalHarness.instances[0]!
-
-    act(() => { socket.open() })
-    expect(JSON.parse(socket.sent[0]!)).toEqual({
-      type: 'start', workspaceId: 'workspace-1', cols: 80, rows: 24,
-    })
-    act(() => { socket.message({ type: 'ready', shell: 'zsh' }) })
-    expect(controller.terminalReady).toHaveBeenCalledWith('terminal:1', 'zsh')
+    expect(terminal.write).toHaveBeenCalledWith('\u001b[32mok\u001b[0m', expect.any(Function))
+    expect(view.acknowledge).toHaveBeenCalledWith(3)
     act(() => { terminal.emitData('pwd\r') })
-    expect(JSON.parse(socket.sent[1]!)).toEqual({ type: 'input', data: 'pwd\r' })
-    act(() => { socket.message({ type: 'data', data: '\u001b[32mready\u001b[0m' }) })
-    expect(terminal.write).toHaveBeenCalledWith('\u001b[32mready\u001b[0m')
-
-    act(() => { socket.message({ type: 'exit', exitCode: 0 }) })
-    expect(controller.terminalExited).toHaveBeenCalledWith('terminal:1', 0, undefined)
-    view.unmount()
-    expect(socket.close).toHaveBeenCalled()
+    expect(view.write).toHaveBeenCalledWith('pwd\r')
+    // The connected+running phase is mirrored onto the tab for the rail/tab dots.
+    expect(controller.setTerminalStatus).toHaveBeenCalledWith('terminal:1', 'running')
+    rendered.unmount()
     expect(terminal.dispose).toHaveBeenCalled()
   })
 
-  it('为失败或退出的终端提供原位重启入口', () => {
-    const controller = controllerFake()
-    const view = render(
+  it('在展开且可写时把适配后的尺寸回传给官方模型', () => {
+    const view = makeView()
+    render(
       <TerminalSurface
-        tab={{ id: 'terminal:2', kind: 'terminal', sequence: 2, generation: 0, status: 'error', error: '启动失败' }}
-        workspaceId="workspace-1"
+        tab={terminalTab(2)}
+        sessionId="session-1"
+        active
+        controller={controllerFake(view) as never}
+        t={translate}
+      />,
+    )
+    expect(view.resize).toHaveBeenCalledWith(120, 50)
+  })
+
+  it('尚未绑定会话时显示等待提示且不挂载视图', () => {
+    const controller = { terminalView: vi.fn(() => undefined), setTerminalStatus: vi.fn() }
+    const rendered = render(
+      <TerminalSurface
+        tab={terminalTab(3)}
+        sessionId={undefined}
         active
         controller={controller as never}
         t={translate}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: '重新启动' }))
-    expect(controller.restartTerminal).toHaveBeenCalledWith('terminal:2')
+    expect(rendered.getByText(zh['terminal.noSession'])).toBeTruthy()
   })
 
-  it('中栏显隐过渡期间冻结网格，并在稳定端点只适配一次', () => {
-    const frame = document.createElement('div')
-    frame.setAttribute(FRAME_ATTRIBUTE, '')
-    const container = document.createElement('div')
-    frame.appendChild(container)
-    document.body.appendChild(frame)
-    render(
+  it('为失败的终端提供原位重试入口', () => {
+    const view = makeView({ phase: 'failed', writable: false, info: undefined })
+    const rendered = render(
       <TerminalSurface
-        tab={{ id: 'terminal:3', kind: 'terminal', sequence: 3, generation: 0, status: 'running', error: null }}
-        workspaceId="workspace-1"
+        tab={terminalTab(4)}
+        sessionId="session-1"
         active
-        controller={controllerFake() as never}
+        controller={controllerFake(view) as never}
         t={translate}
       />,
-      { container },
     )
-    const fit = terminalHarness.fitInstances[0]!.fit
-    const resizeObserver = FakeResizeObserver.instances[0]!
-    const fitsBeforeTransition = fit.mock.calls.length
-
-    act(() => { frame.dispatchEvent(new CustomEvent(EDITOR_TRANSITION_START_EVENT, { bubbles: true })) })
-    frame.setAttribute(EDITOR_COLLAPSED_ATTRIBUTE, '')
-    act(() => { resizeObserver.trigger() })
-    act(() => { resizeObserver.trigger() })
-    expect(fit).toHaveBeenCalledTimes(fitsBeforeTransition)
-
-    act(() => { frame.dispatchEvent(new CustomEvent(EDITOR_TRANSITION_END_EVENT, {
-      bubbles: true,
-      detail: { expanded: false },
-    })) })
-    expect(fit).toHaveBeenCalledTimes(fitsBeforeTransition)
-
-    act(() => { frame.dispatchEvent(new CustomEvent(EDITOR_TRANSITION_START_EVENT, { bubbles: true })) })
-    frame.removeAttribute(EDITOR_COLLAPSED_ATTRIBUTE)
-    act(() => { resizeObserver.trigger() })
-    act(() => { frame.dispatchEvent(new CustomEvent(EDITOR_TRANSITION_END_EVENT, {
-      bubbles: true,
-      detail: { expanded: true },
-    })) })
-    expect(fit).toHaveBeenCalledTimes(fitsBeforeTransition + 1)
+    fireEvent.click(rendered.getByRole('button', { name: zh['terminal.retry'] }))
+    expect(view.refresh).toHaveBeenCalled()
   })
 
-  it('终端在过渡中挂载时等待最终展开宽度', () => {
-    const frame = document.createElement('div')
-    frame.setAttribute(FRAME_ATTRIBUTE, '')
-    frame.setAttribute(EDITOR_TRANSITION_ATTRIBUTE, '')
-    const container = document.createElement('div')
-    frame.appendChild(container)
-    document.body.appendChild(frame)
-    render(
+  it('为断开的终端提供重连入口', () => {
+    const view = makeView({ phase: 'disconnected', writable: false })
+    const rendered = render(
       <TerminalSurface
-        tab={{ id: 'terminal:4', kind: 'terminal', sequence: 4, generation: 0, status: 'running', error: null }}
-        workspaceId="workspace-1"
+        tab={terminalTab(5)}
+        sessionId="session-1"
         active
-        controller={controllerFake() as never}
+        controller={controllerFake(view) as never}
         t={translate}
       />,
-      { container },
     )
-    const fit = terminalHarness.fitInstances[0]!.fit
-    expect(fit).not.toHaveBeenCalled()
+    fireEvent.click(rendered.getByRole('button', { name: zh['terminal.restart'] }))
+    expect(view.connect).toHaveBeenCalled()
+  })
 
-    frame.removeAttribute(EDITOR_TRANSITION_ATTRIBUTE)
-    act(() => { frame.dispatchEvent(new CustomEvent(EDITOR_TRANSITION_END_EVENT, {
-      bubbles: true,
-      detail: { expanded: true },
-    })) })
-    expect(fit).toHaveBeenCalledOnce()
+  it('只读终端提供获取控制权的入口', () => {
+    const view = makeView({ writable: false })
+    const rendered = render(
+      <TerminalSurface
+        tab={terminalTab(6)}
+        sessionId="session-1"
+        active
+        controller={controllerFake(view) as never}
+        t={translate}
+      />,
+    )
+    fireEvent.click(rendered.getByRole('button', { name: zh['terminal.control'] }))
+    expect(view.connect).toHaveBeenCalled()
   })
 })
 
-function controllerFake() {
-  return {
-    terminalReady: vi.fn(),
-    terminalExited: vi.fn(),
-    terminalFailed: vi.fn(),
-    restartTerminal: vi.fn(),
+interface FakeView {
+  id: string
+  state: { getSnapshot: () => Record<string, unknown>; subscribe: (listener: () => void) => () => void }
+  mount: ReturnType<typeof vi.fn>
+  write: ReturnType<typeof vi.fn>
+  resize: ReturnType<typeof vi.fn>
+  acknowledge: ReturnType<typeof vi.fn>
+  refresh: ReturnType<typeof vi.fn>
+  connect: ReturnType<typeof vi.fn>
+  close: ReturnType<typeof vi.fn>
+  dispose: ReturnType<typeof vi.fn>
+}
+
+function makeView(patch: Record<string, unknown> = {}): FakeView {
+  const listeners = new Set<() => void>()
+  let state: Record<string, unknown> = {
+    phase: 'connected',
+    writable: true,
+    environment: { cwd: '/', maxInputBytes: 65536, maxCols: 500, maxRows: 200, scrollback: 1000 },
+    info: { id: 'term', title: 'zsh', shell: { path: '/zsh', args: [], name: 'zsh' }, cwd: '/', cols: 80, rows: 24, state: 'running', exitCode: null },
+    ...patch,
   }
+  return {
+    id: 'term',
+    state: {
+      getSnapshot: () => state,
+      subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    },
+    mount: vi.fn(() => vi.fn()),
+    write: vi.fn(),
+    resize: vi.fn(),
+    acknowledge: vi.fn(),
+    refresh: vi.fn(() => Promise.resolve()),
+    connect: vi.fn(),
+    close: vi.fn(() => Promise.resolve()),
+    dispose: vi.fn(() => Promise.resolve()),
+  }
+}
+
+function controllerFake(view: FakeView) {
+  return {
+    terminalView: vi.fn(() => view),
+    setTerminalStatus: vi.fn(),
+  }
+}
+
+function terminalTab(sequence: number): WorkbenchTerminalTab {
+  return { id: `terminal:${sequence}`, kind: 'terminal', sequence, contentId: `wbterm:workspace-1:terminal:${sequence}`, status: 'connecting' }
 }
 
 function translate(key: keyof typeof zh, values?: Record<string, string>): string {
   const template = zh[key]
   if (values === undefined) return template
   return Object.entries(values).reduce((text, [name, value]) => text.replace(`{${name}}`, value), template)
-}
-
-class FakeWebSocket extends EventTarget {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSED = 3
-  static readonly instances: FakeWebSocket[] = []
-  readonly sent: string[] = []
-  readonly close = vi.fn(() => { this.readyState = FakeWebSocket.CLOSED })
-  readyState = FakeWebSocket.CONNECTING
-  constructor(readonly url: string) {
-    super()
-    FakeWebSocket.instances.push(this)
-  }
-  send(data: string): void { this.sent.push(data) }
-  open(): void {
-    this.readyState = FakeWebSocket.OPEN
-    this.dispatchEvent(new Event('open'))
-  }
-  message(value: unknown): void {
-    this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) }))
-  }
 }
 
 class FakeResizeObserver {

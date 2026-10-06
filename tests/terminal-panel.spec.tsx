@@ -9,8 +9,8 @@ import { TerminalPanel } from '../src/client/TerminalPanel.tsx'
 const current = vi.hoisted(() => ({ state: {} as WorkbenchState }))
 vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => current.state }))
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  IconCloseOutline16: () => <span />,
-  IconPlusOutline16: () => <span />,
+  IconCloseOutlineMedium: () => <span />,
+  IconPlusOutlineMedium: () => <span />,
   Tooltip: ({ children }: { children: React.ReactNode }) => children,
 }))
 
@@ -22,8 +22,8 @@ describe('终端左栏', () => {
       sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', activeTabId: 'terminal:1', diffViewMode: 'split',
       gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
       tabs: [
-        { id: 'terminal:1', kind: 'terminal', sequence: 1, generation: 0, status: 'running', shell: 'zsh', error: null },
-        { id: 'terminal:2', kind: 'terminal', sequence: 2, generation: 0, status: 'exited', exitCode: 0, error: null },
+        { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'running' },
+        { id: 'terminal:2', kind: 'terminal', sequence: 2, contentId: 'wbterm:workspace-1:terminal:2', status: 'exited' },
       ],
     }
     const controller = {
@@ -37,7 +37,7 @@ describe('终端左栏', () => {
       />,
     )
 
-    expect(view.getByText('zsh')).toBeTruthy()
+    expect(view.getByText('正在运行')).toBeTruthy()
     expect(view.getByText('已退出')).toBeTruthy()
     fireEvent.click(view.getByText('终端 2'))
     expect(controller.selectTab).toHaveBeenCalledWith('terminal:2')

@@ -17,6 +17,9 @@ import {
 
 export type GitLineChangeKind = 'added' | 'modified' | 'deleted'
 
+/** Plugin-owned custom property: the gutter width both diff sides share. */
+export const GIT_LINE_NUMBER_WIDTH_PROPERTY = '--dsh-workbench-git-line-number-width'
+
 export interface GitLineDecorationLabels {
   added: string
   modified: string
@@ -400,7 +403,7 @@ function gitHunkDiffDom(
   const largestLineNumber = diff.rows.reduce((largest, row) => (
     Math.max(largest, row.oldLine ?? 0, row.newLine ?? 0)
   ), 0)
-  body.style.setProperty('--dsw-git-diff-line-number-width', `${Math.max(4, String(largestLineNumber).length + 1)}ch`)
+  body.style.setProperty(GIT_LINE_NUMBER_WIDTH_PROPERTY, `${Math.max(4, String(largestLineNumber).length + 1)}ch`)
   const metadata = document.createElement('div')
   metadata.className = 'cm-gitChangePeekHunkHeader'
   const sides = document.createElement('span')
@@ -492,15 +495,15 @@ function revertSelectedChange(
 
 const gitLineTheme = EditorView.theme({
   '.cm-gitChangeGutter': {
-    width: '8px',
-    minWidth: '8px',
+    width: '6px',
+    minWidth: '6px',
     backgroundColor: 'var(--dsw-alias-bg-base)',
     borderRight: '0',
   },
   '.cm-gitChangeGutter .cm-gutterElement': {
     boxSizing: 'border-box',
-    width: '8px',
-    minWidth: '8px',
+    width: '6px',
+    minWidth: '6px',
     padding: '0',
   },
   '.cm-gitChangedGutterElement': {
@@ -521,9 +524,9 @@ const gitLineTheme = EditorView.theme({
   '.cm-gitLineMarker::before': {
     content: '""',
     position: 'absolute',
-    insetInlineStart: '0',
+    insetInlineStart: '1px',
     insetBlock: '0',
-    width: '3px',
+    width: '2px',
     borderRadius: '0 2px 2px 0',
     background: 'var(--dsw-alias-state-business-primary)',
   },
@@ -532,10 +535,11 @@ const gitLineTheme = EditorView.theme({
   },
   '.cm-gitLineMarker[data-kind="deleted"]::before': {
     insetBlock: '-3px auto',
+    insetInlineStart: '0',
     width: '0',
     height: '0',
     borderBlock: '3px solid transparent',
-    borderInlineStart: '6px solid var(--dsw-alias-state-error-primary)',
+    borderInlineStart: '5px solid var(--dsw-alias-state-error-primary)',
     borderRadius: '0',
     background: 'transparent',
   },
@@ -543,7 +547,7 @@ const gitLineTheme = EditorView.theme({
     background: 'var(--dsw-alias-interactive-bg-hover)',
   },
   '.cm-gitLineMarker:focus-visible': {
-    outline: '1px solid var(--dsw-alias-brand-border)',
+    outline: '1px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary))',
     outlineOffset: '-1px',
   },
   '.cm-tooltip.cm-gitChangePeek': {
@@ -643,7 +647,7 @@ const gitLineTheme = EditorView.theme({
   },
   '.cm-gitChangePeekRow': {
     display: 'grid',
-    gridTemplateColumns: 'var(--dsw-git-diff-line-number-width) var(--dsw-git-diff-line-number-width) 14px minmax(0, 1fr)',
+    gridTemplateColumns: `var(${GIT_LINE_NUMBER_WIDTH_PROPERTY}) var(${GIT_LINE_NUMBER_WIDTH_PROPERTY}) 14px minmax(0, 1fr)`,
     alignItems: 'start',
     minHeight: '20px',
     color: 'var(--dsw-alias-label-primary)',
@@ -731,7 +735,7 @@ const gitLineTheme = EditorView.theme({
     opacity: '1',
   },
   '.cm-gitChangePeekResizeHandle:focus-visible': {
-    outline: '1px solid var(--dsw-alias-brand-border)',
+    outline: '1px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary))',
     outlineOffset: '-2px',
   },
   '@media (prefers-reduced-motion: reduce)': {

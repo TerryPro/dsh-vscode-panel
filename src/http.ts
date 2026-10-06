@@ -71,6 +71,7 @@ function publicFailureMessage(code: string): string {
     case 'FS_NOT_OBSERVED': return '同名文件或目录已经存在。'
     case 'FS_TOO_LARGE': return '文件超过工作台允许的大小。'
     case 'FS_NOT_TEXT': return '该文件不是可编辑的 UTF-8 文本。'
+    case 'IMAGE_UNSUPPORTED': return '该文件不是可预览的图片。'
     case 'FS_NOT_FOUND': return '文件或目录不存在。'
     case 'FS_PERMISSION_DENIED': return '没有权限访问该文件或目录。'
     default: return '工作台操作失败，请查看 DSH 日志。'

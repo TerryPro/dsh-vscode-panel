@@ -10,8 +10,6 @@ import { WORKBENCH_API_PREFIX } from './contracts.ts'
 import { GitBackend } from './git-backend.ts'
 import { errorResponse, readJsonObject, sendJson, WorkbenchHttpError } from './http.ts'
 import { isTrustedWorkbenchRequest } from './request-trust.ts'
-import { TERMINAL_SOCKET_PATH } from './terminal-protocol.ts'
-import { rejectTerminalUpgrade, TerminalSocketServer } from './terminal-websocket.ts'
 import { WorkspaceBackend } from './workspace-backend.ts'
 
 export const name = 'workbench-layout'
@@ -32,7 +30,6 @@ export interface Config {
   maxDirectoryEntries: number
   gitTimeoutMs: number
   gitMaxOutputBytes: number
-  maxTerminalConnections: number
 }
 
 export const Config: z<Config> = z.object({
@@ -40,7 +37,6 @@ export const Config: z<Config> = z.object({
   maxDirectoryEntries: z.natural().min(10).max(5000).default(1000),
   gitTimeoutMs: z.natural().min(1000).max(120_000).default(30_000),
   gitMaxOutputBytes: z.natural().min(64 * 1024).max(32 * 1024 * 1024).default(4 * 1024 * 1024),
-  maxTerminalConnections: z.natural().min(1).max(32).default(8),
 })
 
 /** Register the workbench's isolated JSON endpoint. */
@@ -50,7 +46,6 @@ export function apply(ctx: Context, config: Config): void {
     timeoutMs: config.gitTimeoutMs,
     maxOutputBytes: config.gitMaxOutputBytes,
   })
-  const terminals = new TerminalSocketServer(workspace, ctx.logger, config.maxTerminalConnections)
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (req.method !== 'POST') throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '只允许 POST 请求。')
@@ -73,18 +68,7 @@ export function apply(ctx: Context, config: Config): void {
     () => ctx.webServer.register({ kind: 'prefix', path: WORKBENCH_API_PREFIX, handler }),
     'workbench-layout: workspace and Git route',
   )
-  ctx.effect(() => ctx.webServer.registerUpgrade({
-    path: TERMINAL_SOCKET_PATH,
-    handler: (req, socket, head) => {
-      if (!isTrustedWorkbenchRequest(req.headers, ctx.webRuntime.trustedHosts)) {
-        rejectTerminalUpgrade(socket)
-        return
-      }
-      terminals.handleUpgrade(req, socket, head)
-    },
-  }), 'workbench-layout: workspace terminal WebSocket')
-  ctx.effect(() => () => terminals.close(), 'workbench-layout: workspace terminal lifecycle')
-  ctx.logger.info('workbench-layout: public-package workspace, Git, and terminal APIs registered')
+  ctx.logger.info('workbench-layout: public-package workspace and Git APIs registered')
 }
 
 async function dispatch(
@@ -98,6 +82,8 @@ async function dispatch(
       return workspace.list(body.workspaceId, body.path)
     case `${WORKBENCH_API_PREFIX}/file/read`:
       return workspace.read(body.workspaceId, body.path)
+    case `${WORKBENCH_API_PREFIX}/file/image`:
+      return workspace.readImage(body.workspaceId, body.path)
     case `${WORKBENCH_API_PREFIX}/files/refresh`:
       return workspace.refreshFiles(body.workspaceId, body.files)
     case `${WORKBENCH_API_PREFIX}/file/save`:

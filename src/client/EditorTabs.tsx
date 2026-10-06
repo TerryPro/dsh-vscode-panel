@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchTab } from './controller.ts'
 import { diffKindText } from './git-diff-labels.ts'
@@ -54,6 +54,11 @@ export function EditorTabs({ tabs, activeTabId, gitDecorations, onSelect, onClos
           <div
             key={tab.id}
             className={css.editorTab}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData('text/plain', tab.id)
+              event.dataTransfer.effectAllowed = 'move'
+            }}
             data-active={active || undefined}
             data-dirty={tab.kind === 'file' && tab.dirty || undefined}
             data-tab-kind={tab.kind}
@@ -83,7 +88,7 @@ export function EditorTabs({ tabs, activeTabId, gitDecorations, onSelect, onClos
               aria-label={t('editor.closeTab', { name: label })}
               onClick={() => { onClose(tab.id) }}
             >
-              <IconCloseOutline16 size={13} />
+              <IconCloseOutlineMedium size={13} />
             </button>
           </div>
         )
