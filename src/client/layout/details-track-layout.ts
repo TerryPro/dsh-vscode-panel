@@ -75,8 +75,9 @@ export function readNativeSidebarWidth(frame: HTMLElement, sidebar: HTMLElement)
 }
 
 /**
- * 工作台展开时接管右栏的宽度和原生分隔线；空会话没有原生分隔线时，
- * 才挂载同几何形态的后备拖拽区域。原生聊天与 AppFrame 节点均不移动。
+ * 工作台展开时接管右栏的宽度和原生分隔线；空会话或右栏收起而没有原生分隔线
+ * 时，挂载同几何形态的后备拖拽区域。两种接管都会保留侧栏把手，因此左栏在
+ * 空会话里同样可拖。原生聊天与 AppFrame 节点均不移动。
  */
 export function createDetailsTrackLayout(
   frame: HTMLElement,
@@ -223,7 +224,11 @@ export function createDetailsTrackLayout(
     const blankSurface = phase === 'hero' || phase === 'settling'
     const nativeCollapsed = frame.hasAttribute('data-rightbar-collapsed')
     const rightbarFullscreen = frame.hasAttribute('data-rightbar-fullscreen')
-    const fallback = nativeCollapsed
+    // A blank Session has no native rightbar divider to adopt, so take the track
+    // over with the fallback handle instead of releasing everything: releasing
+    // also hid the plugin sidebar handle and dropped the sidebar width variable,
+    // leaving the left column with nothing to drag in hero/settling sessions.
+    const fallback = !rightbarFullscreen && (nativeCollapsed || blankSurface)
     const native = !blankSurface && !nativeCollapsed && !rightbarFullscreen
     if ((!fallback && !native) || details === null || details.childElementCount === 0 || sidebar === null) {
       clearPresentation()

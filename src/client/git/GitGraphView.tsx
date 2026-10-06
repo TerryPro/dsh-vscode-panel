@@ -162,34 +162,40 @@ function CommitEntry(props: {
             )}
           </button>
         </Tooltip>
-        <Menu
-          className={css.commitMenuFloat}
-          open={menuOpen}
-          onClose={() => { setMenuOpen(false) }}
-          items={[
-            { id: 'copy', label: props.t('git.commitMenu.copy'), icon: <IconCopyOutlineMedium size={14} /> },
-            { id: 'branch', label: props.t('git.commitMenu.branch'), icon: <IconPlusOutlineMedium size={14} /> },
-            { type: 'separator', id: 'history-separator' },
-            { id: 'cherry-pick', label: props.t('git.commitMenu.cherryPick'), icon: <IconPlusOutlineMedium size={14} /> },
-            { id: 'revert', label: props.t('git.commitMenu.revertCommit'), icon: <IconRefreshOutlineMedium size={14} /> },
-            { type: 'separator', id: 'compare-separator' },
-            { id: 'compare', label: props.t('git.commitMenu.compare'), icon: <IconCodeOutlineMedium size={14} /> },
-          ]}
-          onSelect={(id) => {
-            setMenuOpen(false)
-            if (id === 'copy' || id === 'branch' || id === 'cherry-pick' || id === 'revert' || id === 'compare') props.onMenuAction(id)
-          }}
-          align="end"
-          dense
-          portal
-          anchor={(
-            <Tooltip label={props.t('git.commitMenu.more')} side="bottom" delayMs={450}>
-              <button type="button" className={css.commitMenuButton} aria-label={props.t('git.commitMenu.more')} aria-expanded={menuOpen} onClick={() => { setMenuOpen(value => !value) }}>
-                <IconEllipsisOutlineMedium size={14} />
-              </button>
-            </Tooltip>
-          )}
-        />
+        {/* Own absolutely-positioned seat: the runtime layout stylesheet widens
+            any `[class*="_root"]` node in the sidebar to 100% !important, which
+            would stretch the primitives Menu root (a hashed `_root_*` class)
+            across the row and drag the ⋯ anchor to the row head. Keeping the
+            float on our own span confines that override to 100% of 26px. */}
+        <span className={css.commitMenuFloat}>
+          <Menu
+            open={menuOpen}
+            onClose={() => { setMenuOpen(false) }}
+            items={[
+              { id: 'copy', label: props.t('git.commitMenu.copy'), icon: <IconCopyOutlineMedium size={14} /> },
+              { id: 'branch', label: props.t('git.commitMenu.branch'), icon: <IconPlusOutlineMedium size={14} /> },
+              { type: 'separator', id: 'history-separator' },
+              { id: 'cherry-pick', label: props.t('git.commitMenu.cherryPick'), icon: <IconPlusOutlineMedium size={14} /> },
+              { id: 'revert', label: props.t('git.commitMenu.revertCommit'), icon: <IconRefreshOutlineMedium size={14} /> },
+              { type: 'separator', id: 'compare-separator' },
+              { id: 'compare', label: props.t('git.commitMenu.compare'), icon: <IconCodeOutlineMedium size={14} /> },
+            ]}
+            onSelect={(id) => {
+              setMenuOpen(false)
+              if (id === 'copy' || id === 'branch' || id === 'cherry-pick' || id === 'revert' || id === 'compare') props.onMenuAction(id)
+            }}
+            align="end"
+            dense
+            portal
+            anchor={(
+              <Tooltip label={props.t('git.commitMenu.more')} side="bottom" delayMs={450}>
+                <button type="button" className={css.commitMenuButton} aria-label={props.t('git.commitMenu.more')} aria-expanded={menuOpen} onClick={() => { setMenuOpen(value => !value) }}>
+                  <IconEllipsisOutlineMedium size={14} />
+                </button>
+              </Tooltip>
+            )}
+          />
+        </span>
       </div>
       {props.expanded && (
         <div className={css.commitFiles}>

@@ -491,23 +491,37 @@
 }
 
 .commitRowShell {
+  --git-commit-action-reserve: 26px;
   position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
 }
 
-/* The trailing overflow menu (⋯) is absolutely positioned so its closed
-   dropdown list never participates in the row's flex sizing. Left in flow, that
-   list reserved ~260px as a flex sibling and starved the flex:1 commit-row
-   button (and thus the subject) down to nothing. The opened list is portalled
-   to the body, so this never clips the actual menu. */
-.commitMenuFloat {
+/* The trailing overflow menu (⋯) sits in our own absolutely-positioned span so
+   the Menu's closed dropdown list never participates in the row's flex sizing
+   (left in flow it reserved ~260px and starved the flex:1 commit-row button).
+   The seat must stay on OUR span, not on the Menu root: the runtime layout
+   stylesheet widens every `[class*="_root"]` node in the sidebar to
+   `width: 100% !important`, and the primitives Menu root carries a hashed
+   `_root_*` class — on that node the override stretched the float across the
+   row and dragged the ⋯ anchor to the row head whenever the details track was
+   active. The two-class selector outranks the primitives Menu root
+   (`position: relative; display: inline-flex`) no matter which stylesheet is
+   injected last; `margin-left: auto` keeps the control pinned to the tail even
+   if some environment ever downgrades `position` back to in-flow. */
+.commitRowShell > .commitMenuFloat {
   position: absolute;
   right: 2px;
+  left: auto;
   top: 0;
   height: 100%;
   width: 26px;
+  /* Stay above the topology layer (z-index 1) so the hovered button is never
+     painted over by graph nodes or edges. */
+  z-index: 3;
+  flex: none;
+  margin-left: auto;
 }
 
 .commitRow {
@@ -553,6 +567,16 @@
 .commitMenuButton:hover {
   background: var(--dsw-alias-interactive-bg-active);
   color: var(--dsw-alias-brand-text);
+}
+
+/* While the trailing ⋯ is revealed, slide the row content left by the button's
+   width so the menu lands after the reference badges instead of covering them.
+   Mirrors the changes view's --git-row-action-reserve hover slide; the open
+   state keeps the reserve because its list is portalled outside the row. */
+.commitRowShell:hover .commitRow,
+.commitRowShell:focus-within .commitRow,
+.commitRowShell:has(.commitMenuButton[aria-expanded='true']) .commitRow {
+  padding-right: calc(4px + var(--git-commit-action-reserve));
 }
 
 .commitRow:hover,
@@ -895,6 +919,12 @@
   }
 .gitFileText {
     margin-right: var(--git-row-action-reserve);
+  }
+.commitMenuButton {
+    opacity: 1;
+  }
+.commitRow {
+    padding-right: calc(4px + var(--git-commit-action-reserve));
   }
 }
 
