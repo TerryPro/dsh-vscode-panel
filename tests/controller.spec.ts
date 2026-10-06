@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ClientTerminals } from '@deepseek-ai/dsh-api-terminal-controller/client'
-import type { WorkbenchTerminalTab } from '../src/client/controller.ts'
+import type { WorkbenchTerminalTab } from '../src/client/core/controller.ts'
 import { resolveWorkbenchWorkspaceId } from '../src/client/layout/workspace-binding.ts'
 
 vi.mock('@deepseek-ai/dsh-client-store', () => ({
@@ -21,10 +21,10 @@ vi.mock('@deepseek-ai/dsh-client-store', () => ({
   },
 }))
 
-let WorkbenchController: typeof import('../src/client/controller.ts').WorkbenchController
+let WorkbenchController: typeof import('../src/client/core/controller.ts').WorkbenchController
 
 beforeAll(async () => {
-  WorkbenchController = (await import('../src/client/controller.ts')).WorkbenchController
+  WorkbenchController = (await import('../src/client/core/controller.ts')).WorkbenchController
 })
 
 describe('WorkbenchController', () => {

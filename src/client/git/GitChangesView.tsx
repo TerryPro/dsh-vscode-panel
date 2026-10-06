@@ -14,7 +14,7 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GitFileStatus } from '../../shared/contracts.ts'
 import { buildGitPathTree, type GitFileLayout, type GitPathTreeNode } from './git-tree.ts'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 interface GitChangesViewProps {
   stagedFiles: GitFileStatus[]

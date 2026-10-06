@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { IconCloseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkbenchTab } from '../controller.ts'
+import type { WorkbenchTab } from '../core/controller.ts'
 import { diffKindText } from '../git/git-diff-labels.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
-import type { WorkbenchKey } from '../locales.ts'
-import css from '../Workbench.module.css'
+import type { WorkbenchKey } from '../core/locales.ts'
+import css from '../core/Workbench.module.css'
 
 export interface EditorTabsProps {
   tabs: readonly WorkbenchTab[]

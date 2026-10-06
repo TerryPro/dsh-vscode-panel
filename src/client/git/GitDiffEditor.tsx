@@ -4,10 +4,10 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GitFileDiff } from '../../shared/contracts.ts'
-import type { DiffViewMode } from '../controller.ts'
+import type { DiffViewMode } from '../core/controller.ts'
 import { DiffSurface } from '../editor/DiffSurface.tsx'
 import { diffKindText } from './git-diff-labels.ts'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 export interface GitDiffEditorProps {
   diff: GitFileDiff

@@ -7,15 +7,15 @@ import '@xterm/xterm/css/xterm.css'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TerminalView, TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller/client'
-import type { WorkbenchController, WorkbenchTerminalTab } from '../controller.ts'
-import type { TerminalStatus } from '../controller.ts'
+import type { WorkbenchController, WorkbenchTerminalTab } from '../core/controller.ts'
+import type { TerminalStatus } from '../core/controller.ts'
 import {
   EDITOR_TRANSITION_END_EVENT,
   EDITOR_TRANSITION_START_EVENT,
   isEditorTrackExpanded,
   isEditorTrackTransitioning,
 } from '../layout/editor-layout-contract.ts'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 export interface TerminalSurfaceProps {
   tab: WorkbenchTerminalTab

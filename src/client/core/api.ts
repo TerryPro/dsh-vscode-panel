@@ -28,8 +28,8 @@ import type {
   WorkspaceImageFile,
   WorkspaceAbsolutePath,
   WorkspaceRelativePath,
-} from '../shared/contracts.ts'
-import { WORKBENCH_API_PREFIX } from '../shared/contracts.ts'
+} from '../../shared/contracts.ts'
+import { WORKBENCH_API_PREFIX } from '../../shared/contracts.ts'
 
 export class WorkbenchApiError extends Error {
   constructor(readonly code: string, message: string) {

@@ -3,7 +3,7 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { EditorStatusBar } from '../src/client/editor/EditorStatusBar.tsx'
-import { zh } from '../src/client/locales.ts'
+import { zh } from '../src/client/core/locales.ts'
 
 function t(key: keyof typeof zh, values?: Record<string, string>): string {
   const template: string = zh[key]

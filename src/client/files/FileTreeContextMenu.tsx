@@ -10,7 +10,7 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceEntry } from '../../shared/contracts.ts'
 import { IconFileAddOutline16, IconFileOutline16, IconFolderAddOutline16 } from './CreateEntryIcons.tsx'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 export type FileTreeMenuAction =
   | 'open'

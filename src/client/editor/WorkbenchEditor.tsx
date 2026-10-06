@@ -13,7 +13,7 @@ import type {
   WorkbenchState,
   WorkbenchTab,
   WorkbenchTerminalTab,
-} from '../controller.ts'
+} from '../core/controller.ts'
 import { CodeEditor } from './CodeEditor.tsx'
 import { EditorStatusBar } from './EditorStatusBar.tsx'
 import { IconBoldOutline16, IconBulletListOutline16, IconInlineCodeOutline16, IconInlineDiffOutline16, IconInteractiveOutline16, IconItalicOutline16, IconLinkOutline16, IconOutline16, IconPreviewOutline16, IconRevertOutline16, IconSourceOutline16, IconSplitHorizontalOutline16, IconSplitViewOutline16, IconSplitVerticalOutline16, IconTableOutline16, IconWordWrapOutline16 } from './EditorViewIcons.tsx'
@@ -23,15 +23,15 @@ import { GitDiffEditor } from '../git/GitDiffEditor.tsx'
 import { HtmlPreview } from './HtmlPreview.tsx'
 import { isHtmlPath, resolveRelativePath } from './html-preview.ts'
 import type { ReadHtmlRelative } from './html-preview.ts'
-import type { WorkbenchKey } from '../locales.ts'
+import type { WorkbenchKey } from '../core/locales.ts'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { runMarkdownCommand, type MarkdownCommandKind } from '../markdown/markdown-format.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
 import { TerminalSurface } from '../terminal/TerminalSurface.tsx'
-import { useWorkbench } from '../use-workbench.ts'
+import { useWorkbench } from '../core/use-workbench.ts'
 import { resolveWorkbenchWorkspaceId } from '../layout/workspace-binding.ts'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 export type WorkbenchEditorProps = PropsRuntime<'rightbar.session'> & PropsLocale<'workbench'> & {
   controller: WorkbenchController

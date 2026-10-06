@@ -14,7 +14,7 @@ describe('Git file decorations', () => {
   })
 
   it('uses the warning color for VS Code-style modified file labels', () => {
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
     const treeRule = stylesheet.match(/\.treeRow\[data-git-decoration='modified'\]\s*\{[^}]+\}/u)?.[0]
     const tabRule = stylesheet.match(/\.editorTab\[data-git-decoration='modified'\] \.editorTabName\s*\{[^}]+\}/u)?.[0]
 

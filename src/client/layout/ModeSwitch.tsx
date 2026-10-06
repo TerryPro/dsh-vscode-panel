@@ -8,16 +8,16 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkbenchController } from '../controller.ts'
-import type { WorkbenchKey } from '../locales.ts'
+import type { WorkbenchController } from '../core/controller.ts'
+import type { WorkbenchKey } from '../core/locales.ts'
 import { IconSourceControlOutline16 } from '../git/SourceControlIcon.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { IconConversationPanelOutline16 } from './ConversationPanelIcon.tsx'
 import { IconEditorPanelOutline16 } from '../editor/EditorPanelIcon.tsx'
 import { createActivityDockMount } from './activity-dock-layout.ts'
 import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, type SidebarFooterLayout } from './sidebar-footer-layout.ts'
-import { useWorkbench } from '../use-workbench.ts'
-import css from '../Workbench.module.css'
+import { useWorkbench } from '../core/use-workbench.ts'
+import css from '../core/Workbench.module.css'
 
 /**
  * The official shell owns sidebar fold state; its toggle button is the only

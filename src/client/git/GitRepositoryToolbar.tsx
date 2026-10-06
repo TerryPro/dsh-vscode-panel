@@ -19,12 +19,12 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GitBranches, GitRemoteOperation, GitStatus } from '../../shared/contracts.ts'
 import { IconCommitGraphOutline16 } from './CommitGraphIcon.tsx'
-import type { GitView } from '../controller.ts'
+import type { GitView } from '../core/controller.ts'
 import type { GitFileLayout } from './git-tree.ts'
 import { IconSourceControlOutline16 } from './SourceControlIcon.tsx'
 import type { GitBranchDialogMode } from './GitBranchDialog.tsx'
 import type { GitRemoteDialogMode } from './GitRemoteDialog.tsx'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 interface GitRepositoryToolbarProps {
   status: GitStatus | null

@@ -2,12 +2,12 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { zh } from '../src/client/locales.ts'
+import { zh } from '../src/client/core/locales.ts'
 import { WorkbenchRail } from '../src/client/layout/WorkbenchRail.tsx'
 
 const workbench = vi.hoisted(() => ({ current: {} as Record<string, unknown> }))
 
-vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => workbench.current }))
+vi.mock('../src/client/core/use-workbench.ts', () => ({ useWorkbench: () => workbench.current }))
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconFolderCloseMedium: () => <span data-icon="official-folder" />,
   IconListPenOutlineMedium: () => <span data-icon="changes" />,

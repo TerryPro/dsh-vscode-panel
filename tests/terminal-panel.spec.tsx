@@ -2,12 +2,12 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WorkbenchState } from '../src/client/controller.ts'
-import { zh } from '../src/client/locales.ts'
+import type { WorkbenchState } from '../src/client/core/controller.ts'
+import { zh } from '../src/client/core/locales.ts'
 import { TerminalPanel } from '../src/client/terminal/TerminalPanel.tsx'
 
 const current = vi.hoisted(() => ({ state: {} as WorkbenchState }))
-vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => current.state }))
+vi.mock('../src/client/core/use-workbench.ts', () => ({ useWorkbench: () => current.state }))
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconCloseOutlineMedium: () => <span />,
   IconPlusOutlineMedium: () => <span />,

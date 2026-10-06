@@ -1,4 +1,4 @@
-import type { WorkbenchController } from '../controller.ts'
+import type { WorkbenchController } from '../core/controller.ts'
 
 export const OPEN_FILE_REFRESH_INTERVAL_MS = 1_000
 

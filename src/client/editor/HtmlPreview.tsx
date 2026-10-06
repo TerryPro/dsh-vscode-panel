@@ -6,7 +6,7 @@ import {
   packHtml,
 } from './html-preview.ts'
 import type { ReadHtmlRelative } from './html-preview.ts'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 export interface HtmlPreviewProps {
   /** Raw HTML source text; re-rendered whenever it changes. */

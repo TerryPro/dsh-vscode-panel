@@ -16,7 +16,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 }))
 
 const workbench = vi.hoisted(() => ({ sidebarMode: 'git', editorExpanded: true, conversationExpanded: true }))
-vi.mock('../src/client/use-workbench.ts', () => ({
+vi.mock('../src/client/core/use-workbench.ts', () => ({
   useWorkbench: () => workbench,
 }))
 
@@ -137,7 +137,7 @@ describe('工作台活动栏', () => {
   })
 
   it('停靠列与按钮遵循固定 48px 列与官方圆形几何', () => {
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
     const dockRule = stylesheet.match(/\.activityDock\s*\{[^}]+\}/u)?.[0]
     const modeButtonRule = stylesheet.match(/\.modeButton\s*\{[^}]+\}/u)?.[0]
 

@@ -4,7 +4,7 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { detectEditorLineEnding } from './editor-line-endings.ts'
 import { languageLabelForPath } from './editor-languages.ts'
 import type { EditorCursorState } from './CodeEditor.tsx'
-import css from '../Workbench.module.css'
+import css from '../core/Workbench.module.css'
 
 export interface EditorStatusBarProps {
   cursor: EditorCursorState
