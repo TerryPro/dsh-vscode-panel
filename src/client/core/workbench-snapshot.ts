@@ -3,6 +3,24 @@
 import type { WorkbenchState } from './workbench-types.ts'
 import { reconcilePanes } from './editor-pane-model.ts'
 
+export const INITIAL_STATE: WorkbenchState = {
+  sidebarMode: 'files',
+  editorExpanded: true,
+  conversationExpanded: true,
+  tabs: [],
+  diffViewMode: 'split',
+  gitView: 'changes',
+  gitChangeLayout: 'list',
+  gitGraphFileLayout: 'list',
+  gitDecorations: {},
+  gitLineVersions: {},
+  editorSplit: false,
+  editorSplitOrientation: 'horizontal',
+  editorSplitRatio: 0.5,
+  activePane: 'primary',
+  panes: { primary: { tabIds: [] }, secondary: { tabIds: [] } },
+}
+
 export function cloneState(state: WorkbenchState): WorkbenchState {
   return {
     ...state,
