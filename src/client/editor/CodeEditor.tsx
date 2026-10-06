@@ -10,6 +10,7 @@ import {
 } from './editor-line-endings.ts'
 import { dshEditorSetup } from './editor-setup.ts'
 import { languageForPath } from './editor-languages.ts'
+import { MERGE_BASE_OPTIONS } from './editor-merge-options.ts'
 import { editorThemeExtensions, inlineDiffTheme } from './editor-theme.ts'
 import { markdownEditingExtensions } from '../markdown/markdown-format.ts'
 import css from './editor.module.css'
@@ -94,11 +95,7 @@ function gitChangeView(
       unifiedMergeView({
         original: gitOriginal,
         allowInlineDiffs: true,
-        highlightChanges: true,
-        syntaxHighlightDeletions: true,
-        diffConfig: { timeout: 800 },
-        gutter: true,
-        mergeControls: false,
+        ...MERGE_BASE_OPTIONS,
       }),
     ]
   }

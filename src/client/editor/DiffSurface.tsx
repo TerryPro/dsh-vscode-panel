@@ -4,6 +4,7 @@ import { MergeView, unifiedMergeView } from '@codemirror/merge'
 import { EditorView } from '@codemirror/view'
 import { dshEditorSetup } from './editor-setup.ts'
 import { languageForPath } from './editor-languages.ts'
+import { MERGE_BASE_OPTIONS, MERGE_DIFF_CONFIG } from './editor-merge-options.ts'
 import { editorSyntaxHighlighting, foldGutterTheme, indentMarkersTheme } from './editor-theme.ts'
 
 export interface DiffSurfaceProps {
@@ -22,11 +23,7 @@ export function unifiedDiffOptions(mode: 'unified' | 'inline', original: string)
     original,
     allowInlineDiffs: mode === 'inline',
     collapseUnchanged: COLLAPSE_UNCHANGED,
-    diffConfig: { timeout: 800 },
-    gutter: true,
-    highlightChanges: true,
-    mergeControls: false,
-    syntaxHighlightDeletions: true,
+    ...MERGE_BASE_OPTIONS,
   }
 }
 
@@ -55,7 +52,7 @@ export function DiffSurface(props: DiffSurfaceProps) {
         a: { doc: props.original, extensions: extensions(props.originalLabel) },
         b: { doc: props.modified, extensions: extensions(props.modifiedLabel) },
         collapseUnchanged: COLLAPSE_UNCHANGED,
-        diffConfig: { timeout: 800 },
+        diffConfig: MERGE_DIFF_CONFIG,
         gutter: true,
         highlightChanges: true,
       })

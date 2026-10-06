@@ -19,6 +19,7 @@ import { properties } from '@codemirror/legacy-modes/mode/properties'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import type { Extension } from '@codemirror/state'
+import { basename } from '../../shared/path-name.ts'
 
 /**
  * Resolve a CodeMirror language extension from a workspace file path.
@@ -163,11 +164,6 @@ function languageExtension(grammar: Grammar): Extension {
     case 'xml': return xml()
     case 'yaml': return yaml()
   }
-}
-
-function basename(path: string): string {
-  const normalized = path.replace(/\\/gu, '/')
-  return normalized.slice(normalized.lastIndexOf('/') + 1)
 }
 
 /**

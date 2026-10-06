@@ -1,5 +1,7 @@
 /** Single source of truth for which workspace paths are treated as Markdown. */
 
+import { basename } from './path-name.ts'
+
 /**
  * File extensions recognized as Markdown across the Host and browser halves.
  * Kept here so the workspace backend's `markdown` flag and the client editor's
@@ -14,9 +16,4 @@ export function isMarkdownPath(path: string | undefined): boolean {
   const dot = name.lastIndexOf('.')
   if (dot <= 0) return false
   return (MARKDOWN_EXTENSIONS as readonly string[]).includes(name.slice(dot + 1))
-}
-
-function basename(path: string): string {
-  const normalized = path.replace(/\\/gu, '/')
-  return normalized.slice(normalized.lastIndexOf('/') + 1)
 }

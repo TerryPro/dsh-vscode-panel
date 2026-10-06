@@ -1,5 +1,7 @@
 /** Client-side HTML preview helpers: path recognition, sandboxed documents and resource packing. */
 
+import { basename } from '../../shared/path-name.ts'
+
 /** File extensions the workbench offers an HTML preview for. */
 export const HTML_PREVIEW_EXTENSIONS = ['html', 'htm', 'xhtml'] as const
 
@@ -213,7 +215,3 @@ function encodeBase64Utf8(text: string): string {
   return btoa(chunks.join(''))
 }
 
-function basename(path: string): string {
-  const normalized = path.replace(/\\/gu, '/')
-  return normalized.slice(normalized.lastIndexOf('/') + 1)
-}

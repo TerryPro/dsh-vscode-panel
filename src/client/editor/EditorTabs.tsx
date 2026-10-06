@@ -5,6 +5,7 @@ import type { WorkbenchTab } from '../model/controller.ts'
 import { diffKindText } from '../git/git-diff-labels.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
+import { basename } from '../../shared/path-name.ts'
 import css from './editor.module.css'
 
 export interface EditorTabsProps {
@@ -113,10 +114,6 @@ function normalizedHorizontalDelta(element: HTMLElement, event: WheelEvent): num
   if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return rawDelta * 32
   if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return rawDelta * Math.max(1, element.clientWidth)
   return rawDelta
-}
-
-function basename(path: string): string {
-  return path.split('/').at(-1) ?? path
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

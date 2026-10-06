@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { DragEvent } from 'react'
 import { Button, Modal, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EditorGroup, EditorPaneId, WorkbenchController, WorkbenchTab } from '../model/controller.ts'
@@ -28,21 +29,25 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
     () => resolveWorkbenchWorkspaceId(workspaces, sessionId, sessions),
     [sessions, sessionId, workspaces],
   )
-  const tab = state.tabs.find(candidate => candidate.id === state.activeTabId)
+  const findTab = (id: string | undefined): WorkbenchTab | undefined =>
+    id === undefined ? undefined : state.tabs.find(candidate => candidate.id === id)
+  const tab = findTab(state.activeTabId)
   const resolvePaneTabs = (group: EditorGroup): WorkbenchTab[] => group.tabIds
-    .map(id => state.tabs.find(candidate => candidate.id === id))
+    .map(id => findTab(id))
     .filter((candidate): candidate is WorkbenchTab => candidate !== undefined)
   const primaryTabs = resolvePaneTabs(state.panes.primary)
   const secondaryTabs = state.editorSplit ? resolvePaneTabs(state.panes.secondary) : []
   const primaryActive = primaryTabs.find(candidate => candidate.id === state.panes.primary.activeTabId)
   const secondaryActive = secondaryTabs.find(candidate => candidate.id === state.panes.secondary.activeTabId)
-  const closeTab = pendingClose === null ? undefined : state.tabs.find(candidate => candidate.id === pendingClose)
-  const baselineTabId = primaryActive?.kind === 'file' && primaryActive.file !== null && primaryActive.markdownMode !== 'preview' ? primaryActive.id : undefined
-  const baselineFileVersion = primaryActive?.kind === 'file' ? primaryActive.file?.version : undefined
-  const baselineLineVersion = primaryActive?.kind === 'file' ? state.gitLineVersions?.[primaryActive.path] : undefined
-  const secondaryBaselineTabId = secondaryActive?.kind === 'file' && secondaryActive.file !== null && secondaryActive.markdownMode !== 'preview' ? secondaryActive.id : undefined
-  const secondaryBaselineFileVersion = secondaryActive?.kind === 'file' ? secondaryActive.file?.version : undefined
-  const secondaryBaselineLineVersion = secondaryActive?.kind === 'file' ? state.gitLineVersions?.[secondaryActive.path] : undefined
+  const closeTab = pendingClose === null ? undefined : findTab(pendingClose)
+  // A pane's Git baseline only tracks an editable file buffer (not a Markdown preview).
+  const baselineFor = (active: WorkbenchTab | undefined) => ({
+    tabId: active?.kind === 'file' && active.file !== null && active.markdownMode !== 'preview' ? active.id : undefined,
+    fileVersion: active?.kind === 'file' ? active.file?.version : undefined,
+    lineVersion: active?.kind === 'file' ? state.gitLineVersions?.[active.path] : undefined,
+  })
+  const primaryBaseline = baselineFor(primaryActive)
+  const secondaryBaseline = baselineFor(secondaryActive)
   const gitLineLabels = useMemo(() => ({
     added: t('editor.gitAddedChange'),
     modified: t('editor.gitModifiedChange'),
@@ -64,11 +69,11 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
   useEffect(() => { activateWorkspace(workspaceId) }, [activateWorkspace, workspaceId])
   useEffect(() => { controller.setSession(sessionId) }, [controller, sessionId])
   useEffect(() => {
-    if (baselineTabId !== undefined) void controller.ensureGitBaseline(baselineTabId)
-  }, [baselineFileVersion, baselineLineVersion, baselineTabId, controller, state.gitHead])
+    if (primaryBaseline.tabId !== undefined) void controller.ensureGitBaseline(primaryBaseline.tabId)
+  }, [primaryBaseline.fileVersion, primaryBaseline.lineVersion, primaryBaseline.tabId, controller, state.gitHead])
   useEffect(() => {
-    if (secondaryBaselineTabId !== undefined) void controller.ensureGitBaseline(secondaryBaselineTabId)
-  }, [controller, secondaryBaselineFileVersion, secondaryBaselineLineVersion, secondaryBaselineTabId, state.gitHead])
+    if (secondaryBaseline.tabId !== undefined) void controller.ensureGitBaseline(secondaryBaseline.tabId)
+  }, [controller, secondaryBaseline.fileVersion, secondaryBaseline.lineVersion, secondaryBaseline.tabId, state.gitHead])
   useEffect(() => {
     if (pendingClose !== null && (closeTab?.kind !== 'file' || (!closeTab.dirty && !closeTab.saving))) {
       setPendingClose(null)
@@ -92,7 +97,7 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
   if (state.tabs.length === 0 || tab === undefined) return <EditorEmpty text={t('editor.empty')} />
 
   const requestClose = (tabId: string): void => {
-    const target = state.tabs.find(candidate => candidate.id === tabId)
+    const target = findTab(tabId)
     if (target?.kind === 'file' && target.dirty) {
       controller.selectTab(tabId)
       setPendingClose(tabId)
@@ -111,6 +116,19 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
     if (pendingClose !== null) controller.closeTab(pendingClose, true)
     setPendingClose(null)
   }
+  // Per-pane HTML5 drop target: only the primary pane gates drag-over on the split being open.
+  const paneDropProps = (pane: EditorPaneId, enabled: boolean) => ({
+    onDragOver: enabled
+      ? (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverPane(pane) }
+      : undefined,
+    onDragLeave: () => { setDragOverPane(current => current === pane ? null : current) },
+    onDrop: (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      setDragOverPane(null)
+      const movedTabId = event.dataTransfer.getData('text/plain')
+      if (movedTabId !== '') controller.moveTabToPane(movedTabId, pane)
+    },
+  })
 
   return (
     <section className={css.editorRoot} data-dsh-workbench-editor="">
@@ -127,16 +145,7 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
             ? { flexGrow: state.editorSplitRatio, flexShrink: 1, flexBasis: 0 }
             : undefined}
           onPointerDownCapture={() => { controller.focusPane('primary') }}
-          onDragOver={state.editorSplit
-            ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverPane('primary') }
-            : undefined}
-          onDragLeave={() => { setDragOverPane(current => current === 'primary' ? null : current) }}
-          onDrop={(event) => {
-            event.preventDefault()
-            setDragOverPane(null)
-            const movedTabId = event.dataTransfer.getData('text/plain')
-            if (movedTabId !== '') controller.moveTabToPane(movedTabId, 'primary')
-          }}
+          {...paneDropProps('primary', state.editorSplit)}
         >
           <EditorPane
             pane="primary"
@@ -168,14 +177,7 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
               data-dsh-editor-pane="secondary"
               style={{ flexGrow: 1 - state.editorSplitRatio, flexShrink: 1, flexBasis: 0 }}
               onPointerDownCapture={() => { controller.focusPane('secondary') }}
-              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverPane('secondary') }}
-              onDragLeave={() => { setDragOverPane(current => current === 'secondary' ? null : current) }}
-              onDrop={(event) => {
-                event.preventDefault()
-                setDragOverPane(null)
-                const movedTabId = event.dataTransfer.getData('text/plain')
-                if (movedTabId !== '') controller.moveTabToPane(movedTabId, 'secondary')
-              }}
+              {...paneDropProps('secondary', true)}
             >
               <EditorPane
                 pane="secondary"
