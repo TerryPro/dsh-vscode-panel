@@ -163,6 +163,7 @@ function CommitEntry(props: {
           </button>
         </Tooltip>
         <Menu
+          className={css.commitMenuFloat}
           open={menuOpen}
           onClose={() => { setMenuOpen(false) }}
           items={[

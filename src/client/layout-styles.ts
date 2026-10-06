@@ -140,6 +140,18 @@ const CSS = `
     var(${DETAILS_TRACK_WIDTH}) !important;
 }
 
+/* The shell freezes the sidebar content at an inline width (native cols.sidebar)
+   so its collapse slide never reflows. The workbench sidebar handle drives the
+   grid track instead, which would otherwise leave the file tree / Git content
+   pinned to the native width while the column grows. Let the sidebar root fill
+   its column so the content tracks the dragged width. Scoped to the expanded,
+   plugin-driven track states so the native collapse/expand slide keeps its own
+   frozen width. */
+[${FRAME_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}])[${DETAILS_TRACK_ATTRIBUTE}]:not([data-sidebar-collapsed]):not([data-rightbar-collapsed]):not([data-rightbar-fullscreen]) > :nth-child(1) [class*="_root"],
+[${FRAME_ATTRIBUTE}][${DETAILS_TRACK_FALLBACK_ATTRIBUTE}]:not([data-sidebar-collapsed]) > :nth-child(1) [class*="_root"] {
+  width: 100% !important;
+}
+
 /* During a visibility toggle, keep the reordered occupants fixed and animate
    two registered length tracks. Registering the variables is required for
    Firefox and Chromium to interpolate their dependent grid geometry. */

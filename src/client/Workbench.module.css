@@ -82,6 +82,19 @@
   display: none;
 }
 
+/* While the workbench shadows the sidebar body (files/Git/terminal), hide the
+   shell's persistent chrome that sits above the shadowed region: the New
+   Session button (`_newSession`) and the global panel rows (`_panelList`,
+   e.g. "插件"). They belong to the sessions browser, so they reappear once the
+   seat releases back to sessions (the marker is removed with this body).
+   Selectors match stable CSS-module local-name suffixes, mirroring the brand
+   rules above; `display:none` collapses them so the workbench list fills the
+   freed space with no leftover gap. */
+[data-dsh-workbench-sidebar-shadowed] button[class*="_newSession"],
+[data-dsh-workbench-sidebar-shadowed] [class*="_panelList"] {
+  display: none;
+}
+
 .modeSwitch {
   display: flex;
   flex-direction: column;
@@ -896,6 +909,12 @@
   --git-graph-color-5: rgb(8, 145, 178);
   --git-graph-node-bg: var(--dsw-specific-sidebar-fill);
   flex: 1;
+  /* Fill the panel width like the file tree. As a scroll container (overflow
+     auto) it can otherwise size to its content, squeezing the flex:1 subject
+     to ~0 and leaving the row stranded on the left. A definite 100% width
+     forces the row to span the panel; wide graphs still scroll horizontally
+     because the commit entry keeps its min-width. */
+  width: 100%;
   min-height: 0;
   overflow-x: auto;
   overflow-y: auto;
@@ -933,6 +952,7 @@
 
 .commitEntry {
   position: relative;
+  width: 100%;
   min-width: calc(var(--git-row-graph-width) + 210px);
   border-radius: 6px;
 }
@@ -942,6 +962,19 @@
   display: flex;
   align-items: center;
   min-width: 0;
+}
+
+/* The trailing overflow menu (⋯) is absolutely positioned so its closed
+   dropdown list never participates in the row's flex sizing. Left in flow, that
+   list reserved ~260px as a flex sibling and starved the flex:1 commit-row
+   button (and thus the subject) down to nothing. The opened list is portalled
+   to the body, so this never clips the actual menu. */
+.commitMenuFloat {
+  position: absolute;
+  right: 2px;
+  top: 0;
+  height: 100%;
+  width: 26px;
 }
 
 .commitRow {
@@ -1039,8 +1072,10 @@
 }
 
 .commitSubject {
+  /* Primary content: keep a readable floor so a wide graph column can never
+     squeeze the message to 0, and still grow into any leftover row width. */
   flex: 1;
-  min-width: 0;
+  min-width: 5em;
   overflow: hidden;
   font: var(--dsw-font-xs-13);
   text-overflow: ellipsis;
@@ -1048,7 +1083,10 @@
 }
 
 .commitAuthor {
-  flex: none;
+  /* Secondary: shrinkable so it yields width to the subject when the row is
+     tight, instead of crowding the message out entirely. */
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 64px;
   overflow: hidden;
   color: var(--dsw-alias-label-caption);
@@ -1059,7 +1097,8 @@
 
 .commitRefs {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 4px;
   max-width: 118px;

@@ -86,6 +86,8 @@ describe('workbench layout presentation', () => {
     expect(style?.textContent).toContain(`> :nth-child(3) {`)
     expect(style?.textContent).toContain('border-left: 1px solid var(--dsw-alias-border-l1) !important')
     expect(style?.textContent).toContain(`[${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]`)
+    expect(style?.textContent).toContain(`> :nth-child(1) [class*="_root"]`)
+    expect(style?.textContent).toContain('width: 100% !important')
     expect(style?.textContent).toContain('data-dsh-workbench-conversation-narrow')
     expect(style?.textContent).toContain("[role='status']:has(> code) > code")
     expect(style?.textContent).toContain(`[${ASSISTANT_ACTIONS_ATTRIBUTE}]`)

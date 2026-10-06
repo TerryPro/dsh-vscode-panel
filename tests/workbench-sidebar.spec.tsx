@@ -3,7 +3,7 @@
 import { cleanup, render, waitFor, type RenderResult } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/locales.ts'
-import { WorkbenchSidebar, type WorkbenchSidebarProps } from '../src/client/WorkbenchSidebar.tsx'
+import { SIDEBAR_SHADOWED_ATTRIBUTE, WorkbenchSidebar, type WorkbenchSidebarProps } from '../src/client/WorkbenchSidebar.tsx'
 
 vi.mock('../src/client/use-workbench.ts', () => ({ useWorkbench: () => ({ sidebarMode: 'files' }) }))
 vi.mock('../src/client/FileTree.tsx', () => ({
@@ -45,6 +45,20 @@ describe('WorkbenchSidebar Workspace binding', () => {
 
     await waitFor(() => { expect(fileTreeAttribute(view, 'data-workspace')).toBe('workspace-recent') })
     expect(controller.setWorkspace).toHaveBeenCalledWith('workspace-recent')
+  })
+
+  it('marks the document as shadowed while mounted and clears it on release', () => {
+    const controller = { setWorkspace: vi.fn() }
+    const view = renderSidebar(controller, {
+      'session-open': { updatedAt: 1, retainedBy: { mainView: 1 } },
+    })
+
+    // Shadow active (files view): the shell's New Session / panel rows hide via this marker.
+    expect(document.documentElement.hasAttribute(SIDEBAR_SHADOWED_ATTRIBUTE)).toBe(true)
+
+    // Seat released back to sessions: the body unmounts and the marker goes with it.
+    view.unmount()
+    expect(document.documentElement.hasAttribute(SIDEBAR_SHADOWED_ATTRIBUTE)).toBe(false)
   })
 })
 
