@@ -29,7 +29,7 @@ const TABLE_TEMPLATE = '| Column | Column |\n| ------ | ------ |\n| Cell   | Cel
  * Compute a single-document edit for a Markdown command from plain offsets.
  * Kept free of CodeMirror types so it can be unit-tested without a DOM.
  */
-export function buildMarkdownEdit(text: string, from: number, to: number, kind: MarkdownCommandKind): MarkdownEdit | null {
+export function buildMarkdownEdit(text: string, from: number, to: number, kind: MarkdownCommandKind): MarkdownEdit {
   switch (kind) {
     case 'bold': return wrapEdit(text, from, to, WRAPS.bold)
     case 'italic': return wrapEdit(text, from, to, WRAPS.italic)
@@ -94,11 +94,10 @@ function bulletEdit(text: string, from: number, to: number): MarkdownEdit {
   return { from: lineStart, to: lineEnd, insert, anchor: lineStart, head: lineStart + insert.length }
 }
 
-/** Apply a Markdown command to a live editor view; returns false when it did nothing. */
+/** Apply a Markdown command to a live editor view; returns whether it handled the call. */
 export function runMarkdownCommand(view: EditorView, kind: MarkdownCommandKind): boolean {
   const { from, to } = view.state.selection.main
   const edit = buildMarkdownEdit(view.state.doc.toString(), from, to, kind)
-  if (edit === null) return false
   view.dispatch({
     changes: { from: edit.from, to: edit.to, insert: edit.insert },
     selection: { anchor: edit.anchor, head: edit.head },

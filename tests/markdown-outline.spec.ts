@@ -39,4 +39,9 @@ describe('extractMarkdownOutline', () => {
   it('does not treat a standalone thematic break as a setext heading', () => {
     expect(extractMarkdownOutline('some text\n\n---\n\nmore text')).toEqual([])
   })
+
+  it('strips inline images and reference-style links from heading text', () => {
+    const outline = extractMarkdownOutline('# ![alt](img.png) Logo [ref][link] end')
+    expect(outline).toEqual([{ level: 1, text: 'alt Logo ref end', index: 0 }])
+  })
 })

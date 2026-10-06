@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { buildMarkdownEdit, type MarkdownCommandKind } from '../src/client/markdown/markdown-format.ts'
+// @vitest-environment jsdom
+
+import { EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import { afterEach, describe, expect, it } from 'vitest'
+import { buildMarkdownEdit, markdownEditingExtensions, runMarkdownCommand, type MarkdownCommandKind } from '../src/client/markdown/markdown-format.ts'
 
 /** Apply an edit to its source text, the way CodeMirror would, for readable assertions. */
 function apply(text: string, from: number, to: number, kind: MarkdownCommandKind): string {
   const edit = buildMarkdownEdit(text, from, to, kind)
-  if (edit === null) return text
   return text.slice(0, edit.from) + edit.insert + text.slice(edit.to)
 }
 
@@ -19,6 +22,13 @@ describe('buildMarkdownEdit', () => {
 
   it('unwraps an already wrapped selection', () => {
     expect(apply('**text**', 0, 8, 'bold')).toBe('text')
+  })
+
+  it('removes markup surrounding the cursor, not just a wrapped selection', () => {
+    const edit = buildMarkdownEdit('**', 1, 1, 'italic')
+    expect(apply('**', 1, 1, 'italic')).toBe('')
+    expect(edit.anchor).toBe(0)
+    expect(edit.head).toBe(0)
   })
 
   it('inserts empty markup with the cursor inside when nothing is selected', () => {
@@ -55,5 +65,36 @@ describe('buildMarkdownEdit', () => {
 
   it('leaves blank lines untouched inside a bulleted region', () => {
     expect(apply('one\n\ntwo', 0, 9, 'bulletList')).toBe('- one\n\n- two')
+  })
+})
+
+describe('runMarkdownCommand on a live editor', () => {
+  let view: EditorView | undefined
+  afterEach(() => { view?.destroy(); view = undefined })
+
+  function makeEditor(doc: string, from: number, to: number): EditorView {
+    view = new EditorView({
+      parent: document.body,
+      state: EditorState.create({
+        doc,
+        selection: { anchor: from, head: to },
+        extensions: [markdownEditingExtensions],
+      }),
+    })
+    return view
+  }
+
+  it('applies bold and restores the wrapped selection', () => {
+    const editor = makeEditor('text', 0, 4)
+    expect(runMarkdownCommand(editor, 'bold')).toBe(true)
+    expect(editor.state.doc.toString()).toBe('**text**')
+    const selection = editor.state.selection.main
+    expect([selection.from, selection.to]).toEqual([0, 8])
+  })
+
+  it('the Mod-b keybinding routes through the markdown keymap', () => {
+    const editor = makeEditor('text', 0, 4)
+    editor.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true, cancelable: true }))
+    expect(editor.state.doc.toString()).toBe('**text**')
   })
 })
