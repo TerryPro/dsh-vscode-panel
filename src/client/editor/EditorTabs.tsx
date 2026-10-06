@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { IconCloseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkbenchTab } from '../core/controller.ts'
+import type { WorkbenchTab } from '../model/controller.ts'
 import { diffKindText } from '../git/git-diff-labels.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { WorkbenchKey } from '../core/locales.ts'

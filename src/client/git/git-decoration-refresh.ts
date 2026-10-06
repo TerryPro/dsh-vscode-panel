@@ -1,4 +1,4 @@
-import type { WorkbenchController } from '../core/controller.ts'
+import type { WorkbenchController } from '../model/controller.ts'
 
 export const GIT_DECORATION_REFRESH_INTERVAL_MS = 2_000
 

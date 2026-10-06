@@ -6,10 +6,10 @@ import {
   placeTabInPane,
   reconcilePanes,
   selectInPanes,
-} from '../src/client/core/editor-pane-model.ts'
-import { emptyFileTab } from '../src/client/core/tab-model.ts'
-import { cloneState, stripWorkspaceEphemera } from '../src/client/workbench/workbench-snapshot.ts'
-import type { WorkbenchState } from '../src/client/workbench/workbench-types.ts'
+} from '../src/client/model/editor-pane-model.ts'
+import { emptyFileTab } from '../src/client/model/tab-model.ts'
+import { cloneState, stripWorkspaceEphemera } from '../src/client/model/workbench-snapshot.ts'
+import type { WorkbenchState } from '../src/client/model/workbench-types.ts'
 
 function makeState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {

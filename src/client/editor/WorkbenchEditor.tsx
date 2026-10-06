@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Modal, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { EditorGroup, EditorPaneId, WorkbenchController, WorkbenchTab } from '../core/controller.ts'
+import type { EditorGroup, EditorPaneId, WorkbenchController, WorkbenchTab } from '../model/controller.ts'
 import { EditorEmpty } from './EditorShared.tsx'
 import { EditorPane } from './EditorPane.tsx'
 import { SplitDivider } from './SplitDivider.tsx'
-import { useWorkbench } from '../core/use-workbench.ts'
-import { resolveWorkbenchWorkspaceId } from '../layout/workspace-binding.ts'
+import { useWorkbench } from '../model/use-workbench.ts'
+import { resolveWorkbenchWorkspaceId } from '../model/workspace-binding.ts'
 import css from '../core/Workbench.module.css'
 
 export type WorkbenchEditorProps = PropsRuntime<'rightbar.session'> & PropsLocale<'workbench'> & {

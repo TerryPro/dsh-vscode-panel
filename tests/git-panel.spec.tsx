@@ -36,7 +36,7 @@ const workbenchStore = vi.hoisted(() => {
   }
 })
 
-vi.mock('../src/client/core/use-workbench.ts', async () => {
+vi.mock('../src/client/model/use-workbench.ts', async () => {
   const { useSyncExternalStore } = await import('react')
   return {
     useWorkbench: () => useSyncExternalStore(

@@ -7,10 +7,10 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconCommitGraphOutline16 } from '../git/CommitGraphIcon.tsx'
-import type { WorkbenchController, WorkbenchTerminalTab } from '../core/controller.ts'
+import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from '../files/CreateEntryIcons.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
-import { useWorkbench } from '../core/use-workbench.ts'
+import { useWorkbench } from '../model/use-workbench.ts'
 import css from '../core/Workbench.module.css'
 
 interface WorkbenchRailProps {

@@ -13,7 +13,7 @@ import type {
   WorkbenchState,
   WorkbenchTab,
   WorkbenchTerminalTab,
-} from '../core/controller.ts'
+} from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { EditorTabs } from './EditorTabs.tsx'
 import { EditorTabBody } from './EditorTabBody.tsx'

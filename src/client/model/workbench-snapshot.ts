@@ -1,7 +1,7 @@
 /** Structural state cloning and per-Workspace snapshot trimming. */
 
 import type { WorkbenchState } from './workbench-types.ts'
-import { reconcilePanes } from '../core/editor-pane-model.ts'
+import { reconcilePanes } from './editor-pane-model.ts'
 
 export const INITIAL_STATE: WorkbenchState = {
   sidebarMode: 'files',

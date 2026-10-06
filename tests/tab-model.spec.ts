@@ -8,7 +8,7 @@ import {
   messageOf,
   tabIdentity,
   tabRequestKey,
-} from '../src/client/core/tab-model.ts'
+} from '../src/client/model/tab-model.ts'
 
 describe('tab-model', () => {
   it('builds stable, collision-free tab ids', () => {

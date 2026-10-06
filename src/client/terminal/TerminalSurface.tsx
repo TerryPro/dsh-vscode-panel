@@ -7,8 +7,8 @@ import '@xterm/xterm/css/xterm.css'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TerminalView, TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller/client'
-import type { WorkbenchController, WorkbenchTerminalTab } from '../core/controller.ts'
-import type { TerminalStatus } from '../core/controller.ts'
+import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
+import type { TerminalStatus } from '../model/controller.ts'
 import {
   EDITOR_TRANSITION_END_EVENT,
   EDITOR_TRANSITION_START_EVENT,

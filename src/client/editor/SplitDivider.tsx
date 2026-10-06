@@ -1,7 +1,7 @@
 /** Draggable separator that resizes the two split editor panes. */
 
 import { useEffect, useRef } from 'react'
-import type { EditorSplitOrientation } from '../core/controller.ts'
+import type { EditorSplitOrientation } from '../model/controller.ts'
 import css from '../core/Workbench.module.css'
 
 interface SplitDividerProps {

@@ -1,13 +1,13 @@
 import { useEffect, useMemo } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkbenchController } from '../core/controller.ts'
+import type { WorkbenchController } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { FileTree } from '../files/FileTree.tsx'
 import { GitPanel } from '../git/GitPanel.tsx'
 import { TerminalPanel } from '../terminal/TerminalPanel.tsx'
-import { useWorkbench } from '../core/use-workbench.ts'
+import { useWorkbench } from '../model/use-workbench.ts'
 import { WorkbenchRail } from './WorkbenchRail.tsx'
-import { resolveCurrentSessionId, resolveWorkbenchWorkspace } from './workspace-binding.ts'
+import { resolveCurrentSessionId, resolveWorkbenchWorkspace } from '../model/workspace-binding.ts'
 import css from '../core/Workbench.module.css'
 
 export type WorkbenchSidebarProps = PropsRuntime<'sidebar.workspaces'> & PropsLocale<'workbench'> & {

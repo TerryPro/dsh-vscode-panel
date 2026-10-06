@@ -2,13 +2,13 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkbenchFileTab, WorkbenchState } from '../src/client/core/controller.ts'
+import type { WorkbenchFileTab, WorkbenchState } from '../src/client/model/controller.ts'
 import { zh } from '../src/client/core/locales.ts'
 import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/editor/WorkbenchEditor.tsx'
 
 const workbenchState = vi.hoisted(() => ({ current: {} as WorkbenchState }))
 
-vi.mock('../src/client/core/use-workbench.ts', () => ({ useWorkbench: () => workbenchState.current }))
+vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbenchState.current }))
 vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
   CodeEditor: ({ ariaLabel, gitOriginal, gitLabels }: {
     ariaLabel: string

@@ -11,7 +11,7 @@ import type {
   GitStatus,
   GitTargetRemoteOperation,
 } from '../../shared/contracts.ts'
-import type { WorkbenchController } from '../core/controller.ts'
+import type { WorkbenchController } from '../model/controller.ts'
 import { GitChangesView } from './GitChangesView.tsx'
 import { GitBranchDialog, type GitBranchDialogMode } from './GitBranchDialog.tsx'
 import { GitCommitActionDialog, type GitCommitActionRequest } from './GitCommitActionDialog.tsx'
@@ -24,7 +24,7 @@ import {
 import { GitRepositoryToolbar } from './GitRepositoryToolbar.tsx'
 import { GitRemoteDialog, type GitRemoteDialogMode, type GitRemoteDraft } from './GitRemoteDialog.tsx'
 import { copyTextToClipboard } from '../core/clipboard.ts'
-import { useWorkbench } from '../core/use-workbench.ts'
+import { useWorkbench } from '../model/use-workbench.ts'
 import css from '../core/Workbench.module.css'
 
 const GIT_PANEL_REFRESH_INTERVAL_MS = 5_000

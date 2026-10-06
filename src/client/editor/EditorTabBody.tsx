@@ -5,7 +5,7 @@ import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-pr
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { EditorView } from '@codemirror/view'
 import type { GitLineDecorationLabels } from '../git/git-line-decorations.ts'
-import type { WorkbenchController, WorkbenchTab } from '../core/controller.ts'
+import type { WorkbenchController, WorkbenchTab } from '../model/controller.ts'
 import { CodeEditor, type EditorCursorState } from './CodeEditor.tsx'
 import { IconInlineDiffOutline16, IconInteractiveOutline16, IconOutline16, IconPreviewOutline16, IconSourceOutline16, IconSplitViewOutline16, IconWordWrapOutline16 } from './EditorViewIcons.tsx'
 import { EditorEmpty, ImagePreview } from './EditorShared.tsx'

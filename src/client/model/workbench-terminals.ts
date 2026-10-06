@@ -4,7 +4,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ClientTerminals, TerminalView } from '@deepseek-ai/dsh-api-terminal-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TerminalStatus, WorkbenchLogger, WorkbenchState, WorkbenchTerminalTab } from './workbench-types.ts'
-import { focusedPaneId, placeTabInPane, selectInPanes } from '../core/editor-pane-model.ts'
+import { focusedPaneId, placeTabInPane, selectInPanes } from './editor-pane-model.ts'
 
 /** The shell hooks the terminal runtime needs from the controller without importing it. */
 export interface TerminalHost {

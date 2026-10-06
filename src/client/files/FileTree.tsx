@@ -4,7 +4,7 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DirectoryListing, WorkspaceEntry } from '../../shared/contracts.ts'
-import type { WorkbenchController } from '../core/controller.ts'
+import type { WorkbenchController } from '../model/controller.ts'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { childWorkspacePath } from '../../shared/path-policy.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from './CreateEntryIcons.tsx'
@@ -14,7 +14,7 @@ import { FileTreeDialogs } from './FileTreeDialogs.tsx'
 import { FileTreeLevel, isContextMenuKey, type FileTreeCreateDraft } from './FileTreeLevel.tsx'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import { useFileTreeMutations } from './use-file-tree-mutations.ts'
-import { useWorkbench } from '../core/use-workbench.ts'
+import { useWorkbench } from '../model/use-workbench.ts'
 import css from '../core/Workbench.module.css'
 
 const FILE_TREE_REFRESH_INTERVAL_MS = 3_000

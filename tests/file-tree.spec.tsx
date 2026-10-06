@@ -14,7 +14,7 @@ const workbench = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('../src/client/core/use-workbench.ts', () => ({ useWorkbench: () => workbench.current }))
+vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbench.current }))
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>,

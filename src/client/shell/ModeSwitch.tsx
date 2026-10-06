@@ -8,15 +8,15 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkbenchController } from '../core/controller.ts'
+import type { WorkbenchController } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { IconSourceControlOutline16 } from '../git/SourceControlIcon.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { IconConversationPanelOutline16 } from './ConversationPanelIcon.tsx'
 import { IconEditorPanelOutline16 } from '../editor/EditorPanelIcon.tsx'
-import { createActivityDockMount } from './activity-dock-layout.ts'
-import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, type SidebarFooterLayout } from './sidebar-footer-layout.ts'
-import { useWorkbench } from '../core/use-workbench.ts'
+import { createActivityDockMount } from '../layout/activity-dock-layout.ts'
+import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, type SidebarFooterLayout } from '../layout/sidebar-footer-layout.ts'
+import { useWorkbench } from '../model/use-workbench.ts'
 import css from '../core/Workbench.module.css'
 
 /**

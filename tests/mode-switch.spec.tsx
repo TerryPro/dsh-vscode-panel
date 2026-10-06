@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ModeSwitch } from '../src/client/layout/ModeSwitch.tsx'
+import { ModeSwitch } from '../src/client/shell/ModeSwitch.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   FishLogo: () => <svg data-icon="brand" />,
@@ -16,7 +16,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 }))
 
 const workbench = vi.hoisted(() => ({ sidebarMode: 'git', editorExpanded: true, conversationExpanded: true }))
-vi.mock('../src/client/core/use-workbench.ts', () => ({
+vi.mock('../src/client/model/use-workbench.ts', () => ({
   useWorkbench: () => workbench,
 }))
 

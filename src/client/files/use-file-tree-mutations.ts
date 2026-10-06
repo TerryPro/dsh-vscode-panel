@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceEntry } from '../../shared/contracts.ts'
-import type { WorkbenchController, WorkbenchTab } from '../core/controller.ts'
+import type { WorkbenchController, WorkbenchTab } from '../model/controller.ts'
 
 interface FileTreeMutationOptions {
   controller: WorkbenchController
