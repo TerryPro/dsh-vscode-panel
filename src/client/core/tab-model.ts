@@ -1,7 +1,7 @@
 /** Pure tab identity, factory, and path helpers for the workbench tab pool. */
 
 import type { GitFileDiff } from '../../shared/contracts.ts'
-import type { WorkbenchDiffTab, WorkbenchFileTab, WorkbenchTab } from './workbench-types.ts'
+import type { WorkbenchDiffTab, WorkbenchFileTab, WorkbenchTab } from '../workbench/workbench-types.ts'
 
 export function fileTabId(path: string): string {
   return `file:${path}`

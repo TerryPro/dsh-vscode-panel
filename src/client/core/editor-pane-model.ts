@@ -1,6 +1,6 @@
 /** Pure editor-pane math: the two panes stay a clean partition of the tab pool. */
 
-import type { EditorGroup, EditorPaneId, WorkbenchState } from './workbench-types.ts'
+import type { EditorGroup, EditorPaneId, WorkbenchState } from '../workbench/workbench-types.ts'
 
 /** Assign-or-delete an optional active tab id under `exactOptionalPropertyTypes`. */
 export function assignGroupActive(group: EditorGroup, tabId: string | undefined): void {

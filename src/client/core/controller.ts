@@ -21,7 +21,7 @@ import type {
   WorkbenchSidebarAction,
   WorkbenchState,
   WorkbenchTerminalTab,
-} from './workbench-types.ts'
+} from '../workbench/workbench-types.ts'
 import {
   assignActiveTab,
   assignGroupActive,
@@ -31,12 +31,12 @@ import {
   selectInPanes,
 } from './editor-pane-model.ts'
 import { tabIdentity } from './tab-model.ts'
-import { INITIAL_STATE } from './workbench-snapshot.ts'
-import { WorkbenchData } from './workbench-data.ts'
-import { WorkbenchEdits } from './workbench-edits.ts'
-import { WorkbenchTerminals } from './workbench-terminals.ts'
+import { INITIAL_STATE } from '../workbench/workbench-snapshot.ts'
+import { WorkbenchData } from '../workbench/workbench-data.ts'
+import { WorkbenchEdits } from '../workbench/workbench-edits.ts'
+import { WorkbenchTerminals } from '../workbench/workbench-terminals.ts'
 
-export * from './workbench-types.ts'
+export * from '../workbench/workbench-types.ts'
 
 /**
  * Own unified tabs, editor visibility, async races, dirty state, and the sidebar shadow.

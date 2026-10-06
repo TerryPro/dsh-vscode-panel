@@ -8,8 +8,8 @@ import {
   selectInPanes,
 } from '../src/client/core/editor-pane-model.ts'
 import { emptyFileTab } from '../src/client/core/tab-model.ts'
-import { cloneState, stripWorkspaceEphemera } from '../src/client/core/workbench-snapshot.ts'
-import type { WorkbenchState } from '../src/client/core/workbench-types.ts'
+import { cloneState, stripWorkspaceEphemera } from '../src/client/workbench/workbench-snapshot.ts'
+import type { WorkbenchState } from '../src/client/workbench/workbench-types.ts'
 
 function makeState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
   return {

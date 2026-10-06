@@ -2,7 +2,7 @@
 
 import type { GitStatus } from '../../shared/contracts.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
-import type { WorkbenchFileTab, WorkbenchState } from './workbench-types.ts'
+import type { WorkbenchFileTab, WorkbenchState } from '../workbench/workbench-types.ts'
 
 export function buildGitLineVersions(files: readonly GitStatus['files'][number][]): Record<string, string> {
   return Object.fromEntries(files.map(file => [

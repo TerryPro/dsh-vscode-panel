@@ -3,7 +3,7 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { GitCommit, GitFileDiff, GitStatus } from '../../shared/contracts.ts'
 import { imageMimeTypeForPath } from '../../shared/contracts.ts'
-import type { WorkbenchApi } from './api.ts'
+import type { WorkbenchApi } from '../core/api.ts'
 import { isHtmlPath } from '../editor/html-preview.ts'
 import { buildGitDecorations } from '../git/git-decorations.ts'
 import {
@@ -11,9 +11,9 @@ import {
   gitBaselineKey,
   sameDecorations,
   sameStringMap,
-} from './git-decoration-state.ts'
+} from '../core/git-decoration-state.ts'
 import { cloneState, INITIAL_STATE, stripWorkspaceEphemera } from './workbench-snapshot.ts'
-import { focusedPaneId, placeTabInPane, reconcilePanes, selectInPanes } from './editor-pane-model.ts'
+import { focusedPaneId, placeTabInPane, reconcilePanes, selectInPanes } from '../core/editor-pane-model.ts'
 import {
   diffTabId,
   emptyDiffTab,
@@ -22,7 +22,7 @@ import {
   isSameOrDescendantPath,
   messageOf,
   tabRequestKey,
-} from './tab-model.ts'
+} from '../core/tab-model.ts'
 import type {
   DiffViewMode,
   WorkbenchDiffTab,
