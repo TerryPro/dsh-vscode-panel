@@ -505,6 +505,9 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: var(--dsw-font-xxs-12);
+  /* Keep "↓n ↑n" on one line; a wrap would stack the counts and double the
+     button's height in the narrow toolbar. */
+  white-space: nowrap;
   cursor: pointer;
 }
 
