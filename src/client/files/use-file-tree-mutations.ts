@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceEntry } from '../../shared/contracts.ts'
 import type { WorkbenchController, WorkbenchTab } from '../model/controller.ts'
+import { isSameOrDescendantPath, messageOf } from '../model/tab-model.ts'
+import { parentPath } from '../../shared/path-name.ts'
 
 interface FileTreeMutationOptions {
   controller: WorkbenchController
@@ -110,17 +112,4 @@ export function useFileTreeMutations(options: FileTreeMutationOptions) {
   }
 
   return { renameTarget, deleteTarget, dialogError, busy, requestRename, requestDelete, rename, remove, close }
-}
-
-function parentPath(path: string): string {
-  const separator = path.lastIndexOf('/')
-  return separator < 0 ? '' : path.slice(0, separator)
-}
-
-function isSameOrDescendantPath(candidate: string, parent: string): boolean {
-  return candidate === parent || candidate.startsWith(`${parent}/`)
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

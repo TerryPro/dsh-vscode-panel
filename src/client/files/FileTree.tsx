@@ -7,6 +7,8 @@ import type { DirectoryListing, WorkspaceEntry } from '../../shared/contracts.ts
 import type { WorkbenchController } from '../model/controller.ts'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { childWorkspacePath } from '../../shared/path-policy.ts'
+import { parentPath } from '../../shared/path-name.ts'
+import { isSameOrDescendantPath, messageOf } from '../model/tab-model.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from './CreateEntryIcons.tsx'
 import type { FileTreeCreateKind } from './FileTreeCreateRow.tsx'
 import { FileTreeContextMenu, type FileTreeMenuAction, type FileTreeMenuTarget } from './FileTreeContextMenu.tsx'
@@ -131,7 +133,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
 
   const beginCreate = (kind: FileTreeCreateKind, parentOverride?: string): void => {
     const parent = parentOverride
-      ?? (selectedKind === 'directory' && selectedPath !== undefined ? selectedPath : parentPath(selectedPath))
+      ?? (selectedKind === 'directory' && selectedPath !== undefined ? selectedPath : parentPath(selectedPath ?? ''))
     setError(null)
     setResult(null)
     setCreateDraft({ parent, kind })
@@ -164,14 +166,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     }
     if (activeWorkspace.current !== targetWorkspace) return true
     setSelection({ path, kind: draft.kind })
-    try {
-      const listing = await controller.api.listDirectory(targetWorkspace, draft.parent)
-      if (activeWorkspace.current === targetWorkspace) {
-        setListings(previous => ({ ...previous, [draft.parent]: listing }))
-      }
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
-    }
+    await reloadDirectory(targetWorkspace, draft.parent)
     if (draft.kind === 'file' && activeWorkspace.current === targetWorkspace) {
       void controller.openFile(targetWorkspace, path)
     }
@@ -211,12 +206,16 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     })
   }
 
+  // Keep the polling subscription stable: `refreshAllExpanded` closes over the
+  // latest expanded/listings, so the interval must not restart every time they change.
+  const refreshAllExpandedRef = useRef(refreshAllExpanded)
+  refreshAllExpandedRef.current = refreshAllExpanded
+
   useEffect(() => {
     if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
     const poll = (): void => {
       if (document.visibilityState === 'hidden') return
-      void refreshAllExpanded()
+      void refreshAllExpandedRef.current()
     }
     const timer = window.setInterval(poll, FILE_TREE_REFRESH_INTERVAL_MS)
     window.addEventListener('focus', poll)
@@ -226,7 +225,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
       window.removeEventListener('focus', poll)
       document.removeEventListener('visibilitychange', poll)
     }
-  }, [workspaceId, expanded, listings])
+  }, [workspaceId])
 
   const mutations = useFileTreeMutations({
     controller,
@@ -255,35 +254,14 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     }
     if (action === 'expand-all') {
       if (entry === null || entry.kind !== 'directory') return
-      const basePath = entry.path
-      void (async (): Promise<void> => {
-        const collected: Record<string, DirectoryListing> = {}
-        const newExpanded = new Set(expanded)
-        const queue: string[] = [basePath]
-        let count = 0
-        while (queue.length > 0 && count < 500) {
-          const batch = queue.splice(0, 10)
-          const results = await Promise.allSettled(
-            batch.map(path => controller.api.listDirectory(targetWorkspace, path)),
-          )
-          for (let index = 0; index < batch.length; index += 1) {
-            const result = results[index]
-            const path = batch[index]
-            if (result === undefined || path === undefined || result.status !== 'fulfilled') continue
-            collected[path] = result.value
-            count += 1
-            newExpanded.add(path)
-            for (const childEntry of result.value.entries) {
-              if (childEntry.kind === 'directory') {
-                queue.push(childEntry.path)
-              }
-            }
-          }
-        }
-        if (activeWorkspace.current !== targetWorkspace) return
-        setListings(previous => ({ ...previous, ...collected }))
-        setExpanded(newExpanded)
-      })()
+      const collected = await collectDirectoryExpansion(
+        path => controller.api.listDirectory(targetWorkspace, path),
+        entry.path,
+        expanded,
+      )
+      if (activeWorkspace.current !== targetWorkspace) return
+      setListings(previous => ({ ...previous, ...collected.listings }))
+      setExpanded(collected.expanded)
       return
     }
     if (action === 'collapse-all') {
@@ -436,14 +414,38 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
   )
 }
 
-function parentPath(path: string | undefined): string {
-  if (path === undefined) return ''
-  const separator = path.lastIndexOf('/')
-  return separator < 0 ? '' : path.slice(0, separator)
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/**
+ * Breadth-first load of a directory subtree: lists `startPath` and every
+ * descendant directory in bounded batches, returning the merged listings and a
+ * copy of `seedExpanded` with each visited directory marked open. Stops after
+ * `max` directories to bound the worst case. Read-only; callers apply the result.
+ */
+async function collectDirectoryExpansion(
+  list: (path: string) => Promise<DirectoryListing>,
+  startPath: string,
+  seedExpanded: ReadonlySet<string>,
+  max = 500,
+): Promise<{ listings: Record<string, DirectoryListing>; expanded: Set<string> }> {
+  const listings: Record<string, DirectoryListing> = {}
+  const expanded = new Set(seedExpanded)
+  const queue: string[] = [startPath]
+  let count = 0
+  while (queue.length > 0 && count < max) {
+    const batch = queue.splice(0, 10)
+    const results = await Promise.allSettled(batch.map(list))
+    for (let index = 0; index < batch.length; index += 1) {
+      const result = results[index]
+      const path = batch[index]
+      if (result === undefined || path === undefined || result.status !== 'fulfilled') continue
+      listings[path] = result.value
+      count += 1
+      expanded.add(path)
+      for (const childEntry of result.value.entries) {
+        if (childEntry.kind === 'directory') queue.push(childEntry.path)
+      }
+    }
+  }
+  return { listings, expanded }
 }
 
 function omitPathListings(
@@ -455,10 +457,6 @@ function omitPathListings(
 
 function omitExpandedPaths(expanded: Set<string>, path: string): Set<string> {
   return new Set([...expanded].filter(candidate => !isSameOrDescendantPath(candidate, path)))
-}
-
-function isSameOrDescendantPath(candidate: string, parent: string): boolean {
-  return candidate === parent || candidate.startsWith(`${parent}/`)
 }
 
 function listingEqual(a: DirectoryListing | undefined, b: DirectoryListing): boolean {

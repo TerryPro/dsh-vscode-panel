@@ -64,6 +64,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   workbench.current = { activeTabId: undefined, tabs: [], sidebarAction: undefined, gitDecorations: {} }
 })
 
@@ -320,5 +321,118 @@ describe('文件目录', () => {
     await view.findByText('此目录为空。')
     fireEvent.keyDown(view.getByRole('tree'), { key: 'ContextMenu' })
     expect(view.getByRole('menuitem', { name: '刷新文件目录' })).toBeTruthy()
+  })
+
+  it('复制相对路径到剪贴板并给出成功提示', async () => {
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard })
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(() => Promise.resolve({ path: '', truncated: false, entries: [{ name: 'README.md', path: 'README.md', kind: 'file' as const }] })) },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    const row = await view.findByRole('treeitem', { name: 'README.md' })
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '复制相对路径' }))
+    await waitFor(() => {
+      expect(clipboard.writeText).toHaveBeenCalledWith('README.md')
+      expect(view.getByRole('status').textContent).toContain('已复制相对路径。')
+    })
+  })
+
+  it('通过右键菜单展开全部，递归加载并展开目录树', async () => {
+    const listDirectory = vi.fn((_workspaceId: string, path: string) => Promise.resolve(
+      path === 'docs'
+        ? { path: 'docs', truncated: false, entries: [{ name: 'nested', path: 'docs/nested', kind: 'directory' as const }] }
+        : path === 'docs/nested'
+          ? { path: 'docs/nested', truncated: false, entries: [{ name: 'deep.txt', path: 'docs/nested/deep.txt', kind: 'file' as const }] }
+          : { path: '', truncated: false, entries: [{ name: 'docs', path: 'docs', kind: 'directory' as const }] },
+    ))
+    const controller = { fileTreeExpanded: new Map<string, Set<string>>(), api: { listDirectory }, openFile: vi.fn() }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    const docsRow = await view.findByRole('treeitem', { name: 'docs' })
+    expect(view.queryByRole('treeitem', { name: 'deep.txt' })).toBeNull()
+    fireEvent.contextMenu(docsRow, { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '展开全部' }))
+    expect(await view.findByRole('treeitem', { name: 'deep.txt' })).toBeTruthy()
+    const paths = listDirectory.mock.calls.map(call => call[1])
+    expect(paths).toContain('docs')
+    expect(paths).toContain('docs/nested')
+  })
+
+  it('通过右键菜单折叠全部，收起后代的展开状态', async () => {
+    const listDirectory = vi.fn((_workspaceId: string, path: string) => Promise.resolve(
+      path === 'docs'
+        ? { path: 'docs', truncated: false, entries: [{ name: 'nested', path: 'docs/nested', kind: 'directory' as const }] }
+        : path === 'docs/nested'
+          ? { path: 'docs/nested', truncated: false, entries: [{ name: 'deep.txt', path: 'docs/nested/deep.txt', kind: 'file' as const }] }
+          : { path: '', truncated: false, entries: [{ name: 'docs', path: 'docs', kind: 'directory' as const }] },
+    ))
+    const controller = { fileTreeExpanded: new Map<string, Set<string>>(), api: { listDirectory }, openFile: vi.fn() }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    const docsRow = await view.findByRole('treeitem', { name: 'docs' })
+    fireEvent.contextMenu(docsRow, { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '展开全部' }))
+    await view.findByRole('treeitem', { name: 'deep.txt' })
+
+    fireEvent.contextMenu(docsRow, { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '折叠全部' }))
+    await waitFor(() => {
+      expect(view.queryByRole('treeitem', { name: 'deep.txt' })).toBeNull()
+      expect(view.getByRole('treeitem', { name: 'nested' })).toBeTruthy()
+      expect(view.getByRole('treeitem', { name: 'docs' })).toBeTruthy()
+    })
+  })
+
+  it('头部刷新按钮重新列出已展开目录并渲染新增条目', async () => {
+    const docsV1 = { path: 'docs', truncated: false, entries: [{ name: 'a.ts', path: 'docs/a.ts', kind: 'file' as const }] }
+    const docsV2 = {
+      path: 'docs',
+      truncated: false,
+      entries: [
+        { name: 'a.ts', path: 'docs/a.ts', kind: 'file' as const },
+        { name: 'b.ts', path: 'docs/b.ts', kind: 'file' as const },
+      ],
+    }
+    let docsVersion = 1
+    const listDirectory = vi.fn((_workspaceId: string, path: string) => Promise.resolve(
+      path === 'docs'
+        ? (docsVersion === 1 ? docsV1 : docsV2)
+        : { path: '', truncated: false, entries: [{ name: 'docs', path: 'docs', kind: 'directory' as const }] },
+    ))
+    const controller = { fileTreeExpanded: new Map<string, Set<string>>(), api: { listDirectory }, openFile: vi.fn() }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    fireEvent.click(await view.findByRole('treeitem', { name: 'docs' }))
+    await view.findByRole('treeitem', { name: 'a.ts' })
+    expect(view.queryByRole('treeitem', { name: 'b.ts' })).toBeNull()
+
+    docsVersion = 2
+    const docsCallsBefore = listDirectory.mock.calls.filter(call => call[1] === 'docs').length
+    fireEvent.click(view.getByRole('button', { name: '刷新文件目录' }))
+    await waitFor(() => { expect(view.getByRole('treeitem', { name: 'b.ts' })).toBeTruthy() })
+    expect(listDirectory.mock.calls.filter(call => call[1] === 'docs').length).toBeGreaterThan(docsCallsBefore)
+  })
+
+  it('页面可见时每 3 秒自动轮询刷新已展开目录', async () => {
+    const root = { path: '', truncated: false, entries: [{ name: 'README.md', path: 'README.md', kind: 'file' as const }] }
+    const listDirectory = vi.fn(() => Promise.resolve(root))
+    const controller = { fileTreeExpanded: new Map<string, Set<string>>(), api: { listDirectory }, openFile: vi.fn() }
+    vi.useFakeTimers()
+    render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    await vi.advanceTimersByTimeAsync(5)
+    const before = listDirectory.mock.calls.length
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(listDirectory.mock.calls.length).toBeGreaterThan(before)
   })
 })

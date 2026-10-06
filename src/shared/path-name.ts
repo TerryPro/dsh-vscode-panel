@@ -11,3 +11,14 @@ export function basename(path: string): string {
   const normalized = path.replace(/\\/gu, '/')
   return normalized.slice(normalized.lastIndexOf('/') + 1)
 }
+
+/**
+ * Return the parent directory of a slash-delimited workspace path.
+ *
+ * The root (`''`) and a bare file name both have no parent and map back to
+ * `''`, matching the workspace-relative root the Host lists against.
+ */
+export function parentPath(path: string): string {
+  const separator = path.lastIndexOf('/')
+  return separator < 0 ? '' : path.slice(0, separator)
+}

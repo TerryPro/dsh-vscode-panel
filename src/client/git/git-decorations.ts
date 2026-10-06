@@ -1,4 +1,5 @@
 import type { GitFileStatus } from '../../shared/contracts.ts'
+import { parentPath } from '../../shared/path-name.ts'
 
 export type GitFileDecoration = 'conflict' | 'untracked' | 'deleted' | 'added' | 'modified' | 'renamed'
 export type GitDecorationMap = Record<string, GitFileDecoration>
@@ -46,9 +47,4 @@ export function buildGitDecorations(files: readonly GitFileStatus[]): GitDecorat
 function mergeDecoration(target: GitDecorationMap, path: string, decoration: GitFileDecoration): void {
   const current = target[path]
   if (current === undefined || PRIORITY[decoration] > PRIORITY[current]) target[path] = decoration
-}
-
-function parentPath(path: string): string {
-  const separator = path.lastIndexOf('/')
-  return separator < 0 ? '' : path.slice(0, separator)
 }
