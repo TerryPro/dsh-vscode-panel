@@ -152,7 +152,6 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
             tabs={primaryTabs}
             group={state.panes.primary}
             state={state}
-            sessionId={sessionId}
             workspaceId={workspaceId}
             controller={controller}
             t={t}
@@ -184,7 +183,6 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
                 tabs={secondaryTabs}
                 group={state.panes.secondary}
                 state={state}
-                sessionId={sessionId}
                 workspaceId={workspaceId}
                 controller={controller}
                 t={t}

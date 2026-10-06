@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/core/locales.ts'
 import type { WorkbenchTerminalTab } from '../src/client/model/controller.ts'
 import { TerminalSurface } from '../src/client/terminal/TerminalSurface.tsx'
+import { EDITOR_TRANSITION_END_EVENT, EDITOR_TRANSITION_START_EVENT } from '../src/client/layout/editor-layout-contract.ts'
 
 const terminalHarness = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -71,7 +72,6 @@ describe('中栏终端画布', () => {
     const rendered = render(
       <TerminalSurface
         tab={terminalTab(1)}
-        sessionId="session-1"
         active
         controller={controller as never}
         t={translate}
@@ -95,7 +95,6 @@ describe('中栏终端画布', () => {
     render(
       <TerminalSurface
         tab={terminalTab(2)}
-        sessionId="session-1"
         active
         controller={controllerFake(view) as never}
         t={translate}
@@ -104,12 +103,50 @@ describe('中栏终端画布', () => {
     expect(view.resize).toHaveBeenCalledWith(120, 50)
   })
 
+  it('终端从 connecting 变为可写后重新适配并回传尺寸', () => {
+    const view = makeView({ phase: 'connecting', writable: false })
+    render(
+      <TerminalSurface
+        tab={terminalTab(7)}
+        active
+        controller={controllerFake(view) as never}
+        t={translate}
+      />,
+    )
+    // Not writable yet: the emulator must not adopt a size or notify the model.
+    expect(view.resize).not.toHaveBeenCalled()
+    // Connecting -> running with no host resize: fit has to be retried here.
+    act(() => { view.set({ phase: 'connected', writable: true }) })
+    expect(view.resize).toHaveBeenCalledWith(120, 50)
+  })
+
+  it('快照网格大于可见窗格时按容器尺寸回适，避免底部行被裁切', () => {
+    const view = makeView({
+      render: {
+        revision: 1,
+        frame: { type: 'snapshot', info: { cols: 80, rows: 24, state: 'running' }, screen: 'dir output' },
+      },
+    })
+    render(
+      <TerminalSurface
+        tab={terminalTab(8)}
+        active
+        controller={controllerFake(view) as never}
+        t={translate}
+      />,
+    )
+    const terminal = terminalHarness.instances[0]!
+    // The snapshot first applies the server's 24-row grid, then the reconcile
+    // re-fits to the container, so the last resize is the fitted one (not 80x24).
+    expect(terminal.resize).toHaveBeenCalledWith(80, 24)
+    expect(terminal.resize).toHaveBeenLastCalledWith(120, 50)
+  })
+
   it('尚未绑定会话时显示等待提示且不挂载视图', () => {
     const controller = { terminalView: vi.fn(() => undefined), setTerminalStatus: vi.fn() }
     const rendered = render(
       <TerminalSurface
         tab={terminalTab(3)}
-        sessionId={undefined}
         active
         controller={controller as never}
         t={translate}
@@ -123,7 +160,6 @@ describe('中栏终端画布', () => {
     const rendered = render(
       <TerminalSurface
         tab={terminalTab(4)}
-        sessionId="session-1"
         active
         controller={controllerFake(view) as never}
         t={translate}
@@ -138,7 +174,6 @@ describe('中栏终端画布', () => {
     const rendered = render(
       <TerminalSurface
         tab={terminalTab(5)}
-        sessionId="session-1"
         active
         controller={controllerFake(view) as never}
         t={translate}
@@ -153,7 +188,6 @@ describe('中栏终端画布', () => {
     const rendered = render(
       <TerminalSurface
         tab={terminalTab(6)}
-        sessionId="session-1"
         active
         controller={controllerFake(view) as never}
         t={translate}
@@ -162,11 +196,81 @@ describe('中栏终端画布', () => {
     fireEvent.click(rendered.getByRole('button', { name: zh['terminal.control'] }))
     expect(view.connect).toHaveBeenCalled()
   })
+
+  it('宿主网格与模拟器一致时不重复回传服务端尺寸', () => {
+    const view = makeView()
+    render(
+      <TerminalSurface tab={terminalTab(9)} active controller={controllerFake(view) as never} t={translate} />,
+    )
+    const before = view.resize.mock.calls.length
+    expect(before).toBeGreaterThanOrEqual(1)
+    // The mock emulator is fixed at 80x24; proposing the same grid must hit the
+    // idempotency guard and skip re-notifying the server.
+    terminalHarness.fitInstances[0]!.proposeDimensions.mockReturnValue({ cols: 80, rows: 24 })
+    FakeResizeObserver.instances[0]!.trigger()
+    expect(view.resize.mock.calls.length).toBe(before)
+  })
+
+  it('按服务端 maxRows/maxCols 上限截断容器尺寸', () => {
+    const view = makeView() // environment.maxCols = 500, maxRows = 200
+    render(
+      <TerminalSurface tab={terminalTab(12)} active controller={controllerFake(view) as never} t={translate} />,
+    )
+    terminalHarness.fitInstances[0]!.proposeDimensions.mockReturnValue({ cols: 600, rows: 500 })
+    FakeResizeObserver.instances[0]!.trigger()
+    expect(view.resize).toHaveBeenLastCalledWith(500, 200)
+  })
+
+  it('容器高度为零或行数不足时不回传尺寸', () => {
+    const view = makeView()
+    render(
+      <TerminalSurface tab={terminalTab(13)} active controller={controllerFake(view) as never} t={translate} />,
+    )
+    const before = view.resize.mock.calls.length
+    terminalHarness.fitInstances[0]!.proposeDimensions.mockReturnValue({ cols: 120, rows: 0 })
+    FakeResizeObserver.instances[0]!.trigger()
+    expect(view.resize.mock.calls.length).toBe(before)
+
+    terminalHarness.fitInstances[0]!.proposeDimensions.mockReturnValue({ cols: 120, rows: 40 })
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(0)
+    FakeResizeObserver.instances[0]!.trigger()
+    expect(view.resize.mock.calls.length).toBe(before)
+  })
+
+  it('编辑器轨道过渡期间挂起 fit，过渡结束后补算尺寸', () => {
+    const view = makeView({ phase: 'connecting', writable: false })
+    render(
+      <TerminalSurface tab={terminalTab(10)} active controller={controllerFake(view) as never} t={translate} />,
+    )
+    document.body.dispatchEvent(new Event(EDITOR_TRANSITION_START_EVENT, { bubbles: true }))
+    // Terminal becomes ready mid-transition: fit is deferred, not applied.
+    act(() => { view.set({ phase: 'connected', writable: true }) })
+    expect(view.resize).not.toHaveBeenCalled()
+    // Transition ends: the pending fit runs and reports the fitted grid.
+    document.body.dispatchEvent(new Event(EDITOR_TRANSITION_END_EVENT, { bubbles: true }))
+    expect(view.resize).toHaveBeenCalledWith(120, 50)
+  })
+
+  it('宿主主题令牌变化时重算 xterm 主题', async () => {
+    const view = makeView()
+    render(
+      <TerminalSurface tab={terminalTab(11)} active controller={controllerFake(view) as never} t={translate} />,
+    )
+    const terminal = terminalHarness.instances[0]!
+    expect(terminal.options.theme).toBeUndefined()
+    await act(async () => {
+      document.body.setAttribute('data-ds-dark-theme', 'true')
+      await new Promise(resolve => { setTimeout(resolve, 0) })
+    })
+    expect(terminal.options.theme).toBeDefined()
+    document.body.removeAttribute('data-ds-dark-theme')
+  })
 })
 
 interface FakeView {
   id: string
   state: { getSnapshot: () => Record<string, unknown>; subscribe: (listener: () => void) => () => void }
+  set: (patch: Record<string, unknown>) => void
   mount: ReturnType<typeof vi.fn>
   write: ReturnType<typeof vi.fn>
   resize: ReturnType<typeof vi.fn>
@@ -191,6 +295,10 @@ function makeView(patch: Record<string, unknown> = {}): FakeView {
     state: {
       getSnapshot: () => state,
       subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    },
+    set: (patch) => {
+      state = { ...state, ...patch }
+      for (const listener of [...listeners]) listener()
     },
     mount: vi.fn(() => vi.fn()),
     write: vi.fn(),

@@ -36,7 +36,6 @@ interface EditorPaneProps {
   tabs: WorkbenchTab[]
   group: EditorGroup
   state: WorkbenchState
-  sessionId: string
   workspaceId: string
   controller: WorkbenchController
   t: TranslateNS<'workbench'>
@@ -50,7 +49,6 @@ export function EditorPane({
   tabs,
   group,
   state,
-  sessionId,
   workspaceId,
   controller,
   t,
@@ -162,7 +160,6 @@ export function EditorPane({
         >
           <TerminalSurface
             tab={terminal}
-            sessionId={sessionId}
             active={terminal.id === activeId}
             controller={controller}
             t={t}
