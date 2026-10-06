@@ -124,19 +124,16 @@ export class GitBackend {
       ? await this.stagedSides(cwd, status)
       : await this.worktreeSides(workspaceId, cwd, status)
     const stat = await this.changeStat(cwd, path, staged, status, modified)
-    const binary = original.binary || modified.binary || stat?.binary === true
     this.ctx.logger.info(`workbench-layout: opened ${staged ? 'staged' : 'worktree'} Git diff for ${JSON.stringify(path)}`)
-    return {
+    return this.buildFileDiff({
       kind: staged ? 'staged' : 'worktree',
       path,
-      ...(status.originalPath === undefined ? {} : { originalPath: status.originalPath }),
+      originalPath: status.originalPath,
       status: normalizeStatus(staged ? status.index : status.worktree),
-      original: binary ? '' : original.text,
-      modified: binary ? '' : modified.text,
-      binary,
-      ...(stat?.additions === undefined ? {} : { additions: stat.additions }),
-      ...(stat?.deletions === undefined ? {} : { deletions: stat.deletions }),
-    }
+      original,
+      modified,
+      stat,
+    })
   }
 
   /** Return the HEAD-side text used by editable source-line Git decorations. */
@@ -432,22 +429,19 @@ export class GitBackend {
       ? emptyGitText()
       : await this.runner.readGitBlob(cwd, `${details.commit.hash}:${file.path}`)
     const stat = await this.commitStat(cwd, details, file)
-    const binary = original.binary || modified.binary || stat?.binary === true
     this.ctx.logger.info(`workbench-layout: opened Git commit file diff ${details.commit.shortHash} ${JSON.stringify(path)}`)
-    return {
+    return this.buildFileDiff({
       kind: 'commit',
       path: file.path,
-      ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
+      originalPath: file.originalPath,
       status: normalizeStatus(file.status),
       revision: details.commit.hash,
-      ...(details.parentRevision === undefined ? {} : { parentRevision: details.parentRevision }),
+      parentRevision: details.parentRevision,
       commit: details.commit,
-      original: binary ? '' : original.text,
-      modified: binary ? '' : modified.text,
-      binary,
-      ...(stat?.additions === undefined ? {} : { additions: stat.additions }),
-      ...(stat?.deletions === undefined ? {} : { deletions: stat.deletions }),
-    }
+      original,
+      modified,
+      stat,
+    })
   }
 
   async comparisonFiles(workspaceId: unknown, revisionValue: unknown): Promise<GitCommitFiles> {
@@ -479,21 +473,18 @@ export class GitBackend {
           'diff', '--numstat', '-z', '--find-renames', '--find-copies', details.commit.hash, '--',
           ...file.originalPath === undefined ? [file.path] : [file.originalPath, file.path],
         ])).stdout)[0]
-    const binary = original.binary || modified.binary || stat?.binary === true
     this.ctx.logger.info(`workbench-layout: opened workspace comparison for ${details.commit.shortHash} ${JSON.stringify(path)}`)
-    return {
+    return this.buildFileDiff({
       kind: 'comparison',
       path,
-      ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
+      originalPath: file.originalPath,
       status: normalizeStatus(file.status),
       revision: details.commit.hash,
       commit: details.commit,
-      original: binary ? '' : original.text,
-      modified: binary ? '' : modified.text,
-      binary,
-      ...(stat?.additions === undefined ? {} : { additions: stat.additions }),
-      ...(stat?.deletions === undefined ? {} : { deletions: stat.deletions }),
-    }
+      original,
+      modified,
+      stat,
+    })
   }
 
   async commitAction(workspaceId: unknown, operationValue: unknown, revisionValue: unknown): Promise<GitCommitActionResult> {
@@ -589,6 +580,36 @@ export class GitBackend {
     const summary = result.stdout.trim().split(/\r?\n/u)[0] ?? 'Git 提交完成。'
     this.ctx.logger.info('workbench-layout: Git commit created from explicit user action')
     return { summary }
+  }
+
+  /** 统一构造 GitFileDiff：收敛 binary 判定与可选字段的条件展开样板。 */
+  private buildFileDiff(input: {
+    kind: GitFileDiff['kind']
+    path: string
+    status: GitFileDiff['status']
+    original: GitText
+    modified: GitText | WorkspaceGitText
+    originalPath?: string | undefined
+    revision?: string | undefined
+    parentRevision?: string | undefined
+    commit?: GitCommit | undefined
+    stat?: GitNumstat | undefined
+  }): GitFileDiff {
+    const binary = input.original.binary || input.modified.binary || input.stat?.binary === true
+    return {
+      kind: input.kind,
+      path: input.path,
+      ...(input.originalPath === undefined ? {} : { originalPath: input.originalPath }),
+      status: input.status,
+      ...(input.revision === undefined ? {} : { revision: input.revision }),
+      ...(input.parentRevision === undefined ? {} : { parentRevision: input.parentRevision }),
+      ...(input.commit === undefined ? {} : { commit: input.commit }),
+      original: binary ? '' : input.original.text,
+      modified: binary ? '' : input.modified.text,
+      binary,
+      ...(input.stat?.additions === undefined ? {} : { additions: input.stat.additions }),
+      ...(input.stat?.deletions === undefined ? {} : { deletions: input.stat.deletions }),
+    }
   }
 
   private async stagedSides(cwd: string, file: GitFileStatus): Promise<[GitText, GitText]> {

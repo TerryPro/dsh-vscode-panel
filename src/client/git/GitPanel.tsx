@@ -174,6 +174,33 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
   }, [controller, graph, loading, workspaceId])
   const requestMoreGraph = useCallback(() => { void loadMoreGraph() }, [loadMoreGraph])
 
+  /** 编排一次独占的 Git 变更操作：置 busy、清空提示、竞态守卫、错误上报与收尾。 */
+  const runGitOperation = async <T,>(config: {
+    busy: string
+    perform: (targetWorkspace: string) => Promise<T>
+    onSuccess?: (value: T, targetWorkspace: string) => Promise<void> | void
+    error?: (message: string) => void
+    clearError?: boolean
+    clearResult?: boolean
+    onStart?: () => void
+  }): Promise<void> => {
+    if (workspaceId === undefined) return
+    const targetWorkspace = workspaceId
+    setBusy(config.busy)
+    if (config.clearError !== false) setError(null)
+    if (config.clearResult !== false) setResult(null)
+    config.onStart?.()
+    try {
+      const value = await config.perform(targetWorkspace)
+      if (activeWorkspace.current !== targetWorkspace) return
+      await config.onSuccess?.(value, targetWorkspace)
+    } catch (reason: unknown) {
+      if (activeWorkspace.current === targetWorkspace) (config.error ?? setError)(messageOf(reason))
+    } finally {
+      if (activeWorkspace.current === targetWorkspace) setBusy(null)
+    }
+  }
+
   const update = async (targetWorkspace: string, operation: () => Promise<GitStatus>): Promise<boolean> => {
     setError(null)
     try {
@@ -205,27 +232,18 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
     }
   }
 
-  const batchIndexOperation = async (operation: 'stage' | 'unstage'): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
-    setBusy(`${operation}-all`)
-    setError(null)
-    setResult(null)
-    try {
-      const next = operation === 'stage'
-        ? await controller.api.gitStageAll(targetWorkspace)
-        : await controller.api.gitUnstageAll(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
+  const batchIndexOperation = (operation: 'stage' | 'unstage'): Promise<void> => runGitOperation({
+    busy: `${operation}-all`,
+    perform: targetWorkspace => operation === 'stage'
+      ? controller.api.gitStageAll(targetWorkspace)
+      : controller.api.gitUnstageAll(targetWorkspace),
+    onSuccess: (next, targetWorkspace) => {
       setStatus(next)
       controller.acceptGitStatus?.(targetWorkspace, next)
       controller.closeDiffTabs(targetWorkspace)
       setResult(t(operation === 'stage' ? 'git.stageAllDone' : 'git.unstageAllDone'))
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
-  }
+    },
+  })
 
   const requestDiscard = (request: { scope: 'all' } | { scope: 'file'; file: GitFileStatus }): void => {
     if (workbench.tabs.some(tab => tab.kind === 'file' && tab.dirty)) {
@@ -236,53 +254,38 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
     setDiscardRequest(request)
   }
 
-  const confirmDiscard = async (): Promise<void> => {
-    if (workspaceId === undefined || discardRequest === null) return
-    const targetWorkspace = workspaceId
+  const confirmDiscard = (): Promise<void> => {
+    if (discardRequest === null) return Promise.resolve()
     const request = discardRequest
-    setBusy('discard')
-    setError(null)
-    setResult(null)
-    try {
-      const next = request.scope === 'all'
-        ? await controller.api.gitDiscardAll(targetWorkspace)
-        : await controller.api.gitDiscard(targetWorkspace, request.file.path)
-      controller.resetWorkspaceView(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
-      setStatus(next)
-      controller.acceptGitStatus?.(targetWorkspace, next)
-      setDiscardRequest(null)
-      setResult(t(request.scope === 'all' ? 'git.discardAllDone' : 'git.discardDone'))
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) {
+    return runGitOperation({
+      busy: 'discard',
+      error: message => { setDiscardRequest(null); setError(message) },
+      perform: async (targetWorkspace) => {
+        const next = request.scope === 'all'
+          ? await controller.api.gitDiscardAll(targetWorkspace)
+          : await controller.api.gitDiscard(targetWorkspace, request.file.path)
+        controller.resetWorkspaceView(targetWorkspace)
+        return next
+      },
+      onSuccess: (next, targetWorkspace) => {
+        setStatus(next)
+        controller.acceptGitStatus?.(targetWorkspace, next)
         setDiscardRequest(null)
-        setError(messageOf(reason))
-      }
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
+        setResult(t(request.scope === 'all' ? 'git.discardAllDone' : 'git.discardDone'))
+      },
+    })
   }
 
-  const commit = async (): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
-    setBusy('commit')
-    setError(null)
-    setResult(null)
-    try {
-      const committed = await controller.api.gitCommit(targetWorkspace, message)
-      if (activeWorkspace.current !== targetWorkspace) return
+  const commit = (): Promise<void> => runGitOperation({
+    busy: 'commit',
+    perform: targetWorkspace => controller.api.gitCommit(targetWorkspace, message),
+    onSuccess: async (committed, targetWorkspace) => {
       setMessage('')
       setResult(committed.summary)
       controller.closeDiffTabs(targetWorkspace)
       await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current !== targetWorkspace) return
-      setError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
-  }
+    },
+  })
 
   const showCommitDetails = async (commitValue: GitCommit, kind: GitCommitDetailKind, toggle = true): Promise<void> => {
     if (workspaceId === undefined) return
@@ -342,107 +345,94 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
     setCommitActionRequest({ action, commit: commitValue })
   }
 
-  const confirmCommitAction = async (): Promise<void> => {
-    if (workspaceId === undefined || commitActionRequest === null) return
-    const targetWorkspace = workspaceId
+  const confirmCommitAction = (): Promise<void> => {
+    if (commitActionRequest === null) return Promise.resolve()
     const request = commitActionRequest
-    setBusy(`commit-${request.action}`)
-    setCommitActionError(null)
-    setResult(null)
-    try {
-      const value = await controller.api.gitCommitAction(targetWorkspace, request.action, request.commit.hash)
-      controller.resetWorkspaceView(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
-      setCommitActionRequest(null)
-      setResult(value.summary)
-      await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setCommitActionError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
+    return runGitOperation({
+      busy: `commit-${request.action}`,
+      clearError: false,
+      error: setCommitActionError,
+      onStart: () => { setCommitActionError(null) },
+      perform: async (targetWorkspace) => {
+        const value = await controller.api.gitCommitAction(targetWorkspace, request.action, request.commit.hash)
+        controller.resetWorkspaceView(targetWorkspace)
+        return value
+      },
+      onSuccess: async value => {
+        setCommitActionRequest(null)
+        setResult(value.summary)
+        await refresh()
+      },
+    })
   }
 
-  const switchBranch = async (ref: string): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
+  const switchBranch = (ref: string): Promise<void> => {
+    if (workspaceId === undefined) return Promise.resolve()
     if (workbench.tabs.some(tab => tab.kind === 'file' && tab.dirty)) {
       setError(t('git.unsavedOperation'))
-      return
+      return Promise.resolve()
     }
     const target = branches?.branches.find(branch => branch.ref === ref)
-    setBusy('switch')
-    setError(null)
-    setResult(null)
-    try {
-      await controller.api.gitSwitchBranch(targetWorkspace, ref)
-      controller.resetWorkspaceView(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
-      setResult(`${t('git.switchedBranch')} ${target?.name ?? ref}`)
-      await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current !== targetWorkspace) return
-      setError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
+    return runGitOperation({
+      busy: 'switch',
+      perform: async (targetWorkspace) => {
+        await controller.api.gitSwitchBranch(targetWorkspace, ref)
+        controller.resetWorkspaceView(targetWorkspace)
+      },
+      onSuccess: async () => {
+        setResult(`${t('git.switchedBranch')} ${target?.name ?? ref}`)
+        await refresh()
+      },
+    })
   }
 
-  const manageBranch = async (nameOrRef: string, source?: string): Promise<void> => {
-    if (workspaceId === undefined || branchDialog === null) return
-    const targetWorkspace = workspaceId
+  const manageBranch = (nameOrRef: string, source?: string): Promise<void> => {
+    if (workspaceId === undefined || branchDialog === null) return Promise.resolve()
     const operation = branchDialog.mode
     const switchesWorktree = operation === 'create' || operation === 'create-from'
     if (switchesWorktree && workbench.tabs.some(tab => tab.kind === 'file' && tab.dirty)) {
       setBranchDialogError(t('git.unsavedOperation'))
-      return
+      return Promise.resolve()
     }
-    setBusy(`branch-${operation}`)
-    setBranchDialogError(null)
-    setError(null)
-    setResult(null)
-    try {
-      if (operation === 'create' || operation === 'create-from') {
-        await controller.api.gitCreateBranch(targetWorkspace, nameOrRef, source)
-        controller.resetWorkspaceView(targetWorkspace)
-      } else if (operation === 'rename') {
-        await controller.api.gitRenameBranch(targetWorkspace, nameOrRef)
-      } else {
-        await controller.api.gitDeleteBranch(targetWorkspace, nameOrRef)
-      }
-      if (activeWorkspace.current !== targetWorkspace) return
-      setBranchDialog(null)
-      setResult(t(`git.branchDialog.${operation}.done`))
-      await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setBranchDialogError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
+    return runGitOperation({
+      busy: `branch-${operation}`,
+      error: setBranchDialogError,
+      onStart: () => { setBranchDialogError(null) },
+      perform: async (targetWorkspace) => {
+        if (operation === 'create' || operation === 'create-from') {
+          await controller.api.gitCreateBranch(targetWorkspace, nameOrRef, source)
+          controller.resetWorkspaceView(targetWorkspace)
+        } else if (operation === 'rename') {
+          await controller.api.gitRenameBranch(targetWorkspace, nameOrRef)
+        } else {
+          await controller.api.gitDeleteBranch(targetWorkspace, nameOrRef)
+        }
+      },
+      onSuccess: async () => {
+        setBranchDialog(null)
+        setResult(t(`git.branchDialog.${operation}.done`))
+        await refresh()
+      },
+    })
   }
 
-  const remoteOperation = async (operation: GitRemoteOperation): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
+  const remoteOperation = (operation: GitRemoteOperation): Promise<void> => {
+    if (workspaceId === undefined) return Promise.resolve()
     if ((operation === 'pull' || operation === 'sync') && workbench.tabs.some(tab => tab.kind === 'file' && tab.dirty)) {
       setError(t('git.unsavedOperation'))
-      return
+      return Promise.resolve()
     }
-    setBusy(operation)
-    setError(null)
-    setResult(null)
-    try {
-      await controller.api.gitRemoteOperation(targetWorkspace, operation)
-      if (operation === 'pull' || operation === 'sync') controller.resetWorkspaceView(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
-      setResult(t(`git.${operation}Done`))
-      await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current !== targetWorkspace) return
-      setError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
+    return runGitOperation({
+      busy: operation,
+      perform: async (targetWorkspace) => {
+        await controller.api.gitRemoteOperation(targetWorkspace, operation)
+        if (operation === 'pull' || operation === 'sync') controller.resetWorkspaceView(targetWorkspace)
+      },
+      onSuccess: async () => {
+        setResult(t(`git.${operation}Done`))
+        await refresh()
+      },
+    })
   }
 
   const openRemoteDialog = async (mode: GitRemoteDialogMode): Promise<void> => {
@@ -459,71 +449,64 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
     }
   }
 
-  const saveRemote = async (draft: GitRemoteDraft): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
-    setBusy('remote-config')
-    setRemoteDialogError(null)
-    try {
-      const value = draft.currentName === undefined
-        ? await controller.api.gitAddRemote(targetWorkspace, draft)
-        : await controller.api.gitUpdateRemote(targetWorkspace, draft.currentName, draft)
-      if (activeWorkspace.current !== targetWorkspace) return
+  const saveRemote = (draft: GitRemoteDraft): Promise<void> => runGitOperation({
+    busy: 'remote-config',
+    clearError: false,
+    clearResult: false,
+    error: setRemoteDialogError,
+    onStart: () => { setRemoteDialogError(null) },
+    perform: targetWorkspace => draft.currentName === undefined
+      ? controller.api.gitAddRemote(targetWorkspace, draft)
+      : controller.api.gitUpdateRemote(targetWorkspace, draft.currentName, draft),
+    onSuccess: async value => {
       setRemotes(value)
       setRemoteDialog(null)
       setResult(t('git.remoteDialog.saved'))
       await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setRemoteDialogError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
-  }
+    },
+  })
 
-  const deleteRemote = async (name: string): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
-    setBusy('remote-config')
-    setRemoteDialogError(null)
-    try {
-      const value = await controller.api.gitDeleteRemote(targetWorkspace, name)
-      if (activeWorkspace.current !== targetWorkspace) return
+  const deleteRemote = (name: string): Promise<void> => runGitOperation({
+    busy: 'remote-config',
+    clearError: false,
+    clearResult: false,
+    error: setRemoteDialogError,
+    onStart: () => { setRemoteDialogError(null) },
+    perform: targetWorkspace => controller.api.gitDeleteRemote(targetWorkspace, name),
+    onSuccess: async value => {
       setRemotes(value)
       setRemoteDialog(null)
       setResult(t('git.remoteDialog.deleted'))
       await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setRemoteDialogError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
-  }
+    },
+  })
 
-  const targetRemoteOperation = async (
+  const targetRemoteOperation = (
     operation: GitTargetRemoteOperation,
     remote: string,
     branch?: string,
   ): Promise<void> => {
-    if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
+    if (workspaceId === undefined) return Promise.resolve()
     if (operation === 'pull' && workbench.tabs.some(tab => tab.kind === 'file' && tab.dirty)) {
       setRemoteDialogError(t('git.unsavedOperation'))
-      return
+      return Promise.resolve()
     }
-    setBusy(`remote-${operation}`)
-    setRemoteDialogError(null)
-    try {
-      await controller.api.gitTargetRemoteOperation(targetWorkspace, operation, remote, branch)
-      if (operation === 'pull') controller.resetWorkspaceView(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
-      setRemoteDialog(null)
-      setResult(t(`git.remoteDialog.target.${operation}Done`, { remote }))
-      await refresh()
-    } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setRemoteDialogError(messageOf(reason))
-    } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
-    }
+    return runGitOperation({
+      busy: `remote-${operation}`,
+      clearError: false,
+      clearResult: false,
+      error: setRemoteDialogError,
+      onStart: () => { setRemoteDialogError(null) },
+      perform: async (targetWorkspace) => {
+        await controller.api.gitTargetRemoteOperation(targetWorkspace, operation, remote, branch)
+        if (operation === 'pull') controller.resetWorkspaceView(targetWorkspace)
+      },
+      onSuccess: async () => {
+        setRemoteDialog(null)
+        setResult(t(`git.remoteDialog.target.${operation}Done`, { remote }))
+        await refresh()
+      },
+    })
   }
 
   if (workspaceId === undefined) return <div className={css.emptyState}>{t('git.emptyWorkspace')}</div>
