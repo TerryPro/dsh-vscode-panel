@@ -28,7 +28,7 @@ describe('中栏长行自动换行', () => {
   })
 
   it('把普通编辑器与 Markdown 预览约束在弹性中栏内', () => {
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/editor/editor.module.css'), 'utf8')
     expect(stylesheet).toMatch(/\.editorBody\s*\{[^}]*min-width: 0[^}]*overflow: hidden/u)
     expect(stylesheet).toMatch(/\.codeEditorHost\s*\{[^}]*flex: 1[^}]*width: 100%[^}]*min-width: 0[^}]*overflow: hidden/u)
     expect(stylesheet).toMatch(/\.markdownPreview\s*\{[^}]*flex: 1[^}]*width: 100%[^}]*min-width: 0[^}]*overflow: auto/u)

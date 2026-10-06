@@ -15,7 +15,7 @@ import {
   isEditorTrackExpanded,
   isEditorTrackTransitioning,
 } from '../layout/editor-layout-contract.ts'
-import css from '../core/Workbench.module.css'
+import css from './terminal.module.css'
 
 export interface TerminalSurfaceProps {
   tab: WorkbenchTerminalTab

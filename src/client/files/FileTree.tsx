@@ -15,7 +15,7 @@ import { FileTreeLevel, isContextMenuKey, type FileTreeCreateDraft } from './Fil
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import { useFileTreeMutations } from './use-file-tree-mutations.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import css from '../core/Workbench.module.css'
+import css from './files.module.css'
 
 const FILE_TREE_REFRESH_INTERVAL_MS = 3_000
 

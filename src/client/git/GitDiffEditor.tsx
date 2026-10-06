@@ -7,7 +7,7 @@ import type { GitFileDiff } from '../../shared/contracts.ts'
 import type { DiffViewMode } from '../model/controller.ts'
 import { DiffSurface } from '../editor/DiffSurface.tsx'
 import { diffKindText } from './git-diff-labels.ts'
-import css from '../core/Workbench.module.css'
+import css from './git.module.css'
 
 export interface GitDiffEditorProps {
   diff: GitFileDiff

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { EditorSplitOrientation } from '../model/controller.ts'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 
 interface SplitDividerProps {
   orientation: EditorSplitOrientation

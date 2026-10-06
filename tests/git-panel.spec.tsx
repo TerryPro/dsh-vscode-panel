@@ -112,7 +112,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Git panel', () => {
   it('uses the native neutral notice surface for successful Git feedback', () => {
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/git/git.module.css'), 'utf8')
     const successRule = stylesheet.match(/\.success\s*\{[^}]+\}/u)?.[0]
 
     expect(successRule).toContain('background: var(--dsw-alias-interactive-bg-hover)')
@@ -141,7 +141,7 @@ describe('Git panel', () => {
     expect(rootFileText?.hasAttribute('data-has-directory')).toBe(false)
     expect(rootFileText?.querySelector('[data-git-file-directory]')).toBeNull()
 
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/git/git.module.css'), 'utf8')
     const changeRowRule = stylesheet.match(/\.gitChangeRow\s*\{[^}]+\}/u)?.[0]
     const rootNameRule = stylesheet.match(/\.gitFileText > \.rowName\s*\{[^}]+\}/u)?.[0]
     const overlayRule = stylesheet.match(/\.gitRowActions\s*\{[^}]+\}/u)?.[0]

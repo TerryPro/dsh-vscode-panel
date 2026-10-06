@@ -11,7 +11,7 @@ import type { WorkbenchController, WorkbenchTerminalTab } from '../model/control
 import { IconFileAddOutline16, IconFolderAddOutline16 } from '../files/CreateEntryIcons.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { useWorkbench } from '../model/use-workbench.ts'
-import css from '../core/Workbench.module.css'
+import css from './shell.module.css'
 
 interface WorkbenchRailProps {
   controller: WorkbenchController

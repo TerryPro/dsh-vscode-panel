@@ -5,7 +5,7 @@ import type { WorkbenchTab } from '../model/controller.ts'
 import { diffKindText } from '../git/git-diff-labels.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 
 export interface EditorTabsProps {
   tabs: readonly WorkbenchTab[]

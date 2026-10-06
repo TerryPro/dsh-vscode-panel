@@ -7,7 +7,7 @@ import {
 import type { DirectoryListing, WorkspaceEntry } from '../../shared/contracts.ts'
 import { FileTreeCreateRow, type FileTreeCreateKind } from './FileTreeCreateRow.tsx'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
-import css from '../core/Workbench.module.css'
+import css from './files.module.css'
 
 export interface FileTreeCreateDraft {
   parent: string

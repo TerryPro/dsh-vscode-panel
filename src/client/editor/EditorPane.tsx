@@ -20,7 +20,7 @@ import { EditorTabBody } from './EditorTabBody.tsx'
 import { IconBoldOutline16, IconBulletListOutline16, IconInlineCodeOutline16, IconItalicOutline16, IconLinkOutline16, IconRevertOutline16, IconSplitHorizontalOutline16, IconSplitVerticalOutline16, IconTableOutline16 } from './EditorViewIcons.tsx'
 import { runMarkdownCommand, type MarkdownCommandKind } from '../markdown/markdown-format.ts'
 import { TerminalSurface } from '../terminal/TerminalSurface.tsx'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 
 const MARKDOWN_FORMAT_COMMANDS: readonly { kind: MarkdownCommandKind; Icon: ComponentType<{ size?: number }>; labelKey: WorkbenchKey }[] = [
   { kind: 'bold', Icon: IconBoldOutline16, labelKey: 'markdown.bold' },

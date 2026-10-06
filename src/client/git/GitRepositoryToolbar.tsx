@@ -24,7 +24,7 @@ import type { GitFileLayout } from './git-tree.ts'
 import { IconSourceControlOutline16 } from './SourceControlIcon.tsx'
 import type { GitBranchDialogMode } from './GitBranchDialog.tsx'
 import type { GitRemoteDialogMode } from './GitRemoteDialog.tsx'
-import css from '../core/Workbench.module.css'
+import css from './git.module.css'
 
 interface GitRepositoryToolbarProps {
   status: GitStatus | null

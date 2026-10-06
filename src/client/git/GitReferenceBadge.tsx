@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { GitReference, GitReferenceKind } from '../../shared/contracts.ts'
-import css from '../core/Workbench.module.css'
+import css from './git.module.css'
 
 interface GitReferenceBadgeProps {
   reference: GitReference

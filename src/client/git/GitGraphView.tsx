@@ -15,7 +15,7 @@ import { GitCommitFilesView } from './GitCommitFilesView.tsx'
 import { buildGitGraph, type GitGraphEdge, type GitGraphRow } from './git-graph.ts'
 import type { GitFileLayout } from './git-tree.ts'
 import { GitReferenceBadge } from './GitReferenceBadge.tsx'
-import css from '../core/Workbench.module.css'
+import css from './git.module.css'
 
 const GRAPH_ROW_HEIGHT = 28
 const GRAPH_NODE_Y = GRAPH_ROW_HEIGHT / 2

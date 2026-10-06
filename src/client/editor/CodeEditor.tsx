@@ -12,7 +12,7 @@ import { dshEditorSetup } from './editor-setup.ts'
 import { languageForPath } from './editor-languages.ts'
 import { editorThemeExtensions, inlineDiffTheme } from './editor-theme.ts'
 import { markdownEditingExtensions } from '../markdown/markdown-format.ts'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 import { isMarkdownPath } from '../../shared/markdown-path.ts'
 import {
   DEFAULT_GIT_LINE_LABELS,

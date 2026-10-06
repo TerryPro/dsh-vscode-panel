@@ -27,7 +27,7 @@ describe('侧栏底部同行布局', () => {
     expect(actions.nextElementSibling).toBe(settings)
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('compact Settings action'))
 
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/styles/global.module.css'), 'utf8')
     expect(stylesheet).toContain('[data-dsh-workbench-sidebar-foot][data-wide] [data-dsh-workbench-sidebar-settings-trigger]')
     expect(stylesheet).toContain('height: 32px')
 

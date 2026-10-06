@@ -25,7 +25,7 @@ import { GitRepositoryToolbar } from './GitRepositoryToolbar.tsx'
 import { GitRemoteDialog, type GitRemoteDialogMode, type GitRemoteDraft } from './GitRemoteDialog.tsx'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import css from '../core/Workbench.module.css'
+import css from './git.module.css'
 
 const GIT_PANEL_REFRESH_INTERVAL_MS = 5_000
 

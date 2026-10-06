@@ -16,7 +16,7 @@ import { isHtmlPath, resolveRelativePath, type ReadHtmlRelative } from './html-p
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 
 interface EditorTabBodyProps {
   tab: WorkbenchTab

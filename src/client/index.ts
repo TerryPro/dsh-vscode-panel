@@ -20,6 +20,7 @@ import { installOpenFileRefresh } from './editor/open-file-refresh.ts'
 import { createWorkbenchWorkspaceActivator } from './model/workspace-layout.ts'
 import { WorkbenchEditor } from './editor/WorkbenchEditor.tsx'
 import { WorkbenchSidebar } from './shell/WorkbenchSidebar.tsx'
+import './styles/global.module.css'
 
 export const inject = ['slots', 'locale', 'layout', 'webTerminals']
 

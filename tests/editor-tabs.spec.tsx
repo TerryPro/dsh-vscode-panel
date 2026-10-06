@@ -46,7 +46,7 @@ describe('文件标签栏', () => {
   })
 
   it('使用紧凑的 38px 中栏顶栏', () => {
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/editor/editor.module.css'), 'utf8')
     const headerRule = stylesheet.match(/\.editorHeader\s*\{(?<body>[\s\S]*?)\}/u)?.groups?.body
     expect(headerRule).toContain('height: 38px;')
   })

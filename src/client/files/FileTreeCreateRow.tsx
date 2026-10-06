@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { IconFolderCloseRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconFileOutline16 } from './CreateEntryIcons.tsx'
-import css from '../core/Workbench.module.css'
+import css from './files.module.css'
 
 export type FileTreeCreateKind = 'file' | 'directory'
 

@@ -1,0 +1,195 @@
+.modeSwitchAnchor {
+  display: none;
+}
+
+/* The independent activity dock: a viewport-fixed left column that lives
+   outside the AppFrame grid and the collapsible sidebar, so it is present in
+   every fold state. The AppFrame grid reserves the same width as inline
+   padding (see activity-dock-layout.ts) so its columns clear the dock. */
+.activityDock {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 60;
+  width: 48px;
+  box-sizing: border-box;
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-specific-sidebar-fill);
+}
+
+/* Brand mark pinned to the dock's title-bar band (top-left corner). */
+.dockBrand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--dsh-windows-titlebar-height, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dockBrand svg {
+  width: 22px;
+  height: 22px;
+}
+
+.modeSwitch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+  /* Start the icon column below the titlebar so the first icon aligns with the
+     sidebar's content row, leaving the brand mark room in the top band. */
+  padding: calc(var(--dsh-windows-titlebar-height, 40px) + 8px) 0 8px;
+  box-sizing: border-box;
+}
+
+.activitySpacer {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.modeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 36px;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12);
+  cursor: pointer;
+}
+
+.modeButton > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modeButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.modeButton[data-active] {
+  background: var(--dsw-alias-interactive-bg-active, var(--dsw-alias-interactive-bg-hover));
+  color: var(--dsw-alias-button-info-fill);
+}
+
+.sidebarBody,
+.panelBody {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  width: 100%;
+  color: var(--dsw-alias-label-primary);
+}
+
+.collapsedBody {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  width: 36px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.collapsedBody::-webkit-scrollbar {
+  display: none;
+}
+
+.railButton {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.railButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.railButton[data-active] {
+  background: var(--dsw-alias-interactive-bg-active, var(--dsw-alias-interactive-bg-hover));
+  color: var(--dsw-alias-button-info-fill);
+}
+
+.railButton:disabled {
+  color: var(--dsw-alias-label-caption);
+  cursor: not-allowed;
+}
+
+.railButton[data-status='connecting']::after,
+.railButton[data-status='running']::after,
+.railButton[data-status='exited']::after,
+.railButton[data-status='error']::after {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--dsw-specific-sidebar-fill);
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+  content: '';
+}
+
+.railButton[data-status='connecting']::after {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.railButton[data-status='running']::after {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.railButton[data-status='error']::after {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.railTerminalAdd {
+  position: relative;
+  display: inline-flex;
+}
+
+.railAddGlyph {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  padding: 1px;
+  border-radius: 50%;
+  background: var(--dsw-specific-sidebar-fill);
+}
+
+@media (prefers-reduced-motion: reduce) {
+.treeRow,
+  .modeButton,
+  .iconButton {
+    transition: none;
+  }
+}

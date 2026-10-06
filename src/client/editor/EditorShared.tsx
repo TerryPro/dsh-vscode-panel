@@ -2,7 +2,7 @@
 
 import { FishLogo } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceImageFile } from '../../shared/contracts.ts'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 
 export function EditorEmpty({ text }: { text: string }) {
   return (

@@ -17,7 +17,7 @@ import { IconEditorPanelOutline16 } from '../editor/EditorPanelIcon.tsx'
 import { createActivityDockMount } from '../layout/activity-dock-layout.ts'
 import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, type SidebarFooterLayout } from '../layout/sidebar-footer-layout.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import css from '../core/Workbench.module.css'
+import css from './shell.module.css'
 
 /**
  * The official shell owns sidebar fold state; its toggle button is the only

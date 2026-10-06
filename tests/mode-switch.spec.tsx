@@ -137,7 +137,8 @@ describe('工作台活动栏', () => {
   })
 
   it('停靠列与按钮遵循固定 48px 列与官方圆形几何', () => {
-    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/core/Workbench.module.css'), 'utf8')
+    const stylesheet = ['src/client/shell/shell.module.css', 'src/client/styles/global.module.css']
+      .map((p) => readFileSync(resolve(process.cwd(), p), 'utf8')).join('\n')
     const dockRule = stylesheet.match(/\.activityDock\s*\{[^}]+\}/u)?.[0]
     const modeButtonRule = stylesheet.match(/\.modeButton\s*\{[^}]+\}/u)?.[0]
 

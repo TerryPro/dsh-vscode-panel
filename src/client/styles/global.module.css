@@ -1,0 +1,79 @@
+/* The official footer owns separate action and Settings seats. In the wide
+   sidebar, arrange those existing siblings as an independent two-column tool
+   row; no React node is moved and neither hit target overlays the other. */
+[data-dsh-workbench-sidebar-foot][data-wide] {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+}
+
+[data-dsh-workbench-sidebar-foot][data-wide] > [data-dsh-workbench-sidebar-foot-actions] {
+  grid-column: 2;
+  grid-row: 1;
+  justify-content: flex-end;
+  width: auto;
+}
+
+[data-dsh-workbench-sidebar-foot][data-wide] > [data-dsh-workbench-sidebar-settings-area] {
+  grid-column: 1;
+  grid-row: 1;
+  width: max-content;
+  max-width: 100%;
+}
+
+[data-dsh-workbench-sidebar-foot][data-wide] [data-dsh-workbench-sidebar-settings-trigger] {
+  width: auto;
+  min-height: 32px;
+  height: 32px;
+  margin: 0;
+}
+
+/* Hide the sidebar's large "deepseek HARNESS" brand row; the mark now lives in
+   the activity dock's top-left corner instead. The brand is rendered through
+   CSS-module classes (`<hash>_logoRow` wrapping `_brandIdentity` → `_brandMark`
+   + `_brandName`), not `data-slot` wrappers, so match the stable local-name
+   suffixes. The collapse toggle is `position: fixed` and stays clickable via
+   programmatic .click() even while its row is hidden. */
+[class*="_logoRow"],
+[data-slot="sidebar.brand.mark"],
+[data-slot="sidebar.brand.name"],
+[class*="_brandIdentity"],
+[class*="_brandMark"],
+[class*="_brandName"] {
+  display: none;
+}
+
+/* While the workbench shadows the sidebar body (files/Git/terminal), hide the
+   shell's persistent chrome that sits above the shadowed region: the New
+   Session button (`_newSession`) and the global panel rows (`_panelList`,
+   e.g. "插件"). They belong to the sessions browser, so they reappear once the
+   seat releases back to sessions (the marker is removed with this body).
+   Selectors match stable CSS-module local-name suffixes, mirroring the brand
+   rules above; `display:none` collapses them so the workbench list fills the
+   freed space with no leftover gap. */
+[data-dsh-workbench-sidebar-shadowed] button[class*="_newSession"],
+[data-dsh-workbench-sidebar-shadowed] [class*="_panelList"] {
+  display: none;
+}
+
+/* The dock owns the Settings affordance; hide the duplicated foot trigger while
+   keeping it mounted and programmatically clickable for the gear button. */
+[data-dsh-workbench-activity-dock] [data-dsh-workbench-sidebar-settings-trigger] {
+  display: none;
+}
+
+:global(html[data-dsh-split-dragging]),
+:global(html[data-dsh-split-dragging] *) {
+  user-select: none !important;
+}
+
+:global(html[data-dsh-split-dragging='horizontal']),
+:global(html[data-dsh-split-dragging='horizontal'] *) {
+  cursor: col-resize !important;
+}
+
+:global(html[data-dsh-split-dragging='vertical']),
+:global(html[data-dsh-split-dragging='vertical'] *) {
+  cursor: row-resize !important;
+}

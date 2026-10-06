@@ -8,7 +8,7 @@ import { TerminalPanel } from '../terminal/TerminalPanel.tsx'
 import { useWorkbench } from '../model/use-workbench.ts'
 import { WorkbenchRail } from './WorkbenchRail.tsx'
 import { resolveCurrentSessionId, resolveWorkbenchWorkspace } from '../model/workspace-binding.ts'
-import css from '../core/Workbench.module.css'
+import css from './shell.module.css'
 
 export type WorkbenchSidebarProps = PropsRuntime<'sidebar.workspaces'> & PropsLocale<'workbench'> & {
   controller: WorkbenchController

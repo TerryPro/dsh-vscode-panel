@@ -1,5 +1,5 @@
 import type { MarkdownOutlineEntry } from './markdown-outline.ts'
-import css from '../core/Workbench.module.css'
+import css from './markdown.module.css'
 
 export interface MarkdownOutlineLabels {
   /** Accessible name and panel heading, e.g. “大纲”. */

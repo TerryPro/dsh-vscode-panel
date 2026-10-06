@@ -6,7 +6,7 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import css from '../core/Workbench.module.css'
+import css from './terminal.module.css'
 
 export interface TerminalPanelProps {
   controller: WorkbenchController

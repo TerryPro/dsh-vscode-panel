@@ -7,7 +7,7 @@ import { EditorPane } from './EditorPane.tsx'
 import { SplitDivider } from './SplitDivider.tsx'
 import { useWorkbench } from '../model/use-workbench.ts'
 import { resolveWorkbenchWorkspaceId } from '../model/workspace-binding.ts'
-import css from '../core/Workbench.module.css'
+import css from './editor.module.css'
 
 export type WorkbenchEditorProps = PropsRuntime<'rightbar.session'> & PropsLocale<'workbench'> & {
   controller: WorkbenchController
