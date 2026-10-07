@@ -14,6 +14,7 @@ import type {
   GitView,
   HtmlViewMode,
   MarkdownViewMode,
+  MermaidViewMode,
   SidebarMode,
   TerminalStatus,
   WorkbenchEditorLayout,
@@ -360,6 +361,11 @@ export class WorkbenchController {
 
   setHtmlMode(mode: HtmlViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.edits.setHtmlMode(mode, tabId)
+  }
+
+  /** Switch one Mermaid file tab between preview, split and source views. */
+  setMermaidMode(mode: MermaidViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.edits.setMermaidMode(mode, tabId)
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {

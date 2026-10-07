@@ -5,6 +5,7 @@ import type {
   DraftChangeSource,
   HtmlViewMode,
   MarkdownViewMode,
+  MermaidViewMode,
   WorkbenchFileTab,
   WorkbenchLogger,
   WorkbenchState,
@@ -125,5 +126,10 @@ export class WorkbenchEdits {
 
   setHtmlMode(mode: HtmlViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.patchFileTab(tabId, (tab) => { tab.htmlMode = mode })
+  }
+
+  /** Switch one Mermaid file tab between preview, split and source views. */
+  setMermaidMode(mode: MermaidViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.patchFileTab(tabId, (tab) => { tab.mermaidMode = mode })
   }
 }

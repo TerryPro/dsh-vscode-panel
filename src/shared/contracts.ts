@@ -2,6 +2,14 @@
 
 export const WORKBENCH_API_PREFIX = '/dsh-workbench-layout'
 
+/**
+ * Public GET path the Host serves the built Mermaid runtime bundle from. The
+ * browser half imports this URL lazily (see `src/client/mermaid/mermaid-loader.ts`)
+ * so the multi-megabyte diagram library never lands in the eagerly-loaded client
+ * bundle; the Host side that answers it lives in `src/host/mermaid-runtime.ts`.
+ */
+export const MERMAID_RUNTIME_PATH = `${WORKBENCH_API_PREFIX}/mermaid-runtime.js`
+
 export type WorkspaceEntryKind = 'file' | 'directory' | 'symlink' | 'other'
 
 export interface WorkspaceEntry {

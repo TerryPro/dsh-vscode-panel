@@ -1,14 +1,16 @@
 /** Host half: trusted-origin workspace API backed by DSH filesystem and Session services. */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-workspace'
-import { WORKBENCH_API_PREFIX } from './shared/contracts.ts'
+import { MERMAID_RUNTIME_PATH, WORKBENCH_API_PREFIX } from './shared/contracts.ts'
 import { GitBackend } from './host/git-backend.ts'
 import { errorResponse, readJsonObject, sendJson, WorkbenchHttpError } from './host/http.ts'
+import { serveMermaidRuntime } from './host/mermaid-runtime.ts'
 import { isTrustedWorkbenchRequest } from './host/request-trust.ts'
 import { WorkspaceBackend } from './host/workspace-backend.ts'
 
@@ -67,6 +69,18 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(
     () => ctx.webServer.register({ kind: 'prefix', path: WORKBENCH_API_PREFIX, handler }),
     'workbench-layout: workspace and Git route',
+  )
+  // The bundled Mermaid runtime, served on an exact GET route the router matches
+  // before the POST-only prefix above. The path is resolved relative to this
+  // bundled file (lib/index.js), beside which the build emits lib/mermaid-runtime.js.
+  const mermaidRuntimePath = fileURLToPath(new URL('./mermaid-runtime.js', import.meta.url))
+  ctx.effect(
+    () => ctx.webServer.register({
+      kind: 'exact',
+      path: MERMAID_RUNTIME_PATH,
+      handler: (req: IncomingMessage, res: ServerResponse) => serveMermaidRuntime(req, res, mermaidRuntimePath),
+    }),
+    'workbench-layout: mermaid runtime route',
   )
   ctx.logger.info('workbench-layout: public-package workspace and Git APIs registered')
 }

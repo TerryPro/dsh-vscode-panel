@@ -107,6 +107,26 @@ export default defineConfig([
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
   },
+  {
+    // The Mermaid runtime: a self-contained ESM bundle of the `mermaid` library
+    // (d3 + every diagram parser, ~3.4 MB) the Host serves at MERMAID_RUNTIME_PATH
+    // and the browser half imports lazily. Kept out of client.js so the eagerly
+    // loaded bundle stays small and the diagram library only downloads on demand.
+    name: `${PLUGIN_ID}/mermaid-runtime`,
+    entry: { 'mermaid-runtime': 'lib/types/client/mermaid/mermaid-runtime.js' },
+    outDir: 'lib',
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    dts: false,
+    minify: true,
+    clean: false,
+    // Mermaid lazily imports each diagram parser; inline them all so the Host can
+    // serve one self-contained file (no sibling chunks it does not know to route).
+    outputOptions: {
+      inlineDynamicImports: true,
+    },
+  },
 ])
 
 function sourceAssetPath(source: string, importer: string): string {

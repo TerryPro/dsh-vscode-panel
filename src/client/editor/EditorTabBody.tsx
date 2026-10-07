@@ -13,6 +13,8 @@ import { EditorStatusBar } from './EditorStatusBar.tsx'
 import { GitDiffEditor } from '../git/GitDiffEditor.tsx'
 import { HtmlPreview } from './HtmlPreview.tsx'
 import { isHtmlPath, resolveRelativePath, type ReadHtmlRelative } from './html-preview.ts'
+import { MermaidPreview, type MermaidPreviewLabels } from '../mermaid/MermaidPreview.tsx'
+import { isMermaidPath } from '../mermaid/mermaid-path.ts'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
@@ -44,10 +46,13 @@ export function EditorTabBody({
   const previewRef = useRef<HTMLDivElement>(null)
   const [localView, setLocalView] = useState<EditorView | null>(null)
   const isHtmlTab = tab.kind === 'file' && tab.file !== null && isHtmlPath(tab.path)
+  const isMermaidTab = tab.kind === 'file' && tab.file !== null && isMermaidPath(tab.path)
+  const mermaidMode = tab.kind === 'file' && tab.mermaidMode !== undefined ? tab.mermaidMode : 'split'
   const showEditor = tab.kind === 'file'
     && tab.file !== null
     && !(isHtmlTab && tab.htmlMode !== 'source')
     && !(tab.file.markdown && tab.markdownMode === 'preview')
+    && !(isMermaidTab && mermaidMode === 'preview')
   // Read an interactive preview's local dependency relative to the opened HTML file;
   // the resolved path is still scope-checked by the workspace backend.
   const htmlBasePath = tab.kind === 'file' ? tab.path : undefined
@@ -65,6 +70,17 @@ export function EditorTabBody({
     setLocalView(view)
     if (active) onViewReady?.(view)
   }
+  const mermaidLabels = useMemo<MermaidPreviewLabels>(() => ({
+    loading: t('editor.mermaidLoading'),
+    missing: t('editor.mermaidMissing'),
+    renderError: t('editor.mermaidError'),
+    empty: t('editor.mermaidEmpty'),
+    line: t('editor.mermaidLine'),
+    zoomIn: t('editor.mermaidZoomIn'),
+    zoomOut: t('editor.mermaidZoomOut'),
+    zoomFit: t('editor.mermaidZoomFit'),
+    zoomReset: t('editor.mermaidZoomReset'),
+  }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
   const outlineEntries = useMemo(() => {
@@ -106,7 +122,9 @@ export function EditorTabBody({
   return (
     <div className={css.editorFileArea}>
       <div className={css.editorFileBody}>
-        {isHtmlTab && tab.htmlMode !== 'source'
+        {isMermaidTab && mermaidMode === 'preview'
+          ? <MermaidPreview key={`mermaid-${tab.id}`} source={tab.draft} labels={mermaidLabels} />
+          : isHtmlTab && tab.htmlMode !== 'source'
           ? (
             <HtmlPreview
               html={tab.draft}
@@ -147,6 +165,9 @@ export function EditorTabBody({
                     : {}}
                   gitLabels={gitLineLabels}
                 />
+                {isMermaidTab && mermaidMode === 'split' && (
+                  <MermaidPreview key={`mermaid-${tab.id}`} source={tab.draft} labels={mermaidLabels} split />
+                )}
                 {tab.file.markdown && tab.markdownMode === 'split' && (
                   <>
                     <div ref={previewRef} className={css.markdownPreviewPane}><MarkdownText text={tab.draft} labels={markdownLabels} /></div>
@@ -181,6 +202,13 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={tab.htmlMode !== 'interactive' && tab.htmlMode !== 'source' || undefined} aria-label={t('editor.preview')} title={t('editor.preview')} onClick={() => { controller.setHtmlMode('preview', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={tab.htmlMode === 'interactive' || undefined} aria-label={t('editor.htmlInteractive')} title={t('editor.htmlInteractive')} onClick={() => { controller.setHtmlMode('interactive', tab.id) }}><IconInteractiveOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={tab.htmlMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setHtmlMode('source', tab.id) }}><IconSourceOutline16 /></button>
+              </div>
+            )}
+            {isMermaidTab && (
+              <div className={css.editorStatusBarSwitch} role="group" aria-label={t('editor.mermaidPreview')}>
+                <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'preview' || undefined} aria-label={t('editor.preview')} title={t('editor.preview')} onClick={() => { controller.setMermaidMode('preview', tab.id) }}><IconPreviewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setMermaidMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setMermaidMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
             {showEditor && (

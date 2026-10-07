@@ -19,6 +19,11 @@ vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
   ),
 }))
 vi.mock('../src/client/git/GitDiffEditor.tsx', () => ({ GitDiffEditor: () => <div>diff</div> }))
+vi.mock('../src/client/mermaid/MermaidPreview.tsx', () => ({
+  MermaidPreview: ({ source, split }: { source: string; split?: boolean }) => (
+    <div data-testid="mermaid-preview" data-source={source} data-split={split === true ? 'true' : 'false'} />
+  ),
+}))
 vi.mock('../src/client/terminal/TerminalSurface.tsx', () => ({
   TerminalSurface: ({ tab }: { tab: { id: string } }) => <div data-terminal-surface={tab.id}>terminal</div>,
 }))
@@ -325,6 +330,35 @@ describe('WorkbenchEditor multi-file tabs', () => {
     fireEvent.click(view.getByRole('button', { name: '源码' }))
     expect(controller.setHtmlMode).toHaveBeenCalledWith('source', 'file:index.html')
   })
+
+  it('edits and previews a Mermaid file side by side and switches views on demand', () => {
+    workbenchState.current.tabs.push(tab('diagram.mmd', 'graph TD;A-->B', false))
+    focusPrimaryTab('file:diagram.mmd')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+
+    // Default split: the source editor and the live diagram preview both render.
+    const preview = view.getByTestId('mermaid-preview')
+    expect(preview.dataset.source).toBe('graph TD;A-->B')
+    expect(preview.dataset.split).toBe('true')
+    expect(view.getByRole('textbox', { name: 'diagram.mmd' })).toBeTruthy()
+
+    fireEvent.click(view.getByRole('button', { name: '预览' }))
+    expect(controller.setMermaidMode).toHaveBeenCalledWith('preview', 'file:diagram.mmd')
+    fireEvent.click(view.getByRole('button', { name: '源码' }))
+    expect(controller.setMermaidMode).toHaveBeenCalledWith('source', 'file:diagram.mmd')
+  })
+
+  it('shows only the diagram in Mermaid preview mode and hides the wrap toggle', () => {
+    workbenchState.current.tabs.push(tab('diagram.mmd', 'graph TD;A-->B', false, 'preview'))
+    focusPrimaryTab('file:diagram.mmd')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+
+    expect(view.getByTestId('mermaid-preview').dataset.split).toBe('false')
+    expect(view.queryByRole('textbox', { name: 'diagram.mmd' })).toBeNull()
+    expect(view.queryByRole('button', { name: '自动换行' })).toBeNull()
+  })
 })
 
 function editorProps(controller: ReturnType<typeof controllerFake>): WorkbenchEditorProps {
@@ -359,6 +393,7 @@ function controllerFake() {
     setMarkdownMode: vi.fn(),
     toggleMarkdownOutline: vi.fn(),
     setHtmlMode: vi.fn(),
+    setMermaidMode: vi.fn(),
     setEditorWrap: vi.fn(),
     setEditorInlineDiff: vi.fn(),
     revert: vi.fn(),
@@ -411,7 +446,7 @@ function fileTab(index: number): WorkbenchFileTab {
   return candidate
 }
 
-function tab(path: string, content: string, markdown: boolean) {
+function tab(path: string, content: string, markdown: boolean, mermaidMode?: WorkbenchFileTab['mermaidMode']) {
   return {
     id: `file:${path}`,
     kind: 'file' as const,
@@ -421,6 +456,7 @@ function tab(path: string, content: string, markdown: boolean) {
     draft: content,
     dirty: false,
     markdownMode: (markdown ? 'preview' : 'source') as WorkbenchFileTab['markdownMode'],
+    ...(mermaidMode === undefined ? {} : { mermaidMode }),
     wrap: true,
     inlineDiff: true,
     loading: false,
