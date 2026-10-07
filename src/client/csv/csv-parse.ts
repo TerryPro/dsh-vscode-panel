@@ -149,6 +149,11 @@ function numericValue(cell: string): number | undefined {
   return Number.isFinite(value) ? value : undefined
 }
 
+/** Public numeric-cell parser shared with the editing/summary layer. */
+export function parseNumericCell(cell: string): number | undefined {
+  return numericValue(cell)
+}
+
 /**
  * Order two cell values: numerically when both parse as numbers, otherwise with a
  * natural (digit-aware, case-insensitive) string comparison.
@@ -204,4 +209,54 @@ export function columnIsNumeric(rows: readonly (readonly string[])[], columnInde
     seen = true
   }
   return seen
+}
+
+/** Formatting traits of the original text that a table edit must preserve on write-back. */
+export interface CsvFormat {
+  /** Line separator used by the file: CRLF, a lone CR, or LF. */
+  readonly eol: string
+  /** Whether the original ended with a trailing newline. */
+  readonly trailingNewline: boolean
+  /** Whether the original began with a UTF-8 byte-order mark. */
+  readonly bom: boolean
+}
+
+/**
+ * Detect the original file's line ending, trailing newline and BOM so editing a
+ * cell can regenerate text that keeps these traits and minimizes the resulting
+ * diff. LF is the fallback when the text has no line breaks at all.
+ */
+export function detectCsvFormat(text: string): CsvFormat {
+  const bom = text.charCodeAt(0) === 0xfeff
+  const body = bom ? text.slice(1) : text
+  const eol = body.includes('\r\n') ? '\r\n' : body.includes('\r') ? '\r' : '\n'
+  return { eol, trailingNewline: body.endsWith('\n') || body.endsWith('\r'), bom }
+}
+
+/** Quote a cell only when it would otherwise break the format (RFC-4180 minimal quoting). */
+function needsQuote(cell: string, delimiter: string): boolean {
+  return cell.includes(delimiter) || cell.includes('"') || cell.includes('\n') || cell.includes('\r')
+}
+
+function escapeCell(cell: string, delimiter: string): string {
+  const value = cell ?? ''
+  return needsQuote(value, delimiter) ? `"${value.replace(/"/gu, '""')}"` : value
+}
+
+/**
+ * Regenerate delimited text from a table, restoring the original delimiter, line
+ * ending, trailing newline and BOM. Values are re-quoted only when required, so
+ * editing one cell leaves the rest of the file byte-for-byte stable in the common
+ * well-formed case (see the round-trip tests).
+ */
+export function serializeCsv(
+  columns: readonly string[],
+  rows: readonly (readonly string[])[],
+  delimiter: string,
+  format: CsvFormat,
+): string {
+  const lines = [columns, ...rows].map(row => row.map(cell => escapeCell(cell, delimiter)).join(delimiter))
+  let text = lines.join(format.eol)
+  if (format.trailingNewline) text += format.eol
+  return format.bom ? `\uFEFF${text}` : text
 }

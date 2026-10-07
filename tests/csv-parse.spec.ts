@@ -3,9 +3,11 @@ import {
   CSV_RENDER_MAX_ROWS,
   columnIsNumeric,
   compareCsvValues,
+  detectCsvFormat,
   detectDelimiter,
   filterCsvRows,
   parseCsv,
+  serializeCsv,
   sortCsvRows,
 } from '../src/client/csv/csv-parse.ts'
 
@@ -148,5 +150,33 @@ describe('filterCsvRows', () => {
 
   it('returns nothing when no cell matches', () => {
     expect(filterCsvRows(rows, 'zzz')).toEqual([])
+  })
+})
+
+describe('detectCsvFormat', () => {
+  it('reads line ending, trailing newline and BOM', () => {
+    expect(detectCsvFormat('a,b\r\n1,2\r\n')).toMatchObject({ eol: '\r\n', trailingNewline: true, bom: false })
+    expect(detectCsvFormat('\uFEFFa,b\n1,2')).toMatchObject({ eol: '\n', trailingNewline: false, bom: true })
+    expect(detectCsvFormat('abc')).toEqual({ eol: '\n', trailingNewline: false, bom: false })
+  })
+})
+
+describe('serializeCsv', () => {
+  it('round-trips a well-formed document unchanged (parse -> serialize)', () => {
+    for (const text of ['a,b\n1,2\n3,4\n', 'a,b\r\n1,2\r\n', '\uFEFFa,b\n1,2']) {
+      const doc = parseCsv(text)
+      expect(serializeCsv(doc.columns, doc.rows, doc.delimiter, detectCsvFormat(text))).toBe(text)
+    }
+  })
+
+  it('quotes only cells that would otherwise break the format', () => {
+    const out = serializeCsv(['a', 'b'], [['x,y', 'he said "hi"']], ',', { eol: '\n', trailingNewline: false, bom: false })
+    expect(out).toBe('a,b\n"x,y","he said ""hi"""')
+  })
+
+  it('round-trips a tab-delimited file on tabs', () => {
+    const text = 'a\tb\n1\t2'
+    const doc = parseCsv(text)
+    expect(serializeCsv(doc.columns, doc.rows, doc.delimiter, detectCsvFormat(text))).toBe(text)
   })
 })

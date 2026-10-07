@@ -111,8 +111,27 @@ export function EditorTabBody({
     sortNone: t('editor.csvSortNone'),
     sortAscending: t('editor.csvSortAscending'),
     sortDescending: t('editor.csvSortDescending'),
+    editHint: t('editor.csvEditHint'),
+    editLocked: t('editor.csvEditLocked'),
+    renameHint: t('editor.csvRenameHint'),
+    editCell: t('editor.csvEditCell'),
+    renameColumn: t('editor.csvRenameColumn'),
+    insertRowAbove: t('editor.csvInsertRowAbove'),
+    insertRowBelow: t('editor.csvInsertRowBelow'),
+    insertColumnLeft: t('editor.csvInsertColumnLeft'),
+    insertColumnRight: t('editor.csvInsertColumnRight'),
+    summary: t('editor.csvSummary'),
+    addRow: t('editor.csvAddRow'),
+    deleteRow: t('editor.csvDeleteRow'),
+    addColumn: t('editor.csvAddColumn'),
+    deleteColumn: t('editor.csvDeleteColumn'),
+    clearContents: t('editor.csvClearContents'),
+    undo: t('editor.csvUndo'),
+    redo: t('editor.csvRedo'),
+    resize: t('editor.csvResize'),
     truncated: count => t('editor.csvTruncated', { count: String(count) }),
     rowCount: (shown, total) => t('editor.csvRowCount', { shown: String(shown), total: String(total) }),
+    selectedCells: count => t('editor.csvSelectedCells', { count: String(count) }),
   }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
@@ -205,7 +224,16 @@ export function EditorTabBody({
               />
             )
             : isCsvTab && csvMode === 'table'
-            ? <CsvTable key={`csv-${tab.id}`} source={tab.draft} labels={csvLabels} delimiter={csvDelimiter} />
+            ? (
+              <CsvTable
+                key={`csv-${tab.id}`}
+                source={tab.draft}
+                labels={csvLabels}
+                path={tab.path}
+                delimiter={csvDelimiter}
+                onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
+              />
+            )
             : isCsvTab && csvMode === 'split'
               ? (
                 <>

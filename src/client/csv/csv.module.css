@@ -43,6 +43,12 @@
   outline-offset: -1px;
 }
 
+/* Toolbar note explaining that a sort or filter has locked in-place cell editing. */
+.csvLock {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
 .csvCount {
   margin-inline-start: auto;
   color: var(--dsw-alias-label-secondary);
@@ -110,52 +116,53 @@
   border-block-end-color: var(--dsw-alias-border-l2);
 }
 
-.csvSortButton {
-  display: flex;
+.csvHeadLabel {
+  display: inline-block;
+  max-width: 240px;
+  padding: 8px 4px 8px 12px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+  vertical-align: middle;
+  text-overflow: ellipsis;
+}
+
+/* A header's compact sort affordance, kept separate from the (rename-able) label. */
+.csvSortIconButton {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 12px;
+  justify-content: center;
+  width: 22px;
+  height: 26px;
   border: none;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-weight: 600;
-  text-align: start;
+  color: var(--dsw-alias-label-secondary);
+  vertical-align: middle;
   cursor: pointer;
 }
 
-.csvSortButton:hover {
+.csvSortIconButton:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.csvSortButton:focus-visible {
+.csvSortIconButton:focus-visible {
   outline: 1px solid var(--dsw-alias-brand-primary);
   outline-offset: -1px;
 }
 
-.csvHeadLabel {
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Draggable right-edge grip that resizes the column, sized by the colgroup. */
+.csvResizeHandle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
 }
 
-/* Direction caret drawn purely from the header's aria-sort state, no glyph text. */
-.csvSortIcon {
-  flex: none;
-  width: 0;
-  height: 0;
-  border-inline: 4px solid transparent;
-  opacity: 0;
-}
-
-.csvSortIcon[data-direction='ascending'] {
-  opacity: 0.7;
-  border-block-end: 5px solid var(--dsw-alias-label-secondary);
-}
-
-.csvSortIcon[data-direction='descending'] {
-  opacity: 0.7;
-  border-block-start: 5px solid var(--dsw-alias-label-secondary);
+.csvResizeHandle:hover {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 40%, transparent);
 }
 
 .csvRow:nth-child(even) .csvCell {
@@ -184,12 +191,33 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: none;
 }
 
 /* Right-align numeric columns with tabular figures so digits line up. */
 .csvCellNumeric {
   text-align: end;
   font-variant-numeric: tabular-nums;
+}
+
+/* The cell while it is in edit mode drops padding so the inline input fills it. */
+.csvCellEditing {
+  padding: 0;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  border-inline-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+}
+
+.csvCellInput {
+  width: 100%;
+  min-width: 80px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
 }
 
 .csvEmpty {
@@ -205,4 +233,126 @@
   padding: 8px 12px;
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
+}
+
+/* Structural-edit toolbar, shown only when the grid is editable and unlocked. */
+.csvEditBar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+}
+
+.csvEditButton {
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.csvEditButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.csvEditButton:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.csvEditButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Excel-ribbon-style square icon button for the structural toolbar. */
+.csvEditIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.csvEditIconButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.csvEditIconButton:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.csvEditIconButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Thin vertical rule separating the row/column group from history controls. */
+.csvEditDivider {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px 4px;
+  background: var(--dsw-alias-border-l1);
+}
+
+/* The selected data cell, marked by a brand ring so it is obvious under scroll. */
+.csvCellActive {
+  box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary);
+}
+
+/* Cells inside a multi-cell / row / column selection get a soft tint fill. */
+.csvCellSelected {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, var(--dsw-alias-bg-base));
+}
+
+/* Highlight the header or gutter that owns an active column / row selection. */
+.csvHeadCellSelected,
+.csvRowNumberCellSelected {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Toolbar badge counting the selected cells while a range is active. */
+.csvSelected {
+  color: var(--dsw-alias-brand-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Reserve a fixed gutter column so row numbers stay put while widths change. */
+.csvGutterCol {
+  width: 48px;
+}
+
+.csvSummaryRow {
+  border-block-start: 1px solid var(--dsw-alias-border-l2);
+}
+
+.csvSummaryCell {
+  padding: 6px 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.csvSummaryCell[data-kind='number'] {
+  text-align: end;
+  font-weight: 600;
 }
