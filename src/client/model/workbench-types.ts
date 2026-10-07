@@ -9,6 +9,7 @@ export type DiffViewMode = 'split' | 'unified' | 'inline'
 export type MarkdownViewMode = 'preview' | 'source' | 'split'
 export type HtmlViewMode = 'preview' | 'interactive' | 'source'
 export type MermaidViewMode = 'preview' | 'source' | 'split'
+export type CsvViewMode = 'table' | 'source' | 'split'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
 export type DraftChangeSource = 'input' | 'git-revert'
@@ -49,6 +50,8 @@ export interface WorkbenchFileTab {
   htmlMode?: HtmlViewMode
   /** Mermaid diagram view state; only meaningful for `.mmd`/`.mermaid` files. */
   mermaidMode?: MermaidViewMode
+  /** Tabular view state; only meaningful for `.csv`/`.tsv` files. */
+  csvMode?: CsvViewMode
   /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
   wrap: boolean
   inlineDiff: boolean

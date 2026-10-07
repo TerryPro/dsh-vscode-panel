@@ -388,6 +388,23 @@ describe('WorkbenchController', () => {
     expect(toggled?.kind === 'file' && toggled.outlineVisible).toBe(false)
   })
 
+  it('opens CSV files in table mode and switches their view independently per tab', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('data.csv', 'a,b\n1,2', '1'))
+        .mockResolvedValueOnce(file('other.csv', 'x,y\n3,4', '2')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'data.csv')
+    await controller.openFile('workspace-1', 'other.csv')
+
+    expect(fileTab(controller, 'data.csv')).toMatchObject({ csvMode: 'table' })
+    controller.setCsvMode('source', 'file:data.csv')
+    const [first, second] = controller.store.getSnapshot().tabs
+    expect(first?.kind === 'file' && first.csvMode).toBe('source')
+    expect(second?.kind === 'file' && second.csvMode).toBe('table')
+  })
+
   it('routes drafts to the pane that owns the edited tab while split is active', async () => {
     const api = {
       readFile: vi.fn()

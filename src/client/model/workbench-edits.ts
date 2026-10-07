@@ -3,6 +3,7 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
   DraftChangeSource,
+  CsvViewMode,
   HtmlViewMode,
   MarkdownViewMode,
   MermaidViewMode,
@@ -131,5 +132,10 @@ export class WorkbenchEdits {
   /** Switch one Mermaid file tab between preview, split and source views. */
   setMermaidMode(mode: MermaidViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.patchFileTab(tabId, (tab) => { tab.mermaidMode = mode })
+  }
+
+  /** Switch one CSV/TSV file tab between table, split and source views. */
+  setCsvMode(mode: CsvViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.patchFileTab(tabId, (tab) => { tab.csvMode = mode })
   }
 }

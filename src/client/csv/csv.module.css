@@ -1,0 +1,208 @@
+.csvTable {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
+}
+
+/* A split pane's leading edge, mirroring the Markdown/Mermaid split dividers. */
+.csvTableSplit {
+  border-inline-start: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* Toolbar row above the grid: a filter box on the left, a live count on the right. */
+.csvToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.csvFilter {
+  flex: 1;
+  min-width: 0;
+  max-width: 320px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.csvFilter:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.csvCount {
+  margin-inline-start: auto;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The scrolling region holds the grid; the toolbar and note stay fixed around it. */
+.csvScroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.csvGrid {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Freeze the header so column names stay visible while the body scrolls. */
+.csvHeadCell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  background: var(--dsw-alias-bg-layer-1);
+  border-block-end: 1px solid var(--dsw-alias-border-l2);
+  border-inline-end: 1px solid var(--dsw-alias-border-l1);
+  text-align: start;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+/* Frozen row-number gutter: pinned to the left edge while the grid scrolls across. */
+.csvRowNumberCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  border-inline-end: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 400;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+/* The top-left corner cell is pinned both vertically and horizontally. */
+.csvRowNumberHead {
+  top: 0;
+  z-index: 3;
+  vertical-align: bottom;
+  font-weight: 600;
+  border-block-end-color: var(--dsw-alias-border-l2);
+}
+
+.csvSortButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+
+.csvSortButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.csvSortButton:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.csvHeadLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Direction caret drawn purely from the header's aria-sort state, no glyph text. */
+.csvSortIcon {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-inline: 4px solid transparent;
+  opacity: 0;
+}
+
+.csvSortIcon[data-direction='ascending'] {
+  opacity: 0.7;
+  border-block-end: 5px solid var(--dsw-alias-label-secondary);
+}
+
+.csvSortIcon[data-direction='descending'] {
+  opacity: 0.7;
+  border-block-start: 5px solid var(--dsw-alias-label-secondary);
+}
+
+.csvRow:nth-child(even) .csvCell {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 55%, transparent);
+}
+
+.csvRow:hover .csvCell {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Keep the frozen gutter aligned with the row's zebra/hover, but opaque for sticky legibility. */
+.csvRow:nth-child(even) .csvRowNumberCell {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 55%, var(--dsw-alias-bg-base));
+}
+
+.csvRow:hover .csvRowNumberCell {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.csvCell {
+  max-width: 360px;
+  padding: 6px 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  border-inline-end: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right-align numeric columns with tabular figures so digits line up. */
+.csvCellNumeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.csvEmpty {
+  margin: 0;
+  padding: 24px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.csvNote {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}

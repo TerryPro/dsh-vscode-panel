@@ -28,6 +28,10 @@ describe('languageForPath', () => {
     'settings.ini',
     'Dockerfile',
     'app/.dockerfile',
+    'diagram.mmd',
+    'flow.mermaid',
+    'data.csv',
+    'table.tsv',
   ])('resolves a grammar for %s', path => {
     expect(languageForPath(path)).not.toBeNull()
   })
@@ -56,6 +60,9 @@ describe('languageLabelForPath', () => {
     expect(languageLabelForPath('deploy.sh')).toBe('Shell Script')
     expect(languageLabelForPath('Cargo.toml')).toBe('TOML')
     expect(languageLabelForPath('Dockerfile')).toBe('Dockerfile')
+    expect(languageLabelForPath('diagram.mmd')).toBe('Mermaid')
+    expect(languageLabelForPath('data.csv')).toBe('CSV')
+    expect(languageLabelForPath('table.tsv')).toBe('TSV')
   })
 
   it('falls back to Plain Text for unrecognised paths', () => {

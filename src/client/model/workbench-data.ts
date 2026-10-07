@@ -5,6 +5,7 @@ import type { GitCommit, GitFileDiff, GitStatus } from '../../shared/contracts.t
 import { imageMimeTypeForPath } from '../../shared/contracts.ts'
 import type { WorkbenchApi } from './api.ts'
 import { isHtmlPath } from '../editor/html-preview.ts'
+import { isCsvPath } from '../csv/csv-path.ts'
 import { isMermaidPath } from '../mermaid/mermaid-path.ts'
 import { buildGitDecorations } from '../git/git-decorations.ts'
 import {
@@ -202,6 +203,7 @@ export class WorkbenchData {
         tab.markdownMode = nextMarkdownMode
         tab.htmlMode = isHtmlPath(path) ? 'preview' : 'source'
         tab.mermaidMode = isMermaidPath(path) ? 'split' : 'source'
+        tab.csvMode = isCsvPath(path) ? 'table' : 'source'
         tab.loading = false
         tab.error = null
       })

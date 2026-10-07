@@ -12,14 +12,16 @@ import { rust } from '@codemirror/lang-rust'
 import { sql } from '@codemirror/lang-sql'
 import { yaml } from '@codemirror/lang-yaml'
 import { xml } from '@codemirror/lang-xml'
-import { LanguageDescription, StreamLanguage } from '@codemirror/language'
-import type { LanguageSupport } from '@codemirror/language'
+import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language'
+import type { Language } from '@codemirror/language'
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
 import { properties } from '@codemirror/legacy-modes/mode/properties'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import type { Extension } from '@codemirror/state'
 import { basename } from '../../shared/path-name.ts'
+import { mermaidLanguage } from '../mermaid/mermaid-language.ts'
+import { csvLanguage, tsvLanguage } from '../csv/csv-language.ts'
 
 /**
  * Resolve a CodeMirror language extension from a workspace file path.
@@ -40,9 +42,9 @@ export function languageLabelForPath(path: string | undefined): string {
 }
 
 type Grammar =
-  | 'c' | 'cpp' | 'css' | 'dockerfile' | 'go' | 'html' | 'java' | 'javascript'
-  | 'json' | 'jsx' | 'markdown' | 'php' | 'properties' | 'python' | 'rust'
-  | 'shell' | 'sql' | 'ts' | 'toml' | 'tsx' | 'typescript' | 'xml' | 'yaml'
+  | 'c' | 'cpp' | 'css' | 'csv' | 'dockerfile' | 'go' | 'html' | 'java' | 'javascript'
+  | 'json' | 'jsx' | 'markdown' | 'mermaid' | 'php' | 'properties' | 'python' | 'rust'
+  | 'shell' | 'sql' | 'ts' | 'toml' | 'tsx' | 'typescript' | 'tsv' | 'xml' | 'yaml'
 
 const EXTENSION_GRAMMARS: Record<string, Grammar> = {
   c: 'c',
@@ -60,6 +62,8 @@ const EXTENSION_GRAMMARS: Record<string, Grammar> = {
   css: 'css',
   scss: 'css',
   less: 'css',
+  csv: 'csv',
+  tsv: 'tsv',
   go: 'go',
   htm: 'html',
   html: 'html',
@@ -80,6 +84,8 @@ const EXTENSION_GRAMMARS: Record<string, Grammar> = {
   mdown: 'markdown',
   mkd: 'markdown',
   mdx: 'markdown',
+  mmd: 'mermaid',
+  mermaid: 'mermaid',
   php: 'php',
   py: 'python',
   rs: 'rust',
@@ -107,6 +113,7 @@ const LANGUAGE_LABELS: Record<Grammar, string> = {
   c: 'C',
   cpp: 'C++',
   css: 'CSS',
+  csv: 'CSV',
   dockerfile: 'Dockerfile',
   go: 'Go',
   html: 'HTML',
@@ -115,6 +122,7 @@ const LANGUAGE_LABELS: Record<Grammar, string> = {
   json: 'JSON',
   jsx: 'JavaScript JSX',
   markdown: 'Markdown',
+  mermaid: 'Mermaid',
   php: 'PHP',
   properties: 'INI',
   python: 'Python',
@@ -125,6 +133,7 @@ const LANGUAGE_LABELS: Record<Grammar, string> = {
   toml: 'TOML',
   tsx: 'TypeScript JSX',
   typescript: 'TypeScript',
+  tsv: 'TSV',
   xml: 'XML',
   yaml: 'YAML',
 }
@@ -143,6 +152,7 @@ function languageExtension(grammar: Grammar): Extension {
     case 'c':
     case 'cpp': return cpp()
     case 'css': return css()
+    case 'csv': return csvLanguage
     case 'dockerfile': return StreamLanguage.define(dockerFile)
     case 'go': return go()
     case 'html': return html()
@@ -151,6 +161,7 @@ function languageExtension(grammar: Grammar): Extension {
     case 'jsx': return javascript({ jsx: true })
     case 'json': return json()
     case 'markdown': return markdownSupport()
+    case 'mermaid': return mermaidLanguage
     case 'php': return php()
     case 'properties': return StreamLanguage.define(properties)
     case 'python': return python()
@@ -161,6 +172,7 @@ function languageExtension(grammar: Grammar): Extension {
     case 'ts':
     case 'typescript': return javascript({ typescript: true })
     case 'tsx': return javascript({ typescript: true, jsx: true })
+    case 'tsv': return tsvLanguage
     case 'xml': return xml()
     case 'yaml': return yaml()
   }
@@ -180,6 +192,11 @@ function codeLanguage(name: string, alias: readonly string[], support: LanguageS
   return LanguageDescription.of({ name, alias, support })
 }
 
+/** Wrap a bare stream/grammar Language as a LanguageSupport for markdown fences. */
+function fenceSupport(language: Language): LanguageSupport {
+  return new LanguageSupport(language)
+}
+
 const MARKDOWN_CODE_LANGUAGES: readonly LanguageDescription[] = [
   codeLanguage('JavaScript', ['js', 'jsx', 'javascript', 'mjs', 'cjs'], javascript()),
   codeLanguage('TypeScript', ['ts', 'tsx', 'typescript'], javascript({ typescript: true })),
@@ -195,4 +212,7 @@ const MARKDOWN_CODE_LANGUAGES: readonly LanguageDescription[] = [
   codeLanguage('C++', ['cpp', 'cc', 'cxx', 'hpp'], cpp()),
   codeLanguage('PHP', ['php'], php()),
   codeLanguage('XML', ['xml'], xml()),
+  codeLanguage('Mermaid', ['mmd', 'mermaid'], fenceSupport(mermaidLanguage)),
+  codeLanguage('CSV', ['csv'], fenceSupport(csvLanguage)),
+  codeLanguage('TSV', ['tsv'], fenceSupport(tsvLanguage)),
 ]

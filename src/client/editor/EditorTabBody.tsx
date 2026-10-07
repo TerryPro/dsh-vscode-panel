@@ -13,6 +13,9 @@ import { EditorStatusBar } from './EditorStatusBar.tsx'
 import { GitDiffEditor } from '../git/GitDiffEditor.tsx'
 import { HtmlPreview } from './HtmlPreview.tsx'
 import { isHtmlPath, resolveRelativePath, type ReadHtmlRelative } from './html-preview.ts'
+import { CsvTable, type CsvTableLabels } from '../csv/CsvTable.tsx'
+import { delimiterForCsvPath, isCsvPath } from '../csv/csv-path.ts'
+import { clampCsvSplitRatio, readCsvSplitRatio, saveCsvSplitRatio } from '../csv/csv-split.ts'
 import { MermaidPreview, type MermaidPreviewLabels } from '../mermaid/MermaidPreview.tsx'
 import { MermaidSplitDivider } from '../mermaid/MermaidSplitDivider.tsx'
 import { clampMermaidSplitRatio, readMermaidSplitRatio, saveMermaidSplitRatio } from '../mermaid/mermaid-split.ts'
@@ -46,16 +49,21 @@ export function EditorTabBody({
 }: EditorTabBodyProps) {
   const [cursor, setCursor] = useState<EditorCursorState>({ line: 1, column: 1, selectedChars: 0, selectedLines: 0 })
   const [mermaidSplitRatio, setMermaidSplitRatio] = useState(readMermaidSplitRatio)
+  const [csvSplitRatio, setCsvSplitRatio] = useState(readCsvSplitRatio)
   const previewRef = useRef<HTMLDivElement>(null)
   const [localView, setLocalView] = useState<EditorView | null>(null)
   const isHtmlTab = tab.kind === 'file' && tab.file !== null && isHtmlPath(tab.path)
   const isMermaidTab = tab.kind === 'file' && tab.file !== null && isMermaidPath(tab.path)
+  const isCsvTab = tab.kind === 'file' && tab.file !== null && isCsvPath(tab.path)
+  const csvDelimiter = tab.kind === 'file' ? delimiterForCsvPath(tab.path) : undefined
   const mermaidMode = tab.kind === 'file' && tab.mermaidMode !== undefined ? tab.mermaidMode : 'split'
+  const csvMode = tab.kind === 'file' && tab.csvMode !== undefined ? tab.csvMode : 'table'
   const showEditor = tab.kind === 'file'
     && tab.file !== null
     && !(isHtmlTab && tab.htmlMode !== 'source')
     && !(tab.file.markdown && tab.markdownMode === 'preview')
     && !(isMermaidTab && mermaidMode === 'preview')
+    && !(isCsvTab && csvMode === 'table')
   // Read an interactive preview's local dependency relative to the opened HTML file;
   // the resolved path is still scope-checked by the workspace backend.
   const htmlBasePath = tab.kind === 'file' ? tab.path : undefined
@@ -78,6 +86,11 @@ export function EditorTabBody({
     setMermaidSplitRatio(clamped)
     saveMermaidSplitRatio(clamped)
   }, [])
+  const handleCsvSplitRatio = useCallback((ratio: number): void => {
+    const clamped = clampCsvSplitRatio(ratio)
+    setCsvSplitRatio(clamped)
+    saveCsvSplitRatio(clamped)
+  }, [])
   const mermaidLabels = useMemo<MermaidPreviewLabels>(() => ({
     loading: t('editor.mermaidLoading'),
     missing: t('editor.mermaidMissing'),
@@ -89,6 +102,17 @@ export function EditorTabBody({
     zoomFit: t('editor.mermaidZoomFit'),
     zoomReset: t('editor.mermaidZoomReset'),
     pan: t('editor.mermaidPan'),
+  }), [t])
+  const csvLabels = useMemo<CsvTableLabels>(() => ({
+    empty: t('editor.csvEmpty'),
+    noMatches: t('editor.csvNoMatches'),
+    filter: t('editor.csvFilter'),
+    rowNumber: t('editor.csvRowNumber'),
+    sortNone: t('editor.csvSortNone'),
+    sortAscending: t('editor.csvSortAscending'),
+    sortDescending: t('editor.csvSortDescending'),
+    truncated: count => t('editor.csvTruncated', { count: String(count) }),
+    rowCount: (shown, total) => t('editor.csvRowCount', { shown: String(shown), total: String(total) }),
   }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
@@ -180,7 +204,26 @@ export function EditorTabBody({
                 readResource={readHtmlResource}
               />
             )
-            : tab.file.markdown && tab.markdownMode === 'preview'
+            : isCsvTab && csvMode === 'table'
+            ? <CsvTable key={`csv-${tab.id}`} source={tab.draft} labels={csvLabels} delimiter={csvDelimiter} />
+            : isCsvTab && csvMode === 'split'
+              ? (
+                <>
+                  <div className={css.mermaidSplitEditor} style={{ flexGrow: csvSplitRatio, flexBasis: 0 }}>
+                    {codeEditor}
+                  </div>
+                  <MermaidSplitDivider ratio={csvSplitRatio} onRatio={handleCsvSplitRatio} label={t('editor.resizeSplit')} clamp={clampCsvSplitRatio} />
+                  <CsvTable
+                    key={`csv-${tab.id}`}
+                    source={tab.draft}
+                    labels={csvLabels}
+                    delimiter={csvDelimiter}
+                    split
+                    style={{ flexGrow: 1 - csvSplitRatio, flexBasis: 0 }}
+                  />
+                </>
+              )
+              : tab.file.markdown && tab.markdownMode === 'preview'
               ? (
                 <>
                   <div ref={previewRef} className={css.markdownPreview}><MarkdownText text={tab.draft} labels={markdownLabels} /></div>
@@ -233,6 +276,13 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'preview' || undefined} aria-label={t('editor.preview')} title={t('editor.preview')} onClick={() => { controller.setMermaidMode('preview', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setMermaidMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setMermaidMode('source', tab.id) }}><IconSourceOutline16 /></button>
+              </div>
+            )}
+            {isCsvTab && (
+              <div className={css.editorStatusBarSwitch} role="group" aria-label={t('editor.csvTable')}>
+                <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'table' || undefined} aria-label={t('editor.csvTable')} title={t('editor.csvTable')} onClick={() => { controller.setCsvMode('table', tab.id) }}><IconPreviewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setCsvMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setCsvMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
             {showEditor && (
