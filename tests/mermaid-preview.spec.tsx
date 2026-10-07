@@ -24,6 +24,7 @@ const labels: MermaidPreviewLabels = {
   zoomOut: 'OUT',
   zoomFit: 'FIT',
   zoomReset: 'RESET',
+  pan: 'PAN',
 }
 
 const fakeRuntime: MermaidRuntime = {
@@ -49,8 +50,9 @@ describe('MermaidPreview', () => {
       expect(view.container.querySelector('svg[data-diagram="ok"]')).not.toBeNull()
     })
     expect(loader.renderMermaidDiagram).toHaveBeenCalledWith(false, 'graph TD;A-->B')
-    // The zoom bar appears only once a diagram is on screen.
+    // The zoom bar appears only once a diagram is on screen, with a pan toggle.
     expect(view.getByRole('button', { name: 'IN' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'PAN' })).toBeTruthy()
   })
 
   it('shows the empty state and skips rendering for blank source', async () => {

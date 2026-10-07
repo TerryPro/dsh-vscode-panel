@@ -45,6 +45,8 @@ describe('中栏长行自动换行', () => {
       />,
     )
     expect(split.container.querySelectorAll('.cm-lineWrapping')).toHaveLength(2)
+    // The split view carries a draggable divider between its two editor panes.
+    expect(split.container.querySelector('.cm-diffSplitHandle')).not.toBeNull()
     split.unmount()
 
     const inline = render(

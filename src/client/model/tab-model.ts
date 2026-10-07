@@ -38,7 +38,9 @@ export function emptyFileTab(path: string): WorkbenchFileTab {
     dirty: false,
     markdownMode: 'source',
     wrap: true,
-    inlineDiff: true,
+    // Open a file showing its plain contents; the inline Git diff overlay stays
+    // off until the reader turns it on from the status bar.
+    inlineDiff: false,
     loading: true,
     saving: false,
     externalChange: null,

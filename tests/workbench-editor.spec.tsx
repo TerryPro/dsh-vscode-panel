@@ -337,11 +337,11 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const controller = controllerFake()
     const view = renderEditor(controller)
 
-    // Default split: the source editor and the live diagram preview both render.
+    // Default split: the source editor, a draggable divider, and the preview render.
     const preview = view.getByTestId('mermaid-preview')
     expect(preview.dataset.source).toBe('graph TD;A-->B')
-    expect(preview.dataset.split).toBe('true')
     expect(view.getByRole('textbox', { name: 'diagram.mmd' })).toBeTruthy()
+    expect(view.getByRole('separator', { name: '拖拽调整分栏大小' })).toBeTruthy()
 
     fireEvent.click(view.getByRole('button', { name: '预览' }))
     expect(controller.setMermaidMode).toHaveBeenCalledWith('preview', 'file:diagram.mmd')
@@ -355,8 +355,9 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const controller = controllerFake()
     const view = renderEditor(controller)
 
-    expect(view.getByTestId('mermaid-preview').dataset.split).toBe('false')
+    expect(view.getByTestId('mermaid-preview')).toBeTruthy()
     expect(view.queryByRole('textbox', { name: 'diagram.mmd' })).toBeNull()
+    expect(view.queryByRole('separator')).toBeNull()
     expect(view.queryByRole('button', { name: '自动换行' })).toBeNull()
   })
 })

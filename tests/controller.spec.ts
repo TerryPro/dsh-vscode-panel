@@ -352,15 +352,16 @@ describe('WorkbenchController', () => {
     await controller.openFile('workspace-1', 'doc.md')
 
     controller.setEditorWrap('file:first.ts', false)
-    controller.setEditorInlineDiff('file:second.ts', false)
+    controller.setEditorInlineDiff('file:second.ts', true)
     controller.setMarkdownMode('source', 'file:doc.md')
 
     const state = controller.store.getSnapshot()
     const [first, second, doc] = state.tabs
     expect(first?.kind === 'file' && first.wrap).toBe(false)
-    expect(first?.kind === 'file' && first.inlineDiff).toBe(true)
+    // first's inline diff was never toggled, so it stays at the off-by-default.
+    expect(first?.kind === 'file' && first.inlineDiff).toBe(false)
     expect(second?.kind === 'file' && second.wrap).toBe(true)
-    expect(second?.kind === 'file' && second.inlineDiff).toBe(false)
+    expect(second?.kind === 'file' && second.inlineDiff).toBe(true)
     expect(doc?.kind === 'file' && doc.markdownMode).toBe('source')
     // The active tab is untouched by these targeted toggles.
     expect(activeTab(controller)?.path).toBe('doc.md')

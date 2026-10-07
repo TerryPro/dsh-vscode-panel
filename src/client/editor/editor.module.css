@@ -472,6 +472,14 @@
   min-height: 0;
 }
 
+/* Left cell of the Mermaid split row: a flex box that lets the CodeMirror host fill it. */
+.mermaidSplitEditor {
+  display: flex;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .editorStatusBar {
   display: flex;
   align-items: center;
@@ -651,4 +659,63 @@
   max-height: 100%;
   object-fit: contain;
   border-radius: 6px;
+}
+
+/*
+ * Split Git diff: the two editor panes share width by --diff-split-ratio (a
+ * left-pane fraction the host sets from a remembered ratio), and a draggable
+ * divider sits between them. The divider is a thin visible line inside a wider
+ * hit area; it turns accent-coloured on hover, focus, or while dragging.
+ */
+:global([data-diff-surface='split'] .cm-mergeView) {
+  /* Always reserve the vertical scrollbar's column so the panes keep one width
+     whether or not the diff is tall enough to scroll. */
+  scrollbar-gutter: stable;
+}
+
+:global([data-diff-surface='split'] .cm-mergeViewEditors) {
+  position: relative;
+}
+
+:global([data-diff-surface='split'] .cm-mergeViewEditor:first-child) {
+  flex-grow: var(--diff-split-ratio, 0.5);
+  flex-basis: 0;
+}
+
+:global([data-diff-surface='split'] .cm-mergeViewEditor:last-child) {
+  flex-grow: calc(1 - var(--diff-split-ratio, 0.5));
+  flex-basis: 0;
+}
+
+/*
+ * Absolutely positioned so it consumes no flex width: the two panes then split
+ * the full container by the same ratio the header grid uses, and the handle's
+ * 1px line is pinned to the exact boundary (ratio × width) — the same pixel
+ * column as the header's border-left — instead of drifting by the handle width.
+ */
+:global(.cm-diffSplitHandle) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--diff-split-ratio, 0.5) * 100% - 3px);
+  width: 7px;
+  z-index: 1;
+  cursor: col-resize;
+  background: transparent;
+}
+
+:global(.cm-diffSplitHandle::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--dsw-alias-border-l1);
+}
+
+:global(.cm-diffSplitHandle:hover::before),
+:global(.cm-diffSplitHandle:focus-visible::before),
+:global(.cm-diffSplitHandleActive::before) {
+  background: var(--dsw-alias-brand-primary);
 }

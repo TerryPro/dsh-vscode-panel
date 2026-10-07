@@ -2,11 +2,14 @@ import {
   FishLogo,
   Pill,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GitFileDiff } from '../../shared/contracts.ts'
 import type { DiffViewMode } from '../model/controller.ts'
 import { DiffSurface } from '../editor/DiffSurface.tsx'
 import { diffKindText } from './git-diff-labels.ts'
+import { clampDiffSplitRatio, readDiffSplitRatio, saveDiffSplitRatio } from './git-diff-split.ts'
 import css from './git.module.css'
 
 export interface GitDiffEditorProps {
@@ -23,6 +26,14 @@ export function GitDiffEditor(props: GitDiffEditorProps) {
   const renamed = props.diff.originalPath !== undefined && props.diff.originalPath !== props.diff.path
   const noChanges = !props.diff.binary && props.diff.original === props.diff.modified
   const showPaneLabels = props.diff.kind === 'worktree' || props.diff.kind === 'staged'
+  // One ratio drives both the pane-label grid and the split editor panes, so the
+  // header divider stays aligned with the draggable divider between the editors.
+  const [splitRatio, setSplitRatio] = useState(readDiffSplitRatio)
+  const handleSplitRatio = useCallback((ratio: number) => {
+    const clamped = clampDiffSplitRatio(ratio)
+    setSplitRatio(clamped)
+    saveDiffSplitRatio(clamped)
+  }, [])
   return (
     <section className={css.diffDocument} data-diff-effective-mode={effectiveMode}>
       <div className={css.diffMetadata}>
@@ -65,7 +76,7 @@ export function GitDiffEditor(props: GitDiffEditorProps) {
         : noChanges
           ? <DiffNotice text={props.t('editor.diffEmpty')} />
           : (
-            <div className={css.diffEditorBody}>
+            <div className={css.diffEditorBody} style={{ '--diff-split-ratio': String(splitRatio) } as CSSProperties}>
               {showPaneLabels && (
                 <div className={css.diffPaneLabels} data-diff-pane-labels="" data-mode={effectiveMode}>
                   {effectiveMode === 'split'
@@ -82,6 +93,8 @@ export function GitDiffEditor(props: GitDiffEditorProps) {
                   modifiedLabel={labels.modified}
                   mode={effectiveMode}
                   path={props.diff.path}
+                  onSplitRatioChange={handleSplitRatio}
+                  splitResizeLabel={props.t('editor.resizeSplit')}
                 />
               </div>
             </div>

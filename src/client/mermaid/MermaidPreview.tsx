@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import {
   clampZoom,
   createRenderGuard,
@@ -37,6 +38,8 @@ export interface MermaidPreviewLabels {
   zoomOut: string
   zoomFit: string
   zoomReset: string
+  /** Label for the toggle that lets the reader drag the diagram to pan it. */
+  pan: string
 }
 
 export interface MermaidPreviewProps {
@@ -45,17 +48,22 @@ export interface MermaidPreviewProps {
   labels: MermaidPreviewLabels
   /** True when shown beside the source editor in split mode; draws a divider. */
   split?: boolean
+  /** Inline style merged on the root, used to size the pane in a split row. */
+  style?: CSSProperties
 }
 
 type RuntimeStatus = 'loading' | 'ready' | 'missing'
 
-export function MermaidPreview({ source, labels, split = false }: MermaidPreviewProps) {
+export function MermaidPreview({ source, labels, split = false, style }: MermaidPreviewProps) {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>('loading')
   const [svg, setSvg] = useState('')
   const [error, setError] = useState('')
   const [rendering, setRendering] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [themeNonce, setThemeNonce] = useState(0)
+  const [panEnabled, setPanEnabled] = useState(false)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [panDragging, setPanDragging] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const svgHostRef = useRef<HTMLDivElement>(null)
@@ -63,6 +71,7 @@ export function MermaidPreview({ source, labels, split = false }: MermaidPreview
   const didFitRef = useRef(false)
   const zoomRef = useRef(1)
   zoomRef.current = zoom
+  const panDragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   const guard = useMemo(createRenderGuard, [])
 
   // Load the shared runtime once; the status gates rendering and drives the
@@ -75,11 +84,15 @@ export function MermaidPreview({ source, labels, split = false }: MermaidPreview
     return () => { alive = false }
   }, [])
 
-  // Re-tune and redraw when the shell flips light/dark.
+  // Re-tune and redraw when the shell flips light/dark. The theme can move via an
+  // attribute, a class, or inline token overrides on either <html> or <body>, so
+  // watch all three signals on both nodes (the terminal re-reads tokens on style).
   useEffect(() => {
     if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return undefined
     const observer = new MutationObserver(() => { setThemeNonce(value => value + 1) })
-    observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+    const watch: MutationObserverInit = { attributes: true, attributeFilter: ['data-ds-dark-theme', 'class', 'style'] }
+    observer.observe(document.documentElement, watch)
+    observer.observe(document.body, watch)
     return () => { observer.disconnect() }
   }, [])
 
@@ -127,6 +140,7 @@ export function MermaidPreview({ source, labels, split = false }: MermaidPreview
   }, [source, runtimeStatus, themeNonce, guard])
 
   const fitToView = useCallback((): void => {
+    setPan({ x: 0, y: 0 })
     const scroll = scrollRef.current
     const element = svgHostRef.current?.querySelector('svg') ?? null
     if (scroll === null || element === null) {
@@ -171,14 +185,42 @@ export function MermaidPreview({ source, labels, split = false }: MermaidPreview
   const hasSvg = svg !== '' && error === '' && runtimeStatus === 'ready'
   const errorLine = error === '' ? null : extractErrorLine(error)
 
+  const togglePan = (): void => {
+    const next = !panEnabled
+    setPanEnabled(next)
+    if (!next) setPan({ x: 0, y: 0 })
+  }
+  const onPanPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!panEnabled || event.button !== 0) return
+    panDragRef.current = { x: event.clientX, y: event.clientY, px: pan.x, py: pan.y }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    setPanDragging(true)
+  }
+  const onPanPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = panDragRef.current
+    if (drag === null) return
+    setPan({ x: drag.px + (event.clientX - drag.x), y: drag.py + (event.clientY - drag.y) })
+  }
+  const onPanPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (panDragRef.current === null) return
+    panDragRef.current = null
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    setPanDragging(false)
+  }
+
   return (
-    <div className={split ? `${css.mermaidPreview} ${css.mermaidPreviewSplit}` : css.mermaidPreview} data-mermaid-preview="">
+    <div className={split ? `${css.mermaidPreview} ${css.mermaidPreviewSplit}` : css.mermaidPreview} data-mermaid-preview="" style={style}>
       <div
         ref={scrollRef}
-        className={css.mermaidScroll}
+        className={panEnabled ? `${css.mermaidScroll} ${css.mermaidScrollPan}` : css.mermaidScroll}
+        data-dragging={panDragging ? 'true' : undefined}
         onDoubleClick={() => { if (hasSvg) fitToView() }}
+        onPointerDown={onPanPointerDown}
+        onPointerMove={onPanPointerMove}
+        onPointerUp={onPanPointerUp}
+        onPointerCancel={onPanPointerUp}
       >
-        <div className={css.mermaidStage}>
+        <div className={css.mermaidStage} style={panEnabled ? { transform: `translate(${pan.x}px, ${pan.y}px)` } : undefined}>
           {runtimeStatus === 'missing'
             ? <p className={css.mermaidMessage} role="alert">{labels.missing}</p>
             : error !== ''
@@ -198,12 +240,22 @@ export function MermaidPreview({ source, labels, split = false }: MermaidPreview
       {rendering && <div className={css.mermaidBusy} aria-hidden="true"><span className={css.mermaidSpinner} /></div>}
       {hasSvg && (
         <div className={css.mermaidZoomBar}>
+          <button type="button" className={css.mermaidZoomButton} title={labels.pan} aria-label={labels.pan} aria-pressed={panEnabled} onClick={togglePan}><IconMove16 /></button>
           <button type="button" className={css.mermaidZoomButton} title={labels.zoomOut} aria-label={labels.zoomOut} onClick={() => { setZoom(value => clampZoom(value - 0.25)) }}>−</button>
-          <button type="button" className={css.mermaidZoomPercent} title={labels.zoomReset} aria-label={labels.zoomReset} onClick={() => { setZoom(1) }}>{`${Math.round(zoom * 100)}%`}</button>
+          <button type="button" className={css.mermaidZoomPercent} title={labels.zoomReset} aria-label={labels.zoomReset} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>{`${Math.round(zoom * 100)}%`}</button>
           <button type="button" className={css.mermaidZoomButton} title={labels.zoomFit} aria-label={labels.zoomFit} onClick={fitToView}>⤢</button>
           <button type="button" className={css.mermaidZoomButton} title={labels.zoomIn} aria-label={labels.zoomIn} onClick={() => { setZoom(value => clampZoom(value + 0.25)) }}>+</button>
         </div>
       )}
     </div>
+  )
+}
+
+/** A four-way move glyph marking the drag-to-pan toggle. */
+function IconMove16() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2.5v11M2.5 8h11M8 2.5 6.2 4.3M8 2.5l1.8 1.8M8 13.5l-1.8-1.8M8 13.5l1.8-1.8M2.5 8l1.8-1.8M2.5 8l1.8 1.8M13.5 8l-1.8-1.8M13.5 8l-1.8 1.8" />
+    </svg>
   )
 }

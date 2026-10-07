@@ -879,6 +879,16 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Split: mirror the editor panes' width so the label divider lines up with the draggable one. */
+.diffPaneLabels[data-mode='split'] {
+  grid-template-columns: calc(var(--diff-split-ratio, 0.5) * 100%) calc((1 - var(--diff-split-ratio, 0.5)) * 100%);
+  /* Reserve the same scrollbar column the diff body does, so the label grid and
+     the panes share one content width and their dividers land on the same pixel. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .diffPaneLabels span {
   overflow: hidden;
   padding: 7px 12px;

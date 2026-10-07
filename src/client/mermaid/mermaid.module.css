@@ -21,6 +21,17 @@
   box-sizing: border-box;
 }
 
+/* Pan mode: dragging moves the diagram, so overflow is hidden and the cursor grips. */
+.mermaidScrollPan {
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+}
+
+.mermaidScrollPan[data-dragging='true'] {
+  cursor: grabbing;
+}
+
 .mermaidStage {
   display: flex;
   align-items: center;
@@ -147,4 +158,32 @@
 .mermaidZoomPercent:focus-visible {
   outline: 1px solid var(--dsw-alias-brand-primary);
   outline-offset: -1px;
+}
+
+/*
+ * Draggable divider between the Mermaid source editor and its preview in split
+ * mode: a thin visible line inside a wider col-resize hit area.
+ */
+.mermaidSplitDivider {
+  flex: 0 0 7px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.mermaidSplitDivider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--dsw-alias-border-l1);
+}
+
+.mermaidSplitDivider:hover::before,
+.mermaidSplitDivider:focus-visible::before {
+  background: var(--dsw-alias-brand-primary);
 }

@@ -62,6 +62,21 @@ describe('Git Diff editor', () => {
     expect(view.getAllByRole('button').every(button => !button.hasAttribute('disabled'))).toBe(true)
   })
 
+  it('drives the split panes from a remembered ratio exposed as a CSS variable', () => {
+    localStorage.setItem('dsh-workbench:diff-split-ratio', '0.65')
+    const view = render(
+      <GitDiffEditor
+        diff={sampleDiff()}
+        viewMode="split"
+        onViewModeChange={vi.fn()}
+        t={(key: keyof typeof zh) => zh[key]}
+      />,
+    )
+    const body = view.container.querySelector('[class*="diffEditorBody"]') as HTMLElement | null
+    expect(body).not.toBeNull()
+    expect(body?.style.getPropertyValue('--diff-split-ratio')).toBe('0.65')
+  })
+
   it('shows a binary notice instead of constructing a text editor', () => {
     const view = render(
       <GitDiffEditor

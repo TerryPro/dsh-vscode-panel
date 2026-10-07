@@ -6,6 +6,7 @@ import { dshEditorSetup } from './editor-setup.ts'
 import { languageForPath } from './editor-languages.ts'
 import { MERGE_BASE_OPTIONS, MERGE_DIFF_CONFIG } from './editor-merge-options.ts'
 import { editorSyntaxHighlighting, foldGutterTheme, indentMarkersTheme } from './editor-theme.ts'
+import './editor.module.css'
 
 export interface DiffSurfaceProps {
   original: string
@@ -14,6 +15,10 @@ export interface DiffSurfaceProps {
   modifiedLabel: string
   mode: 'split' | 'unified' | 'inline'
   path?: string
+  /** Reports a drag of the split divider as the left pane's width fraction (0–1). */
+  onSplitRatioChange?: (ratio: number) => void
+  /** Accessible label for the split divider's resize handle. */
+  splitResizeLabel?: string
 }
 
 const COLLAPSE_UNCHANGED = { margin: 3, minSize: 8 } as const
@@ -30,6 +35,8 @@ export function unifiedDiffOptions(mode: 'unified' | 'inline', original: string)
 /** 使用 CodeMirror 的左右、统一或字符行内模式渲染一个只读文件 Diff。 */
 export function DiffSurface(props: DiffSurfaceProps) {
   const parent = useRef<HTMLDivElement>(null)
+  const onSplitRatioChangeRef = useRef(props.onSplitRatioChange)
+  onSplitRatioChangeRef.current = props.onSplitRatioChange
 
   useEffect(() => {
     if (parent.current === null) return
@@ -58,7 +65,8 @@ export function DiffSurface(props: DiffSurfaceProps) {
       })
       merge.dom.style.height = '100%'
       merge.dom.style.overflow = 'auto'
-      return () => { merge.destroy() }
+      const divider = installSplitDivider(merge, props.splitResizeLabel, (ratio) => { onSplitRatioChangeRef.current?.(ratio) })
+      return () => { divider?.(); merge.destroy() }
     }
 
     const view = new EditorView({
@@ -75,6 +83,65 @@ export function DiffSurface(props: DiffSurfaceProps) {
   }, [props.mode, props.modified, props.modifiedLabel, props.original, props.originalLabel, props.path])
 
   return <div ref={parent} data-diff-surface={props.mode} style={{ height: '100%', minHeight: 0 }} />
+}
+
+/**
+ * Insert a draggable divider between the split view's two editor panes. The
+ * divider doubles as the visible separator; dragging reports the left pane's
+ * width fraction so the host can drive both panes (and the header labels) from
+ * one ratio via a CSS custom property. CodeMirror's own ResizeObserver reflows
+ * the editors as the width changes, so a final measure on release keeps the two
+ * sides aligned. Returns a disposer, or undefined when the merge DOM is absent.
+ */
+function installSplitDivider(
+  merge: MergeView,
+  label: string | undefined,
+  onRatio: (ratio: number) => void,
+): (() => void) | undefined {
+  const editors = merge.dom.querySelector('.cm-mergeViewEditors')
+  if (editors === null) return undefined
+  const wraps = Array.from(editors.children).filter(
+    (node): node is HTMLElement => node.classList.contains('cm-mergeViewEditor'),
+  )
+  if (wraps.length < 2) return undefined
+  const rightPane = wraps[wraps.length - 1] as HTMLElement
+
+  const handle = document.createElement('div')
+  handle.className = 'cm-diffSplitHandle'
+  handle.setAttribute('role', 'separator')
+  handle.setAttribute('aria-orientation', 'vertical')
+  handle.setAttribute('tabindex', '0')
+  handle.setAttribute('aria-label', label ?? 'Resize diff panes')
+  editors.insertBefore(handle, rightPane)
+
+  const onPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const bounds = editors.getBoundingClientRect()
+    handle.setPointerCapture?.(event.pointerId)
+    handle.classList.add('cm-diffSplitHandleActive')
+    const move = (moveEvent: PointerEvent): void => {
+      if (bounds.width <= 0) return
+      onRatio((moveEvent.clientX - bounds.left) / bounds.width)
+    }
+    const up = (upEvent: PointerEvent): void => {
+      handle.releasePointerCapture?.(upEvent.pointerId)
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+      handle.classList.remove('cm-diffSplitHandleActive')
+      merge.a.requestMeasure()
+      merge.b.requestMeasure()
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+  }
+  handle.addEventListener('pointerdown', onPointerDown)
+  return () => {
+    handle.removeEventListener('pointerdown', onPointerDown)
+    handle.remove()
+  }
 }
 
 const diffTheme = EditorView.theme({
@@ -101,17 +168,32 @@ const diffTheme = EditorView.theme({
     backgroundColor: 'var(--dsw-alias-interactive-bg-active) !important',
   },
   '&.cm-focused': { outline: 'none' },
-  '&.cm-merge-a .cm-changedLine, .cm-deletedChunk': {
+  // Split view: one uniform block per changed line and nothing darker on top.
+  // CodeMirror marks a whole added/removed chunk with <ins>/<del> (and inline
+  // edits with .cm-changedText); clearing those tints and their text decoration
+  // leaves only the flat .cm-changedLine colour, so a line reads as one block.
+  '&.cm-merge-a .cm-changedLine': {
+    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 15%, transparent)',
+  },
+  '&.cm-merge-b .cm-changedLine': {
+    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 15%, transparent)',
+  },
+  '&.cm-merge-a .cm-changedText, &.cm-merge-b .cm-changedText, &.cm-merge-a .cm-deletedLine, &.cm-merge-b .cm-insertedLine': {
+    background: 'transparent',
+    textDecoration: 'none',
+  },
+  // Unified / inline view: keep the line tint plus the character-level highlight.
+  '.cm-deletedChunk': {
     backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 11%, transparent)',
   },
-  '&.cm-merge-b .cm-changedLine, .cm-inlineChangedLine': {
+  '.cm-inlineChangedLine': {
     backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 11%, transparent)',
   },
-  '&.cm-merge-a .cm-changedText, .cm-deletedChunk .cm-deletedText, &.cm-merge-b .cm-deletedText': {
+  '.cm-deletedChunk .cm-deletedText, &.cm-merge-b .cm-deletedText': {
     background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 23%, transparent)',
     textDecoration: 'none',
   },
-  '&.cm-merge-b .cm-changedText, .cm-insertedLine': {
+  '.cm-insertedLine': {
     background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 23%, transparent)',
     textDecoration: 'none',
   },

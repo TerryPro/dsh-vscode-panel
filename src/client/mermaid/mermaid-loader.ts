@@ -48,9 +48,41 @@ function runtimeUrl(): string {
   return new URL(MERMAID_RUNTIME_PATH, base).href
 }
 
-/** Whether the shell is currently in its dark theme, so Mermaid can match it. */
+/**
+ * Whether the shell is currently in its dark theme, so Mermaid can match it.
+ *
+ * The `data-ds-dark-theme` attribute is only one signal and is not always present
+ * (dark can be the default, or conveyed purely through the design tokens), so we
+ * fall back to reading the resolved `--dsw-alias-bg-base` luminance — the same
+ * live token the terminal reads — instead of trusting the attribute alone.
+ */
 export function shellIsDark(): boolean {
-  return typeof document !== 'undefined' && document.body?.hasAttribute('data-ds-dark-theme') === true
+  if (typeof document === 'undefined') return false
+  if (document.body?.hasAttribute('data-ds-dark-theme') === true) return true
+  if (document.documentElement?.hasAttribute('data-ds-dark-theme') === true) return true
+  return isDarkToken('--dsw-alias-bg-base')
+}
+
+/** Resolve a design token to a colour and decide whether it reads as dark. */
+function isDarkToken(token: string): boolean {
+  if (typeof document === 'undefined' || document.body === null) return false
+  // A detached probe lets the browser resolve the `var()` chain to a concrete
+  // rgb(), which getPropertyValue on the custom property would not.
+  const probe = document.createElement('span')
+  probe.setAttribute('aria-hidden', 'true')
+  probe.style.display = 'none'
+  probe.style.color = `var(${token})`
+  document.body.appendChild(probe)
+  let rgb = ''
+  try {
+    rgb = getComputedStyle(probe).color
+  } finally {
+    probe.remove()
+  }
+  const match = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/u.exec(rgb)
+  if (match === null) return false
+  const luminance = (0.2126 * Number(match[1]) + 0.7152 * Number(match[2]) + 0.0722 * Number(match[3])) / 255
+  return luminance < 0.5
 }
 
 /**

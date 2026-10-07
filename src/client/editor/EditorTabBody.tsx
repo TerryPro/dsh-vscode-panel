@@ -14,6 +14,8 @@ import { GitDiffEditor } from '../git/GitDiffEditor.tsx'
 import { HtmlPreview } from './HtmlPreview.tsx'
 import { isHtmlPath, resolveRelativePath, type ReadHtmlRelative } from './html-preview.ts'
 import { MermaidPreview, type MermaidPreviewLabels } from '../mermaid/MermaidPreview.tsx'
+import { MermaidSplitDivider } from '../mermaid/MermaidSplitDivider.tsx'
+import { clampMermaidSplitRatio, readMermaidSplitRatio, saveMermaidSplitRatio } from '../mermaid/mermaid-split.ts'
 import { isMermaidPath } from '../mermaid/mermaid-path.ts'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
@@ -43,6 +45,7 @@ export function EditorTabBody({
   onViewReady,
 }: EditorTabBodyProps) {
   const [cursor, setCursor] = useState<EditorCursorState>({ line: 1, column: 1, selectedChars: 0, selectedLines: 0 })
+  const [mermaidSplitRatio, setMermaidSplitRatio] = useState(readMermaidSplitRatio)
   const previewRef = useRef<HTMLDivElement>(null)
   const [localView, setLocalView] = useState<EditorView | null>(null)
   const isHtmlTab = tab.kind === 'file' && tab.file !== null && isHtmlPath(tab.path)
@@ -70,6 +73,11 @@ export function EditorTabBody({
     setLocalView(view)
     if (active) onViewReady?.(view)
   }
+  const handleMermaidSplitRatio = useCallback((ratio: number): void => {
+    const clamped = clampMermaidSplitRatio(ratio)
+    setMermaidSplitRatio(clamped)
+    saveMermaidSplitRatio(clamped)
+  }, [])
   const mermaidLabels = useMemo<MermaidPreviewLabels>(() => ({
     loading: t('editor.mermaidLoading'),
     missing: t('editor.mermaidMissing'),
@@ -80,6 +88,7 @@ export function EditorTabBody({
     zoomOut: t('editor.mermaidZoomOut'),
     zoomFit: t('editor.mermaidZoomFit'),
     zoomReset: t('editor.mermaidZoomReset'),
+    pan: t('editor.mermaidPan'),
   }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
@@ -119,65 +128,80 @@ export function EditorTabBody({
   }
   if (tab.image !== null) return <ImagePreview image={tab.image} />
   if (tab.file === null) return <EditorEmpty text={tab.error ?? t('editor.loading')} />
+  const codeEditor = (
+    <CodeEditor
+      key={tab.id}
+      value={tab.draft}
+      ariaLabel={tab.path}
+      path={tab.path}
+      onChange={(value, source) => { controller.setDraft(value, source, tab.id) }}
+      onCursorChange={setCursor}
+      onGitHunkOpen={() => { controller.logGitHunkOpen(tab.path) }}
+      onGitHunkResize={width => { controller.logGitHunkResize(tab.path, width) }}
+      onGitHunkResizeStorageError={operation => { controller.logGitHunkResizeStorageError(operation) }}
+      onGitHunkDismissOutside={() => { controller.logGitHunkDismissOutside(tab.path) }}
+      onViewReady={handleViewReady}
+      inlineDiff={tab.inlineDiff}
+      wrap={tab.wrap}
+      {...tab.gitBaseline?.available === true && !tab.gitBaseline.binary
+        ? { gitOriginal: tab.gitBaseline.original }
+        : {}}
+      gitLabels={gitLineLabels}
+    />
+  )
   return (
     <div className={css.editorFileArea}>
       <div className={css.editorFileBody}>
         {isMermaidTab && mermaidMode === 'preview'
           ? <MermaidPreview key={`mermaid-${tab.id}`} source={tab.draft} labels={mermaidLabels} />
-          : isHtmlTab && tab.htmlMode !== 'source'
-          ? (
-            <HtmlPreview
-              html={tab.draft}
-              title={t('editor.htmlFrame')}
-              loadingText={t('editor.loading')}
-              failedText={t('editor.htmlFailed')}
-              interactive={tab.htmlMode === 'interactive'}
-              readResource={readHtmlResource}
-            />
-          )
-          : tab.file.markdown && tab.markdownMode === 'preview'
+          : isMermaidTab && mermaidMode === 'split'
             ? (
               <>
-                <div ref={previewRef} className={css.markdownPreview}><MarkdownText text={tab.draft} labels={markdownLabels} /></div>
-                {tab.outlineVisible === true && (
-                  <MarkdownOutline entries={outlineEntries} labels={{ title: t('editor.outline'), empty: t('editor.outlineEmpty') }} onSelect={handleOutlineSelect} />
-                )}
+                <div className={css.mermaidSplitEditor} style={{ flexGrow: mermaidSplitRatio, flexBasis: 0 }}>
+                  {codeEditor}
+                </div>
+                <MermaidSplitDivider ratio={mermaidSplitRatio} onRatio={handleMermaidSplitRatio} label={t('editor.resizeSplit')} />
+                <MermaidPreview
+                  key={`mermaid-${tab.id}`}
+                  source={tab.draft}
+                  labels={mermaidLabels}
+                  style={{ flexGrow: 1 - mermaidSplitRatio, flexBasis: 0 }}
+                />
               </>
             )
-            : (
-              <>
-                <CodeEditor
-                  key={tab.id}
-                  value={tab.draft}
-                  ariaLabel={tab.path}
-                  path={tab.path}
-                  onChange={(value, source) => { controller.setDraft(value, source, tab.id) }}
-                  onCursorChange={setCursor}
-                  onGitHunkOpen={() => { controller.logGitHunkOpen(tab.path) }}
-                  onGitHunkResize={width => { controller.logGitHunkResize(tab.path, width) }}
-                  onGitHunkResizeStorageError={operation => { controller.logGitHunkResizeStorageError(operation) }}
-                  onGitHunkDismissOutside={() => { controller.logGitHunkDismissOutside(tab.path) }}
-                  onViewReady={handleViewReady}
-                  inlineDiff={tab.inlineDiff}
-                  wrap={tab.wrap}
-                  {...tab.gitBaseline?.available === true && !tab.gitBaseline.binary
-                    ? { gitOriginal: tab.gitBaseline.original }
-                    : {}}
-                  gitLabels={gitLineLabels}
-                />
-                {isMermaidTab && mermaidMode === 'split' && (
-                  <MermaidPreview key={`mermaid-${tab.id}`} source={tab.draft} labels={mermaidLabels} split />
-                )}
-                {tab.file.markdown && tab.markdownMode === 'split' && (
-                  <>
-                    <div ref={previewRef} className={css.markdownPreviewPane}><MarkdownText text={tab.draft} labels={markdownLabels} /></div>
-                    {tab.outlineVisible === true && (
-                      <MarkdownOutline entries={outlineEntries} labels={{ title: t('editor.outline'), empty: t('editor.outlineEmpty') }} onSelect={handleOutlineSelect} />
-                    )}
-                  </>
-                )}
-              </>
-            )}
+            : isHtmlTab && tab.htmlMode !== 'source'
+            ? (
+              <HtmlPreview
+                html={tab.draft}
+                title={t('editor.htmlFrame')}
+                loadingText={t('editor.loading')}
+                failedText={t('editor.htmlFailed')}
+                interactive={tab.htmlMode === 'interactive'}
+                readResource={readHtmlResource}
+              />
+            )
+            : tab.file.markdown && tab.markdownMode === 'preview'
+              ? (
+                <>
+                  <div ref={previewRef} className={css.markdownPreview}><MarkdownText text={tab.draft} labels={markdownLabels} /></div>
+                  {tab.outlineVisible === true && (
+                    <MarkdownOutline entries={outlineEntries} labels={{ title: t('editor.outline'), empty: t('editor.outlineEmpty') }} onSelect={handleOutlineSelect} />
+                  )}
+                </>
+              )
+              : (
+                <>
+                  {codeEditor}
+                  {tab.file.markdown && tab.markdownMode === 'split' && (
+                    <>
+                      <div ref={previewRef} className={css.markdownPreviewPane}><MarkdownText text={tab.draft} labels={markdownLabels} /></div>
+                      {tab.outlineVisible === true && (
+                        <MarkdownOutline entries={outlineEntries} labels={{ title: t('editor.outline'), empty: t('editor.outlineEmpty') }} onSelect={handleOutlineSelect} />
+                      )}
+                    </>
+                  )}
+                </>
+              )}
       </div>
       <EditorStatusBar
         cursor={cursor}
