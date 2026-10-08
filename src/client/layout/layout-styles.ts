@@ -28,6 +28,12 @@ import {
   EDITOR_RELEASE_ATTRIBUTE,
   EDITOR_TRANSITION_ATTRIBUTE,
   FRAME_ATTRIBUTE,
+  PANEL_HEADER_ATTRIBUTE,
+  PANEL_HEADER_HEIGHT_PROPERTY,
+  PANEL_RULE_ATTRIBUTE,
+  PANEL_RULE_LEFT_PROPERTY,
+  PANEL_RULE_TOP_PROPERTY,
+  PANEL_RULE_WIDTH_PROPERTY,
   TRANSITION_CONVERSATION_WIDTH,
   TRANSITION_EDITOR_WIDTH,
   TRANSITION_SIDEBAR_WIDTH,
@@ -39,6 +45,10 @@ import {
   type GlobalPanelLayout,
   type GlobalPanelSource,
 } from './global-panel-layout.ts'
+import {
+  createPanelRuleLayout,
+  type PanelRuleLayout,
+} from './panel-rule-layout.ts'
 import {
   createDetailsTrackLayout,
   DETAILS_TRACK_ATTRIBUTE,
@@ -129,6 +139,23 @@ const CSS = `
   border-right: none;
 }
 
+/* Collapsing the middle editor returns the conversation to AppFrame's centre
+   track, where the shell draws no left edge at all on Windows and a 0.5px l3
+   hairline elsewhere, and rounds that corner by 16px. Every other workbench
+   seam — including the top divider this file paints on all three columns — is a
+   square 1px l1 line, so toggling the editor visibly thins the seam and curls a
+   notch into the top divider where it meets the rounded corner. Keep the seam
+   identical in both states, and leave it alone when the sidebar is collapsed
+   too: there the centre reaches the window edge, where no divider belongs. */
+[${FRAME_ATTRIBUTE}][${EDITOR_COLLAPSED_ATTRIBUTE}]:not([data-sidebar-collapsed]) > :nth-child(2) {
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 0;
+}
+
+[${FRAME_ATTRIBUTE}][${EDITOR_COLLAPSED_ATTRIBUTE}]:not([data-sidebar-collapsed]) > :nth-child(1) {
+  border-right: none;
+}
+
 /* The app menu bar lives in the frame's top padding (the titlebar strip), so
    the content columns begin below it (top = padding-top). Draw the divider on
    each column's top edge so it lands at the menu bar's bottom on every
@@ -137,6 +164,49 @@ const CSS = `
 [${FRAME_ATTRIBUTE}] > :nth-child(2),
 [${FRAME_ATTRIBUTE}] > :nth-child(3) {
   border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* The sidebar panel rule. It closes the panel header and must be collinear with
+   the middle column's tab bar, so it cannot be a border on that header: the
+   shell's .regionArea clips overflow and reclaims only 4px of the sidebar's 12px
+   inline padding on the left, which leaves the line 8px short of the column edge
+   (the visible gap). Nor can it be a background layer on the column or the
+   sidebar root, because each sits behind the next element's own fill and would
+   replace the macOS vibrancy gradients. Paint it on the frame instead: the frame
+   is already the columns' containing block, its ::before is the only pseudo the
+   shell claims, and a trailing pseudo lands above every column fill.
+
+   Left, width, top, and the matching header height all come from
+   panel-rule-layout.ts, so no host padding is assumed.
+
+   The stroke is the tab bar's own declaration — the same border-bottom width and
+   the same token — rather than a 1px background fill of the same size. Blink
+   quantises a border's edges onto the device grid but paints a background at its
+   exact fractional width, so two visually identical CSS rules can render two
+   different lines: at the 125%/150% scales Windows defaults to, a 1px fill
+   spreads over an extra device row and reads heavier than the border it
+   continues. Identical primitive, identical geometry, identical colour. */
+[${FRAME_ATTRIBUTE}][${PANEL_RULE_ATTRIBUTE}]::after {
+  content: '';
+  position: absolute;
+  left: var(${PANEL_RULE_LEFT_PROPERTY});
+  top: var(${PANEL_RULE_TOP_PROPERTY});
+  width: var(${PANEL_RULE_WIDTH_PROPERTY});
+  height: 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  pointer-events: none;
+}
+
+/* With the rule published, the header row is sized by the same measurement so
+   its content ends where the middle column's content begins, and its last row
+   is reserved for the rule exactly as the tab bar reserves its own. Without a
+   measurement (collapsed middle column) the row keeps DSH's natural height and
+   the line is simply not drawn. */
+[${FRAME_ATTRIBUTE}][${PANEL_RULE_ATTRIBUTE}] [${PANEL_HEADER_ATTRIBUTE}] {
+  box-sizing: border-box;
+  height: var(${PANEL_HEADER_HEIGHT_PROPERTY}, auto);
+  min-height: 0;
+  padding-block: 0 1px;
 }
 
 [${FRAME_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}])[${DETAILS_TRACK_ATTRIBUTE}]:not([data-rightbar-collapsed]):not([data-rightbar-fullscreen]),
@@ -406,6 +476,7 @@ export function installWorkbenchLayout(
     let conversationFileRouting: ConversationFileRouting | undefined
     let editorTransition: EditorTrackTransition | undefined
     let globalPanel: GlobalPanelLayout | undefined
+    let panelRule: PanelRuleLayout | undefined
     let editorExpanded = visibility.getSnapshot().editorExpanded
     const synchronizeVisibility = (): void => {
       const nextExpanded = visibility.getSnapshot().editorExpanded
@@ -420,6 +491,8 @@ export function installWorkbenchLayout(
       if (next === frame) return
       globalPanel?.dispose()
       globalPanel = undefined
+      panelRule?.dispose()
+      panelRule = undefined
       conversationLayout?.dispose()
       conversationLayout = undefined
       conversationFileRouting?.dispose()
@@ -444,6 +517,7 @@ export function installWorkbenchLayout(
         availableWidth => detailsTrack?.resolvePreferredWidth(availableWidth) ?? 0,
       )
       globalPanel = createGlobalPanelLayout(frame, panelInfo, ctx.logger)
+      panelRule = createPanelRuleLayout(frame, ctx.logger)
       const conversationColumn = frame.children.item(1)
       if (conversationColumn instanceof HTMLElement) {
         conversationLayout = createConversationLayout(conversationColumn, ctx.logger)
@@ -459,6 +533,7 @@ export function installWorkbenchLayout(
       documentObserver.disconnect()
       unsubscribeVisibility()
       globalPanel?.dispose()
+      panelRule?.dispose()
       conversationLayout?.dispose()
       conversationFileRouting?.dispose()
       editorTransition?.dispose()

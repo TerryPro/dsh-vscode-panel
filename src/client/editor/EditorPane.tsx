@@ -63,7 +63,7 @@ export function EditorPane({
   const terminals = tabs.filter((candidate): candidate is WorkbenchTerminalTab => candidate.kind === 'terminal')
   return (
     <>
-      <header className={css.editorHeader}>
+      <header className={css.editorHeader} data-dsh-workbench-panel-rule-anchor="">
         <EditorTabs
           tabs={tabs}
           activeTabId={activeId}

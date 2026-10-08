@@ -13,6 +13,22 @@ export const TRANSITION_CONVERSATION_WIDTH = '--dsh-workbench-transition-convers
 export const EDITOR_TRANSITION_START_EVENT = 'dsh-workbench:editor-transition-start'
 export const EDITOR_TRANSITION_END_EVENT = 'dsh-workbench:editor-transition-end'
 
+/**
+ * Sidebar panel rule markers and geometry.
+ *
+ * The rule closes a sidebar panel header and must be collinear with the middle
+ * column's tab bar. It is painted by a pseudo-element on the AppFrame rather
+ * than as a border on the header, and its box plus the matching header height
+ * are measured at runtime (see panel-rule-layout.ts).
+ */
+export const PANEL_RULE_ANCHOR_ATTRIBUTE = 'data-dsh-workbench-panel-rule-anchor'
+export const PANEL_HEADER_ATTRIBUTE = 'data-dsh-workbench-panel-header'
+export const PANEL_RULE_ATTRIBUTE = 'data-dsh-workbench-panel-rule'
+export const PANEL_RULE_LEFT_PROPERTY = '--dsh-workbench-panel-rule-left'
+export const PANEL_RULE_TOP_PROPERTY = '--dsh-workbench-panel-rule-top'
+export const PANEL_RULE_WIDTH_PROPERTY = '--dsh-workbench-panel-rule-width'
+export const PANEL_HEADER_HEIGHT_PROPERTY = '--dsh-workbench-panel-header-height'
+
 export interface EditorTransitionEventDetail {
   expanded: boolean
 }

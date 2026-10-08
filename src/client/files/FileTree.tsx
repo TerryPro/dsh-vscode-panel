@@ -323,7 +323,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
   const root = listings['']
   return (
     <div className={css.panelBody}>
-      <div className={css.panelHeader}>
+      <div className={css.panelHeader} data-dsh-workbench-panel-header="">
         <div className={css.fileHeaderTitle}>
           <span className={css.fileHeaderLabel}>{t('files.title')}</span>
           {workspacePath !== undefined && (

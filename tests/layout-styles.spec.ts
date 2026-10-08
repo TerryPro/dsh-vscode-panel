@@ -120,6 +120,15 @@ describe('workbench layout presentation', () => {
     expect(style?.textContent).toContain('data-dsh-workbench-floating-model-menu')
     expect(style?.textContent).toContain('position: fixed !important')
     expect(style?.textContent).not.toContain('flex-direction: column')
+    // The collapsed-editor seam: the conversation returns to AppFrame's centre
+    // track, whose native left edge is absent on Windows and a 0.5px hairline
+    // elsewhere, with a 16px rounded corner. It must match the workbench seam.
+    expect(style?.textContent).toContain(
+      `[${EDITOR_COLLAPSED_ATTRIBUTE}]:not([data-sidebar-collapsed]) > :nth-child(2) {
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 0;
+}`,
+    )
 
     visibility.setExpanded(false)
     expect(frame.hasAttribute(EDITOR_COLLAPSED_ATTRIBUTE)).toBe(true)

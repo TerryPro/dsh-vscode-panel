@@ -29,7 +29,7 @@ export function TerminalPanel({ controller, workspaceId, t }: TerminalPanelProps
   if (workspaceId === undefined) return <div className={css.emptyState}>{t('terminal.emptyWorkspace')}</div>
   return (
     <div className={css.panelBody}>
-      <header className={css.panelHeader}>
+      <header className={css.panelHeader} data-dsh-workbench-panel-header="">
         <span>{t('terminal.title')}</span>
         <Tooltip label={t('terminal.new')} delayMs={500}>
           <button

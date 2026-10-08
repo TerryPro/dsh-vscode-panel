@@ -45,7 +45,7 @@ interface GitRepositoryToolbarProps {
 /** 仓库标题工具栏：分支选择、视图切换和显式远程操作。 */
 export function GitRepositoryToolbar(props: GitRepositoryToolbarProps) {
   return (
-    <div className={css.panelHeader}>
+    <div className={css.panelHeader} data-dsh-workbench-panel-header="">
       <BranchMenu {...props} />
       <div className={css.gitHeaderActions}>
         <ViewToggle {...props} />
