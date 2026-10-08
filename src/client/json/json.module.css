@@ -1,0 +1,419 @@
+/* Light-first value colours, shared by the tree and the graph; dark swaps below. */
+.jsonTree,
+.graph {
+  --json-key: var(--dsw-alias-label-primary);
+  --json-string: var(--dsw-static-amber-500);
+  --json-number: var(--dsw-static-blue-500);
+  --json-atom: var(--dsw-static-deepseek-400);
+
+  background: var(--dsw-alias-bg-base);
+}
+
+.jsonTree {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+/* The dark theme mirrors the syntax colours the code editor already uses. */
+:global(body[data-ds-dark-theme]) .jsonTree,
+:global(body[data-ds-dark-theme]) .graph {
+  --json-key: var(--dsw-static-blue-450);
+  --json-string: var(--dsw-static-amber-500);
+  --json-number: var(--dsw-static-amber-400);
+  --json-atom: var(--dsw-static-blue-400);
+}
+
+/* A split pane's leading edge, mirroring the Markdown/Mermaid/CSV dividers. */
+.jsonTreeSplit {
+  border-inline-start: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* Toolbar row above the tree: filter, folding presets and copy actions. */
+.jsonToolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.jsonSearch {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.jsonSearch:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.jsonAction {
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.jsonAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.jsonAction:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.jsonAction:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.jsonCount {
+  margin-inline-start: auto;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* One-line notice above or below the tree: parse trouble, node cap, size cap. */
+.jsonNote {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.jsonNoteError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* The scrolling region holds the rows; the toolbar and notes stay fixed around it. */
+.jsonScroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding-block: 4px 12px;
+  padding-inline-start: 8px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+/*
+ * One row. Only the row itself is a flex container; the key, value and badge
+ * stay inline so a wrapped string flows inside the line instead of stacking.
+ * The face and metrics mirror the source editor (editor-theme.ts) so the split
+ * shows the same document in one typeface at one size.
+ */
+.jsonRow {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding-block: 2px;
+  padding-inline-end: 12px;
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jsonRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.jsonRowSelected {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, var(--dsw-alias-bg-base));
+}
+
+/* Fixed-width chevron slot so every nesting level lines up. */
+.jsonExpander {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.jsonKey {
+  color: var(--json-key);
+}
+
+/* Fixed-width index gutter so a long array lines up vertically, like row numbers. */
+.jsonIndex {
+  flex: none;
+  width: 4ch;
+  text-align: end;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * One indent guide per nesting level: the vertical rule that makes the hierarchy
+ * readable without counting spaces. A row carries as many as its depth.
+ */
+.jsonGuide {
+  flex: none;
+  width: 16px;
+  align-self: stretch;
+  border-inline-start: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* Light the guides of a container's subtree while pointing at the container. */
+.jsonRowLit .jsonGuide {
+  border-inline-start-color: var(--dsw-alias-brand-primary);
+}
+
+/* The `{…}` preview of a folded container's contents, kept quieter than data. */
+.jsonPreview {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The brace that ends a selected container, paired with its opening one. */
+.jsonPunctActive {
+  color: var(--dsw-alias-brand-primary);
+}
+
+.jsonPunctuation {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.jsonString {
+  color: var(--json-string);
+}
+
+.jsonNumber {
+  color: var(--json-number);
+}
+
+.jsonAtom {
+  color: var(--json-atom);
+}
+
+.jsonInvalid {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Trailing `{…} 12 keys` pill shown on a folded container. */
+.jsonBadge {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-label-secondary) 18%, transparent);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Hint that a folded long value expands on a row click; the row owns the click. */
+.jsonValueToggle {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The “show more” cursor under a long array. */
+.jsonMore {
+  padding-block: 2px;
+}
+
+.jsonEmpty {
+  margin: 0;
+  padding: 24px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* --- Graph view: a pannable, zoomable canvas of value cards ----------------- */
+
+.graph {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.graphSplit {
+  border-inline-start: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* The viewport clips the canvas; dragging it pans. */
+.graphViewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--dsw-alias-border-l1) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--dsw-alias-border-l1) 55%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.graphViewport[data-dragging='1'] {
+  cursor: grabbing;
+}
+
+/* Canvas holds the transformed content; its own size is the unscaled layout. */
+.graphCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.graphEdges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.graphEdge {
+  fill: none;
+  stroke: var(--dsw-alias-border-l2);
+  stroke-width: 1.5;
+}
+
+.graphEdgeLit {
+  stroke: var(--dsw-alias-brand-primary);
+}
+
+/* Key label on the wire: a background-coloured halo keeps it legible over the grid. */
+.graphEdgeLabel {
+  fill: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: var(--dsw-alias-bg-base);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+
+/* One card per object or array, measured by json-graph.ts. */
+.graphCard {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.graphCardMatch {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+/* A row is one member; its height matches GRAPH_ROW_HEIGHT in the layout math. */
+.graphRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.graphRow + .graphRow {
+  border-block-start: 1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 60%, transparent);
+}
+
+.graphRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.graphRowSelected {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
+}
+
+/* `+` / `−` on a container row; a spacer keeps rows without one aligned. */
+.graphToggle {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.graphToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.graphToggle:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.graphSpacer {
+  flex: none;
+  width: 16px;
+}
+
+.graphKey {
+  color: var(--json-key);
+}
+
+.graphValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.graphCount {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.graphMore {
+  color: var(--dsw-alias-brand-primary);
+}
+
+/* Corner hint naming the gesture, kept quiet so it never reads as data. */
+.graphHint {
+  position: absolute;
+  inset-block-end: 8px;
+  inset-inline-start: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  pointer-events: none;
+}

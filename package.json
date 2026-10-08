@@ -6,7 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lsq-dsh-plugins/dsh-workbench-layout.git"
+    "url": "git+https://github.com/TerryPro/dsh-vscode-panel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TerryPro/dsh-vscode-panel/issues"
   },
   "publishConfig": {
     "access": "public",

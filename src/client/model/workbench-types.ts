@@ -10,6 +10,7 @@ export type MarkdownViewMode = 'preview' | 'source' | 'split'
 export type HtmlViewMode = 'preview' | 'interactive' | 'source'
 export type MermaidViewMode = 'preview' | 'source' | 'split'
 export type CsvViewMode = 'table' | 'source' | 'split'
+export type JsonViewMode = 'graph' | 'tree' | 'source' | 'split'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
 export type DraftChangeSource = 'input' | 'git-revert'
@@ -52,6 +53,8 @@ export interface WorkbenchFileTab {
   mermaidMode?: MermaidViewMode
   /** Tabular view state; only meaningful for `.csv`/`.tsv` files. */
   csvMode?: CsvViewMode
+  /** Structured view state (graph, tree, split, source); only meaningful for `.json`/`.jsonc` files. */
+  jsonMode?: JsonViewMode
   /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
   wrap: boolean
   inlineDiff: boolean

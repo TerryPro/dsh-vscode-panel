@@ -14,6 +14,7 @@ import type {
   GitView,
   CsvViewMode,
   HtmlViewMode,
+  JsonViewMode,
   MarkdownViewMode,
   MermaidViewMode,
   SidebarMode,
@@ -372,6 +373,11 @@ export class WorkbenchController {
   /** Switch one CSV/TSV file tab between table, split and source views. */
   setCsvMode(mode: CsvViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.edits.setCsvMode(mode, tabId)
+  }
+
+  /** Switch one JSON/JSONC file tab between graph, tree, split and source views. */
+  setJsonMode(mode: JsonViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.edits.setJsonMode(mode, tabId)
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {

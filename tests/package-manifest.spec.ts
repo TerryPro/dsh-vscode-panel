@@ -14,7 +14,7 @@ describe('published package metadata', () => {
     expect(manifest.name).toBe('@lsq64737/dsh-workbench-layout')
     expect(manifest.repository).toEqual({
       type: 'git',
-      url: 'git+https://github.com/lsq-dsh-plugins/dsh-workbench-layout.git',
+      url: 'git+https://github.com/TerryPro/dsh-vscode-panel.git',
     })
     expect(manifest.exports).toHaveProperty('./client')
     expect(manifest.dependencies['@codemirror/merge']).toMatch(/^\^6\./u)

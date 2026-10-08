@@ -3,6 +3,15 @@ import { EditorView } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
 
 /**
+ * The monospace face and metrics every code surface shares. Besides the editor
+ * and its autocomplete tooltip, the JSON tree reads these values too (guarded by
+ * its spec) so a split view shows a document in one typeface at one size.
+ */
+export const editorCodeFontFamily = 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace'
+export const editorCodeFontSize = '13px'
+export const editorCodeLineHeight = '1.65'
+
+/**
  * Syntax colours expressed with the DSH static palette so the editor reads
  * like a familiar dark code theme while staying on host design tokens. The
  * mapping follows the conventions of mainstream dark themes: keywords in cool
@@ -127,11 +136,11 @@ export const editorThemeExtensions = [
       height: '100%',
       backgroundColor: 'var(--dsw-alias-bg-base)',
       color: 'var(--dsw-alias-label-primary)',
-      fontSize: '13px',
+      fontSize: editorCodeFontSize,
     },
     '.cm-scroller': {
-      fontFamily: 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace',
-      lineHeight: '1.65',
+      fontFamily: editorCodeFontFamily,
+      lineHeight: editorCodeLineHeight,
     },
     '.cm-content': { padding: '18px 8px 80px', caretColor: 'var(--dsw-alias-label-primary)' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--dsw-alias-label-primary)' },
@@ -186,7 +195,7 @@ export const editorThemeExtensions = [
       borderRadius: '6px',
     },
     '.cm-tooltip.cm-tooltip-autocomplete > ul': {
-      fontFamily: 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace',
+      fontFamily: editorCodeFontFamily,
     },
     '.cm-tooltip-autocomplete ul li[aria-selected]': {
       backgroundColor: 'var(--dsw-alias-interactive-bg-active)',

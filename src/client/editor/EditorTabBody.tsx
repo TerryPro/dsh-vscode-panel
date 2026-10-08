@@ -7,7 +7,7 @@ import type { EditorView } from '@codemirror/view'
 import type { GitLineDecorationLabels } from '../git/git-line-decorations.ts'
 import type { WorkbenchController, WorkbenchTab } from '../model/controller.ts'
 import { CodeEditor, type EditorCursorState } from './CodeEditor.tsx'
-import { IconInlineDiffOutline16, IconInteractiveOutline16, IconOutline16, IconPreviewOutline16, IconSourceOutline16, IconSplitViewOutline16, IconWordWrapOutline16 } from './EditorViewIcons.tsx'
+import { IconGraphOutline16, IconInlineDiffOutline16, IconInteractiveOutline16, IconOutline16, IconPreviewOutline16, IconSourceOutline16, IconSplitViewOutline16, IconWordWrapOutline16 } from './EditorViewIcons.tsx'
 import { EditorEmpty, ImagePreview } from './EditorShared.tsx'
 import { EditorStatusBar } from './EditorStatusBar.tsx'
 import { GitDiffEditor } from '../git/GitDiffEditor.tsx'
@@ -16,6 +16,10 @@ import { isHtmlPath, resolveRelativePath, type ReadHtmlRelative } from './html-p
 import { CsvTable, type CsvTableLabels } from '../csv/CsvTable.tsx'
 import { delimiterForCsvPath, isCsvPath } from '../csv/csv-path.ts'
 import { clampCsvSplitRatio, readCsvSplitRatio, saveCsvSplitRatio } from '../csv/csv-split.ts'
+import { JsonTree, type JsonTreeLabels } from '../json/JsonTree.tsx'
+import { JsonGraph, type JsonGraphLabels } from '../json/JsonGraph.tsx'
+import { isJsonPath } from '../json/json-path.ts'
+import { clampJsonSplitRatio, readJsonSplitRatio, saveJsonSplitRatio } from '../json/json-split.ts'
 import { MermaidPreview, type MermaidPreviewLabels } from '../mermaid/MermaidPreview.tsx'
 import { MermaidSplitDivider } from '../mermaid/MermaidSplitDivider.tsx'
 import { clampMermaidSplitRatio, readMermaidSplitRatio, saveMermaidSplitRatio } from '../mermaid/mermaid-split.ts'
@@ -50,20 +54,24 @@ export function EditorTabBody({
   const [cursor, setCursor] = useState<EditorCursorState>({ line: 1, column: 1, selectedChars: 0, selectedLines: 0 })
   const [mermaidSplitRatio, setMermaidSplitRatio] = useState(readMermaidSplitRatio)
   const [csvSplitRatio, setCsvSplitRatio] = useState(readCsvSplitRatio)
+  const [jsonSplitRatio, setJsonSplitRatio] = useState(readJsonSplitRatio)
   const previewRef = useRef<HTMLDivElement>(null)
   const [localView, setLocalView] = useState<EditorView | null>(null)
   const isHtmlTab = tab.kind === 'file' && tab.file !== null && isHtmlPath(tab.path)
   const isMermaidTab = tab.kind === 'file' && tab.file !== null && isMermaidPath(tab.path)
   const isCsvTab = tab.kind === 'file' && tab.file !== null && isCsvPath(tab.path)
+  const isJsonTab = tab.kind === 'file' && tab.file !== null && isJsonPath(tab.path)
   const csvDelimiter = tab.kind === 'file' ? delimiterForCsvPath(tab.path) : undefined
   const mermaidMode = tab.kind === 'file' && tab.mermaidMode !== undefined ? tab.mermaidMode : 'split'
   const csvMode = tab.kind === 'file' && tab.csvMode !== undefined ? tab.csvMode : 'table'
+  const jsonMode = tab.kind === 'file' && tab.jsonMode !== undefined ? tab.jsonMode : 'graph'
   const showEditor = tab.kind === 'file'
     && tab.file !== null
     && !(isHtmlTab && tab.htmlMode !== 'source')
     && !(tab.file.markdown && tab.markdownMode === 'preview')
     && !(isMermaidTab && mermaidMode === 'preview')
     && !(isCsvTab && csvMode === 'table')
+    && !(isJsonTab && (jsonMode === 'tree' || jsonMode === 'graph'))
   // Read an interactive preview's local dependency relative to the opened HTML file;
   // the resolved path is still scope-checked by the workspace backend.
   const htmlBasePath = tab.kind === 'file' ? tab.path : undefined
@@ -90,6 +98,11 @@ export function EditorTabBody({
     const clamped = clampCsvSplitRatio(ratio)
     setCsvSplitRatio(clamped)
     saveCsvSplitRatio(clamped)
+  }, [])
+  const handleJsonSplitRatio = useCallback((ratio: number): void => {
+    const clamped = clampJsonSplitRatio(ratio)
+    setJsonSplitRatio(clamped)
+    saveJsonSplitRatio(clamped)
   }, [])
   const mermaidLabels = useMemo<MermaidPreviewLabels>(() => ({
     loading: t('editor.mermaidLoading'),
@@ -132,6 +145,53 @@ export function EditorTabBody({
     truncated: count => t('editor.csvTruncated', { count: String(count) }),
     rowCount: (shown, total) => t('editor.csvRowCount', { shown: String(shown), total: String(total) }),
     selectedCells: count => t('editor.csvSelectedCells', { count: String(count) }),
+  }), [t])
+  const jsonLabels = useMemo<JsonTreeLabels>(() => ({
+    tree: t('editor.jsonTree'),
+    empty: t('editor.jsonEmpty'),
+    invalid: t('editor.jsonInvalid'),
+    invalidValue: t('editor.jsonInvalidValue'),
+    tooLarge: t('editor.jsonTooLarge'),
+    truncated: count => t('editor.jsonTruncated', { count: String(count) }),
+    nodes: count => t('editor.jsonNodes', { count: String(count) }),
+    search: t('editor.jsonSearch'),
+    noMatches: t('editor.jsonNoMatches'),
+    matches: count => t('editor.jsonMatches', { count: String(count) }),
+    expandAll: t('editor.jsonExpandAll'),
+    collapseAll: t('editor.jsonCollapseAll'),
+    depth: depth => t('editor.jsonDepth', { depth: String(depth) }),
+    copyValue: t('editor.jsonCopyValue'),
+    copyPath: t('editor.jsonCopyPath'),
+    copied: t('editor.jsonCopied'),
+    copyFailed: t('editor.jsonCopyFailed'),
+    items: count => t('editor.jsonItems', { count: String(count) }),
+    keys: count => t('editor.jsonKeys', { count: String(count) }),
+    showMore: count => t('editor.jsonShowMore', { count: String(count) }),
+    expandString: t('editor.jsonExpandString'),
+  }), [t])
+  const graphLabels = useMemo<JsonGraphLabels>(() => ({
+    graph: t('editor.jsonGraph'),
+    empty: t('editor.jsonEmpty'),
+    invalid: t('editor.jsonInvalid'),
+    tooLarge: t('editor.jsonTooLarge'),
+    truncated: count => t('editor.jsonTruncated', { count: String(count) }),
+    large: t('editor.jsonGraphLarge'),
+    search: t('editor.jsonSearchNode'),
+    noMatches: t('editor.jsonNoMatches'),
+    matches: count => t('editor.jsonMatches', { count: String(count) }),
+    nextMatch: t('editor.jsonNextMatch'),
+    fit: t('editor.jsonFit'),
+    zoomIn: t('editor.jsonZoomIn'),
+    zoomOut: t('editor.jsonZoomOut'),
+    zoomReset: t('editor.jsonZoomReset'),
+    copyValue: t('editor.jsonCopyValue'),
+    copyPath: t('editor.jsonCopyPath'),
+    copied: t('editor.jsonCopied'),
+    copyFailed: t('editor.jsonCopyFailed'),
+    expandNode: t('editor.jsonExpandNode'),
+    collapseNode: t('editor.jsonCollapseNode'),
+    showMore: count => t('editor.jsonShowMore', { count: String(count) }),
+    panHint: t('editor.jsonPanHint'),
   }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
@@ -251,6 +311,42 @@ export function EditorTabBody({
                   />
                 </>
               )
+              : isJsonTab && jsonMode === 'graph'
+              ? (
+                <JsonGraph
+                  key={`json-graph-${tab.id}`}
+                  source={tab.draft}
+                  path={tab.path}
+                  labels={graphLabels}
+                />
+              )
+              : isJsonTab && jsonMode === 'tree'
+              ? (
+                <JsonTree
+                  key={`json-${tab.id}`}
+                  source={tab.draft}
+                  path={tab.path}
+                  labels={jsonLabels}
+                />
+              )
+              : isJsonTab && jsonMode === 'split'
+                ? (
+                  <>
+                    <div className={css.mermaidSplitEditor} style={{ flexGrow: jsonSplitRatio, flexBasis: 0 }}>
+                      {codeEditor}
+                    </div>
+                    <MermaidSplitDivider ratio={jsonSplitRatio} onRatio={handleJsonSplitRatio} label={t('editor.resizeSplit')} clamp={clampJsonSplitRatio} />
+                    <JsonGraph
+                      key={`json-graph-${tab.id}`}
+                      source={tab.draft}
+                      path={tab.path}
+                      labels={graphLabels}
+                      view={localView}
+                      split
+                      style={{ flexGrow: 1 - jsonSplitRatio, flexBasis: 0 }}
+                    />
+                  </>
+                )
               : tab.file.markdown && tab.markdownMode === 'preview'
               ? (
                 <>
@@ -311,6 +407,14 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'table' || undefined} aria-label={t('editor.csvTable')} title={t('editor.csvTable')} onClick={() => { controller.setCsvMode('table', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setCsvMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setCsvMode('source', tab.id) }}><IconSourceOutline16 /></button>
+              </div>
+            )}
+            {isJsonTab && (
+              <div className={css.editorStatusBarSwitch} role="group" aria-label={t('editor.jsonGraph')}>
+                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'graph' || undefined} aria-label={t('editor.jsonGraph')} title={t('editor.jsonGraph')} onClick={() => { controller.setJsonMode('graph', tab.id) }}><IconGraphOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'tree' || undefined} aria-label={t('editor.jsonTree')} title={t('editor.jsonTree')} onClick={() => { controller.setJsonMode('tree', tab.id) }}><IconOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setJsonMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setJsonMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
             {showEditor && (

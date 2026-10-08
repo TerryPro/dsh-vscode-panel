@@ -252,6 +252,19 @@ export function IconOutline16({ size = 16 }: { size?: number }) {
   )
 }
 
+/** 结构图：左侧一个卡片分叉连向右侧两个卡片，表示节点关系画布。 */
+export function IconGraphOutline16({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="6" width="4.5" height="4" rx="1" />
+      <rect x="10" y="2" width="4.5" height="3.25" rx="1" />
+      <rect x="10" y="10.75" width="4.5" height="3.25" rx="1" />
+      <path d="M6 8h2a2 2 0 0 1 2-2v-1.5" />
+      <path d="M6 8h2a2 2 0 0 0 2 2v2.75" />
+    </svg>
+  )
+}
+
 /** 无序列表：项目符号加行线。 */
 export function IconBulletListOutline16({ size = 16 }: { size?: number }) {
   return (
