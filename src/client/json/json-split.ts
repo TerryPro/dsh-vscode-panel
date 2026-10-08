@@ -1,9 +1,12 @@
-/** Persisted split ratio between the JSON source editor and its tree pane. */
+/** Persisted canvas preferences for the JSON view: the split ratio and the grid. */
 
 /** localStorage key holding the JSON split's editor-pane width fraction. */
 const STORAGE_KEY = 'dsh-workbench:json-split-ratio'
 
-/** Neither the editor nor the tree may collapse past these bounds while dragging. */
+/** localStorage key holding whether the canvas draws its background grid. */
+const GRID_KEY = 'dsh-workbench:json-grid'
+
+/** Neither the editor nor the canvas may collapse past these bounds while dragging. */
 export const JSON_SPLIT_MIN = 0.2
 export const JSON_SPLIT_MAX = 0.8
 
@@ -29,5 +32,23 @@ export function saveJsonSplitRatio(ratio: number): void {
     localStorage?.setItem(STORAGE_KEY, String(clampJsonSplitRatio(ratio)))
   } catch {
     /* the ratio simply will not be remembered */
+  }
+}
+
+/** Read the remembered grid choice; a canvas with no memory still draws the grid. */
+export function readJsonGrid(): boolean {
+  try {
+    return (typeof localStorage === 'undefined' ? null : localStorage.getItem(GRID_KEY)) !== '0'
+  } catch {
+    return true
+  }
+}
+
+/** Remember whether the canvas draws its grid; a blocked storage just drops it. */
+export function saveJsonGrid(visible: boolean): void {
+  try {
+    localStorage?.setItem(GRID_KEY, visible ? '1' : '0')
+  } catch {
+    /* the choice simply will not be remembered */
   }
 }

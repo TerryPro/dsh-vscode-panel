@@ -1,9 +1,10 @@
 /**
  * Graph model and layered layout for the JSON canvas view.
  *
- * The grammar follows JSON Crack: one card per object, one `key: value` row per
- * member, a card for every array so it can be collapsed as a unit, and a labelled
- * edge from a member row to the card it points at. Layout is computed here rather
+ * One card per object or array, one `key: value` row per member, and a wire from
+ * a member row to the card it points at — the grammar JSON Crack made popular.
+ * The wire carries no text of its own: the key already reads in the parent row,
+ * so a label on the edge would only collide with the neighbours. Layout is computed here rather
  * than in the DOM so it is deterministic and testable: cards are measured from
  * their text with a fixed monospace advance, each nesting level becomes a column,
  * and a parent is centred against the span its children gathered.
@@ -84,7 +85,6 @@ export interface GraphEdge {
   readonly id: string
   readonly from: string
   readonly to: string
-  readonly label: string | null
   readonly x1: number
   readonly y1: number
   readonly x2: number
@@ -127,6 +127,22 @@ export function allContainerKeys(root: JsonNode | null, minDepth = GRAPH_DEFAULT
   }
   if (root !== null) visit(root)
   return keys
+}
+
+/** How many characters of a value the details panel shows before pointing at copy. */
+export const GRAPH_DETAIL_MAX_CHARS = 4000
+
+/**
+ * The whole text behind a row, without the card's truncation: decoded for a
+ * string, verbatim for the other scalars, and the source slice for a container,
+ * so a folded `{3}` still reads as the JSON it stands for.
+ */
+export function graphValueText(row: GraphRow, source: string): string {
+  if (row.kind === 'string' || row.kind === 'number' || row.kind === 'boolean' || row.kind === 'null') {
+    return row.display
+  }
+  const slice = source.slice(row.start, row.end)
+  return slice === '' ? row.text : slice
 }
 
 /** Build the cards and edges for a parsed document, laid out left to right. */
@@ -176,7 +192,6 @@ export function buildGraphLayout(root: JsonNode | null, options: GraphLayoutOpti
         id: `${draft.id}->${child.id}`,
         from: draft.id,
         to: child.id,
-        label: rowIndex === -1 ? null : draft.rows[rowIndex]?.key ?? null,
         x1: draft.x + draft.width,
         y1: draft.y + rowIndex * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2,
         x2: child.x,

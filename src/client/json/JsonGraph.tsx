@@ -23,11 +23,14 @@ import type {
 import { EditorView } from '@codemirror/view'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import { readJsonCollapsed, saveJsonCollapsed } from './json-collapse.ts'
+import { readJsonGrid, saveJsonGrid } from './json-split.ts'
 import {
   buildGraphLayout,
   fitTransform,
+  GRAPH_DETAIL_MAX_CHARS,
   GRAPH_MARGIN,
   GRAPH_ROW_HEIGHT,
+  graphValueText,
   matchingCardIds,
   zoomAround,
   type GraphCard,
@@ -37,6 +40,14 @@ import {
 import { isJsonViewRenderable, parseJsonDocument, type JsonNodeKind } from './json-parse.ts'
 import { allContainerKeys, GRAPH_DEFAULT_EXPAND_DEPTH } from './json-graph.ts'
 import css from './json.module.css'
+import {
+  IconCollapseAll16,
+  IconCopyPath16,
+  IconCopyValue16,
+  IconExpandAll16,
+  IconGrid16,
+  IconMove16,
+} from './JsonIcons.tsx'
 
 /** User-facing copy the canvas needs, resolved by the caller from the locale. */
 export interface JsonGraphLabels {
@@ -52,6 +63,9 @@ export interface JsonGraphLabels {
   noMatches: string
   matches: (count: number) => ReactNode
   nextMatch: string
+  /** Labels for the two buttons that open or close every branch at once. */
+  expandAll: string
+  collapseAll: string
   fit: string
   zoomIn: string
   zoomOut: string
@@ -63,8 +77,14 @@ export interface JsonGraphLabels {
   expandNode: string
   collapseNode: string
   showMore: (count: number) => ReactNode
-  /** Hint naming the pan/zoom gesture. */
-  panHint: string
+  /** Heading of the panel that spells out the selected row in full. */
+  selectedValue: string
+  /** Shown when a value is too long for the panel to spell out entirely. */
+  valueTruncated: (shown: number, total: number) => ReactNode
+  /** Label for the toggle that lets a drag pan the canvas. */
+  pan: string
+  /** Label for the toggle that draws the canvas background grid. */
+  grid: string
 }
 
 export interface JsonGraphProps {
@@ -85,6 +105,9 @@ const GRAPH_MAX_CARDS = 500
 const ZOOM_STEP = 1.25
 const WHEEL_STEP = 1.1
 
+/** Pixels a press must travel before it is treated as a pan rather than a click. */
+const PAN_THRESHOLD = 4
+
 export function JsonGraph({ source, path, labels, view = null, split = false, style }: JsonGraphProps) {
   const renderable = useMemo(() => isJsonViewRenderable(source), [source])
   const parsed = useMemo(() => (renderable ? parseJsonDocument(source) : null), [renderable, source])
@@ -98,8 +121,17 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
   const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [canvas, setCanvas] = useState({ x: GRAPH_MARGIN, y: GRAPH_MARGIN, scale: 1 })
   const [dragging, setDragging] = useState(false)
+  const [panEnabled, setPanEnabled] = useState(true)
+  const [grid, setGrid] = useState(readJsonGrid)
   const viewportRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ pointerX: number; pointerY: number; originX: number; originY: number } | null>(null)
+  const dragRef = useRef<{
+    pointerX: number
+    pointerY: number
+    originX: number
+    originY: number
+    pointerId: number
+    panning: boolean
+  } | null>(null)
   const fittedRef = useRef(false)
   const collapsed = folded ?? presetCollapsed
   const layout = useMemo(() => buildGraphLayout(root, { collapsed, revealed }), [root, collapsed, revealed])
@@ -113,6 +145,15 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
     return index
   }, [layout])
   const selected = selectedKey === null ? null : rowsByKey.get(selectedKey) ?? null
+  const detail = useMemo(() => {
+    if (selected === null) return null
+    const full = graphValueText(selected.row, source)
+    return {
+      text: full.slice(0, GRAPH_DETAIL_MAX_CHARS),
+      total: full.length,
+      hidden: Math.max(0, full.length - GRAPH_DETAIL_MAX_CHARS),
+    }
+  }, [selected, source])
   const tooMany = layout.cards.length > GRAPH_MAX_CARDS
 
   const viewportSize = useCallback(() => {
@@ -145,6 +186,13 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
     setCanvas(current => zoomAround(current, { x: size.width / 2, y: size.height / 2 }, current.scale * factor))
   }, [viewportSize])
 
+  const toggleGrid = useCallback((): void => {
+    setGrid(current => {
+      saveJsonGrid(!current)
+      return !current
+    })
+  }, [])
+
   const onWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
     const rect = viewportRef.current?.getBoundingClientRect()
     const point = { x: event.clientX - (rect?.left ?? 0), y: event.clientY - (rect?.top ?? 0) }
@@ -152,37 +200,55 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
   }
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0) return
-    dragRef.current = { pointerX: event.clientX, pointerY: event.clientY, originX: canvas.x, originY: canvas.y }
-    setDragging(true)
-    event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.button !== 0 || !panEnabled) return
+    // Arm the gesture without capturing yet: capturing on pointerdown redirects the
+    // derived `click` to the viewport, which would kill the fold control and the row
+    // selection under the cursor. Capture happens once the press proves it is a drag.
+    dragRef.current = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      originX: canvas.x,
+      originY: canvas.y,
+      pointerId: event.pointerId,
+      panning: false,
+    }
   }
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const drag = dragRef.current
     if (drag === null) return
-    setCanvas(current => ({
-      ...current,
-      x: drag.originX + event.clientX - drag.pointerX,
-      y: drag.originY + event.clientY - drag.pointerY,
-    }))
+    const dx = event.clientX - drag.pointerX
+    const dy = event.clientY - drag.pointerY
+    if (!drag.panning) {
+      if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return
+      drag.panning = true
+      setDragging(true)
+      event.currentTarget.setPointerCapture?.(drag.pointerId)
+    }
+    setCanvas(current => ({ ...current, x: drag.originX + dx, y: drag.originY + dy }))
   }
 
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (dragRef.current === null) return
+    const drag = dragRef.current
     dragRef.current = null
+    if (drag === null) return
+    if (drag.panning) event.currentTarget.releasePointerCapture?.(drag.pointerId)
     setDragging(false)
-    event.currentTarget.releasePointerCapture(event.pointerId)
   }
+
+  /** Record a folding change, so the canvas reopens the way the reader left it. */
+  const applyCollapsed = useCallback((next: Set<string>): void => {
+    setFolded(next)
+    saveJsonCollapsed(path, next)
+  }, [path])
 
   const toggleRow = useCallback((row: GraphRow): void => {
     if (row.childId === null) return
     const next = new Set(collapsed)
     if (next.has(row.childId)) next.delete(row.childId)
     else next.add(row.childId)
-    setFolded(next)
-    saveJsonCollapsed(path, next)
-  }, [collapsed, path])
+    applyCollapsed(next)
+  }, [applyCollapsed, collapsed])
 
   const revealMore = useCallback((cardId: string): void => {
     setRevealed(current => {
@@ -224,9 +290,7 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
   const copy = useCallback(async (kind: 'value' | 'path'): Promise<void> => {
     if (selected === null) return
     const row = selected.row
-    const text = kind === 'path'
-      ? row.pathKey
-      : row.kind === 'string' ? row.display : source.slice(row.start, row.end)
+    const text = kind === 'path' ? row.pathKey : graphValueText(row, source)
     try {
       await copyTextToClipboard(text)
       setNote({ kind: 'ok', text: labels.copied })
@@ -236,6 +300,7 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
   }, [labels.copied, labels.copyFailed, selected, source])
 
   const surfaceClass = split ? `${css.graph} ${css.graphSplit}` : css.graph ?? ''
+  const filtering = query.trim() !== ''
   if (!renderable) {
     return (
       <section className={surfaceClass} style={style} aria-label={labels.graph}>
@@ -257,17 +322,11 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
           onKeyDown={onSearchKeyDown}
         />
         <button type="button" className={css.jsonAction} disabled={matches.length === 0} aria-label={labels.nextMatch} title={labels.nextMatch} onClick={() => { stepMatch(1) }}>↵</button>
-        <button type="button" className={css.jsonAction} onClick={fit}>{labels.fit}</button>
-        <button type="button" className={css.jsonAction} aria-label={labels.zoomOut} title={labels.zoomOut} onClick={() => { zoomFrom(1 / ZOOM_STEP) }}>−</button>
-        <button type="button" className={css.jsonAction} aria-label={labels.zoomIn} title={labels.zoomIn} onClick={() => { zoomFrom(ZOOM_STEP) }}>+</button>
-        <button type="button" className={css.jsonAction} onClick={() => { setCanvas(current => ({ ...current, scale: 1 })) }}>{labels.zoomReset}</button>
-        <button type="button" className={css.jsonAction} disabled={selected === null} onClick={() => { void copy('value') }}>{labels.copyValue}</button>
-        <button type="button" className={css.jsonAction} disabled={selected === null} onClick={() => { void copy('path') }}>{labels.copyPath}</button>
-        <span className={css.jsonCount}>{
-          query.trim() === ''
-            ? `${Math.round(canvas.scale * 100)}%`
-            : (matches.length === 0 ? labels.noMatches : labels.matches(matches.length))
-        }</span>
+        <button type="button" className={css.jsonIconButton} aria-label={labels.expandAll} title={labels.expandAll} onClick={() => { applyCollapsed(new Set()) }}><IconExpandAll16 /></button>
+        <button type="button" className={css.jsonIconButton} aria-label={labels.collapseAll} title={labels.collapseAll} onClick={() => { applyCollapsed(allContainerKeys(root, 1)) }}><IconCollapseAll16 /></button>
+        <button type="button" className={css.jsonIconButton} disabled={selected === null} aria-label={labels.copyValue} title={labels.copyValue} onClick={() => { void copy('value') }}><IconCopyValue16 /></button>
+        <button type="button" className={css.jsonIconButton} disabled={selected === null} aria-label={labels.copyPath} title={labels.copyPath} onClick={() => { void copy('path') }}><IconCopyPath16 /></button>
+        {filtering && <span className={css.jsonCount}>{matches.length === 0 ? labels.noMatches : labels.matches(matches.length)}</span>}
       </div>
       {(parsed?.errors.length ?? 0) > 0 && <p className={`${css.jsonNote} ${css.jsonNoteError}`}>{labels.invalid}</p>}
       {parsed !== null && parsed.truncated && <p className={css.jsonNote}>{labels.truncated(parsed.totalNodes)}</p>}
@@ -279,7 +338,7 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
           : (
             <div
               ref={viewportRef}
-              className={css.graphViewport}
+              className={`${css.graphViewport} ${grid ? css.graphViewportGrid : ''} ${panEnabled ? css.graphViewportPan : ''}`}
               data-viewport="1"
               data-dragging={dragging ? '1' : undefined}
               onWheel={onWheel}
@@ -305,17 +364,6 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
                       className={edgeTouches(edge, selected?.card.id) ? `${css.graphEdge} ${css.graphEdgeLit}` : css.graphEdge}
                     />
                   ))}
-                  {layout.edges.map(edge => edge.label === null ? null : (
-                    <text
-                      key={`${edge.id}-label`}
-                      className={css.graphEdgeLabel}
-                      x={(edge.x1 + edge.x2) / 2}
-                      y={(edge.y1 + edge.y2) / 2 - 4}
-                      textAnchor="middle"
-                    >
-                      {edge.label}
-                    </text>
-                  ))}
                 </svg>
                 {layout.cards.map(card => (
                   <div
@@ -324,7 +372,7 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
                     style={{ left: card.x, top: card.y, width: card.width }}
                     data-card={card.id}
                   >
-                    {card.rows.map(row => row.moreFor === null ? renderRow(row, selectedKey, labels, activateRow, toggleRow) : (
+                    {card.rows.map(row => row.moreFor === null ? renderRow(row, selectedKey, labels, source, activateRow, toggleRow) : (
                       <div key={row.pathKey} className={css.graphRow}>
                         <span className={css.graphSpacer} aria-hidden="true" />
                         <button type="button" className={css.graphMore} onClick={() => { revealMore(card.id) }}>{labels.showMore(row.hidden)}</button>
@@ -333,9 +381,28 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
                   </div>
                 ))}
               </div>
-              <p className={css.graphHint}>{labels.panHint}</p>
+              {/* The bar floats over the canvas but never starts a pan. */}
+              <div className={css.jsonZoomBar} role="group" aria-label={labels.graph} onPointerDown={event => { event.stopPropagation() }}>
+                <button type="button" className={css.jsonZoomButton} aria-pressed={grid} title={labels.grid} aria-label={labels.grid} onClick={toggleGrid}><IconGrid16 /></button>
+                <button type="button" className={css.jsonZoomButton} aria-pressed={panEnabled} title={labels.pan} aria-label={labels.pan} onClick={() => { setPanEnabled(value => !value) }}><IconMove16 /></button>
+                <button type="button" className={css.jsonZoomButton} aria-label={labels.zoomOut} title={labels.zoomOut} onClick={() => { zoomFrom(1 / ZOOM_STEP) }}>−</button>
+                <button type="button" className={css.jsonZoomPercent} aria-label={labels.zoomReset} title={labels.zoomReset} onClick={() => { setCanvas(current => ({ ...current, scale: 1 })) }}>{`${Math.round(canvas.scale * 100)}%`}</button>
+                <button type="button" className={css.jsonZoomButton} aria-label={labels.fit} title={labels.fit} onClick={fit}>⤢</button>
+                <button type="button" className={css.jsonZoomButton} aria-label={labels.zoomIn} title={labels.zoomIn} onClick={() => { zoomFrom(ZOOM_STEP) }}>+</button>
+              </div>
             </div>
           )}
+      {/* A card row clips its own text; the panel below spells out what was chosen. */}
+      {selected !== null && detail !== null && (
+        <div className={css.jsonInspector}>
+          <div className={css.jsonInspectorHead}>
+            <span className={css.jsonInspectorTitle}>{labels.selectedValue}</span>
+            <code className={css.jsonInspectorPath}>{selected.row.pathKey}</code>
+          </div>
+          <pre className={css.jsonInspectorValue}>{detail.text}</pre>
+          {detail.hidden > 0 && <p className={css.jsonInspectorNote}>{labels.valueTruncated(GRAPH_DETAIL_MAX_CHARS, detail.total)}</p>}
+        </div>
+      )}
     </section>
   )
 }
@@ -345,14 +412,17 @@ function renderRow(
   row: GraphRow,
   selectedKey: string | null,
   labels: JsonGraphLabels,
+  source: string,
   activate: (row: GraphRow) => void,
   toggle: (row: GraphRow) => void,
 ): ReactNode {
+  const full = graphValueText(row, source)
   return (
     <div
       className={`${css.graphRow} ${selectedKey === row.pathKey ? css.graphRowSelected : ''}`}
       data-row={row.pathKey}
       data-kind={row.kind}
+      title={full}
       onClick={() => { activate(row) }}
     >
       {row.collapsible

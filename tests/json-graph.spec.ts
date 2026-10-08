@@ -5,6 +5,7 @@ import {
   buildGraphLayout,
   clampGraphScale,
   fitTransform,
+  graphValueText,
   matchingCardIds,
   zoomAround,
   GRAPH_CARD_MAX_WIDTH,
@@ -95,7 +96,7 @@ describe('buildGraphLayout cards', () => {
 describe('buildGraphLayout edges', () => {
   const layout = layoutOf('{"name": "w", "deps": {"a": 1, "b": {"c": 2}}, "list": [1, 2]}')
 
-  it('wires a card row to the card it points at, labelled with the key', () => {
+  it('draws one edge per parent-child card pair, depth first', () => {
     expect(layout.edges.map(edge => `${edge.from}->${edge.to}`)).toEqual([
       '$->$.deps',
       '$.deps->$.deps.b',
@@ -111,7 +112,6 @@ describe('buildGraphLayout edges', () => {
     expect(edge?.y1).toBe(root.y + 1 * GRAPH_ROW_HEIGHT + GRAPH_ROW_HEIGHT / 2)
     expect(edge?.x2).toBe(child.x)
     expect(edge?.y2).toBe(child.y + child.height / 2)
-    expect(edge?.label).toBe('deps')
   })
 })
 
@@ -207,6 +207,34 @@ describe('allContainerKeys', () => {
   it('folds exactly the branches the preset names', () => {
     const layout = buildGraphLayout(root, { collapsed: allContainerKeys(root) })
     expect(layout.cards.map(card => card.id)).toEqual(['$', '$.a', '$.a[1]', '$.c', '$.c.d'])
+  })
+})
+
+describe('graphValueText', () => {
+  const text = '{"note": "a\\nb", "n": -1.5e3, "deps": {"a": 1}}'
+  const layout = layoutOf(text)
+  const rowOf = (pathKey: string) => {
+    for (const card of layout.cards) {
+      const found = card.rows.find(row => row.pathKey === pathKey)
+      if (found !== undefined) return found
+    }
+    throw new Error(`no row ${pathKey}`)
+  }
+
+  it('returns the decoded string rather than the quoted preview', () => {
+    expect(graphValueText(rowOf('$.note'), text)).toBe('a\nb')
+  })
+
+  it('keeps a number exactly as written', () => {
+    expect(graphValueText(rowOf('$.n'), text)).toBe('-1.5e3')
+  })
+
+  it('spells a container out from its source span', () => {
+    expect(graphValueText(rowOf('$.deps'), text)).toBe('{"a": 1}')
+  })
+
+  it('falls back to the preview when a row carries no span', () => {
+    expect(graphValueText({ ...rowOf('$.deps'), start: 0, end: 0 }, text)).toBe('{1}')
   })
 })
 

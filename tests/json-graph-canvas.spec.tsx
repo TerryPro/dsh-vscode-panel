@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { editorCodeFontFamily, editorCodeFontSize } from '../src/client/editor/editor-theme.ts'
 import { JsonGraph, type JsonGraphLabels } from '../src/client/json/JsonGraph.tsx'
 import { copyTextToClipboard } from '../src/client/core/clipboard.ts'
-import { GRAPH_PAGE_SIZE, GRAPH_ROW_HEIGHT } from '../src/client/json/json-graph.ts'
+import { GRAPH_DETAIL_MAX_CHARS, GRAPH_PAGE_SIZE, GRAPH_ROW_HEIGHT } from '../src/client/json/json-graph.ts'
 
 vi.mock('../src/client/core/clipboard.ts', () => ({
   copyTextToClipboard: vi.fn(() => Promise.resolve()),
@@ -24,6 +24,10 @@ const labels: JsonGraphLabels = {
   noMatches: 'NO_MATCHES',
   matches: count => `MATCHES_${count}`,
   nextMatch: 'NEXT_MATCH',
+  expandAll: 'EXPAND_ALL',
+  collapseAll: 'COLLAPSE_ALL',
+  selectedValue: 'SELECTED_VALUE',
+  valueTruncated: (shown, total) => `DETAIL_${shown}_${total}`,
   fit: 'FIT',
   zoomIn: 'ZOOM_IN',
   zoomOut: 'ZOOM_OUT',
@@ -35,11 +39,13 @@ const labels: JsonGraphLabels = {
   expandNode: 'EXPAND',
   collapseNode: 'COLLAPSE',
   showMore: count => `SHOW_MORE_${count}`,
-  panHint: 'PAN_HINT',
+  pan: 'PAN',
+  grid: 'GRID',
 }
 
 /** Mirrors the private key prefix; kept literal so a rename surfaces as a failure. */
 const KEY_PREFIX = 'dsh-workbench:json-collapse:'
+const GRID_KEY = 'dsh-workbench:json-grid'
 
 const SOURCE = '{"name": "w", "deps": {"a": 1, "b": {"c": 2}}, "list": [1, 2]}'
 
@@ -89,10 +95,12 @@ describe('JsonGraph rendering', () => {
     expect(view.getByText('100%')).toBeTruthy()
   })
 
-  it('wires the cards with labelled edges', () => {
+  it('wires the cards with plain wires, without text on them', () => {
     const view = renderGraph()
-    expect(view.container.querySelectorAll('path')).toHaveLength(3)
-    expect(Array.from(view.container.querySelectorAll('text')).map(node => node.textContent)).toEqual(['deps', 'b', 'list'])
+    // Scoped to the wires layer; the control bar's own glyphs are paths too.
+    const wires = view.container.querySelector('[data-canvas] > svg')
+    expect(wires?.querySelectorAll('path')).toHaveLength(3)
+    expect(wires?.querySelectorAll('text')).toHaveLength(0)
   })
 
   it('shows the empty and error notes like the other structured views', () => {
@@ -128,6 +136,66 @@ describe('JsonGraph folding', () => {
     expect(view.getByRole('button', { name: 'COPY_PATH' }).hasAttribute('disabled')).toBe(true)
   })
 
+  it('folds through a press-release-click the canvas must not steal', () => {
+    const view = renderGraph()
+    const surface = viewport(view)
+    let captures = 0
+    surface.setPointerCapture = () => { captures += 1 }
+    surface.releasePointerCapture = () => {}
+    const before = canvasStyle(view)
+    const toggle = within(rowOf(view, '$.deps')).getByRole('button', { name: 'COLLAPSE' })
+    fireEvent.pointerDown(toggle, { button: 0, pointerId: 1, clientX: 10, clientY: 10 })
+    fireEvent.pointerUp(toggle, { pointerId: 1 })
+    fireEvent.click(toggle)
+    // A press that never travels is a click: no capture, so it reaches the control.
+    expect(captures).toBe(0)
+    expect(canvasStyle(view)).toBe(before)
+    expect(cards(view)).toEqual(['$', '$.list'])
+  })
+
+  it('pans from a press that starts on a card, once it travels', () => {
+    const view = renderGraph()
+    const surface = viewport(view)
+    let captures = 0
+    surface.setPointerCapture = () => { captures += 1 }
+    surface.releasePointerCapture = () => {}
+    const row = rowOf(view, '$.name')
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(row, { pointerId: 1, clientX: 130, clientY: 115 })
+    expect(canvasStyle(view)).toContain('translate(54px, 39px)')
+    expect(captures).toBe(1)
+    fireEvent.pointerUp(row, { pointerId: 1 })
+    expect(surface.dataset.dragging).toBeUndefined()
+  })
+
+  it('treats a press that barely moves as a click on the row', () => {
+    const view = renderGraph()
+    const surface = viewport(view)
+    let captures = 0
+    surface.setPointerCapture = () => { captures += 1 }
+    surface.releasePointerCapture = () => {}
+    const before = canvasStyle(view)
+    const row = rowOf(view, '$.name')
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(row, { pointerId: 1, clientX: 102, clientY: 101 })
+    fireEvent.pointerUp(row, { pointerId: 1 })
+    fireEvent.click(row)
+    expect(captures).toBe(0)
+    expect(canvasStyle(view)).toBe(before)
+    expect(row.className).toContain('graphRowSelected')
+  })
+
+  it('collapses every branch at once and opens them back', () => {
+    const view = renderGraph()
+    fireEvent.click(view.getByRole('button', { name: 'COLLAPSE_ALL' }))
+    expect(cards(view)).toEqual(['$'])
+    expect(localStorage.getItem(`${KEY_PREFIX}cfg.json`)).toBe('["$.deps","$.deps.b","$.list"]')
+    expect(rowOf(view, '$.deps').textContent).toContain('+')
+    fireEvent.click(view.getByRole('button', { name: 'EXPAND_ALL' }))
+    expect(cards(view)).toEqual(['$', '$.deps', '$.deps.b', '$.list'])
+    expect(localStorage.getItem(`${KEY_PREFIX}cfg.json`)).toBe('[]')
+  })
+
   it('pages a long array and reveals the rest', () => {
     const view = renderGraph(`[${Array.from({ length: GRAPH_PAGE_SIZE + 3 }, (_, index) => index).join(',')}]`)
     fireEvent.click(view.getByRole('button', { name: 'SHOW_MORE_3' }))
@@ -160,7 +228,9 @@ describe('JsonGraph canvas', () => {
     stubPointerCapture(surface)
     const before = canvasStyle(view)
     fireEvent.pointerDown(surface, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
+    expect(surface.dataset.dragging).toBeUndefined()
     fireEvent.pointerMove(surface, { pointerId: 1, clientX: 140, clientY: 120 })
+    expect(surface.dataset.dragging).toBe('1')
     expect(canvasStyle(view)).toContain('translate(64px, 44px)')
     fireEvent.pointerUp(surface, { pointerId: 1 })
     expect(canvasStyle(view)).not.toBe(before)
@@ -171,6 +241,37 @@ describe('JsonGraph canvas', () => {
     const view = renderGraph()
     fireEvent.click(view.getByRole('button', { name: 'FIT' }))
     expect(canvasStyle(view)).toContain('scale(1)')
+  })
+
+  it('toggles the background grid and remembers the choice', () => {
+    const view = renderGraph()
+    const toggle = view.getByRole('button', { name: 'GRID' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(viewport(view).className).toContain('graphViewportGrid')
+    fireEvent.click(toggle)
+    expect(view.getByRole('button', { name: 'GRID' }).getAttribute('aria-pressed')).toBe('false')
+    expect(viewport(view).className).not.toContain('graphViewportGrid')
+    expect(localStorage.getItem(GRID_KEY)).toBe('0')
+  })
+
+  it('starts with the grid hidden when that was remembered', () => {
+    localStorage.setItem(GRID_KEY, '0')
+    const view = renderGraph()
+    expect(viewport(view).className).not.toContain('graphViewportGrid')
+    expect(view.getByRole('button', { name: 'GRID' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('only pans while the move tool is armed', () => {
+    const view = renderGraph()
+    const surface = viewport(view)
+    stubPointerCapture(surface)
+    fireEvent.click(view.getByRole('button', { name: 'PAN' }))
+    const before = canvasStyle(view)
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 160, clientY: 130 })
+    fireEvent.pointerUp(surface, { pointerId: 1 })
+    expect(canvasStyle(view)).toBe(before)
+    expect(view.getByRole('button', { name: 'PAN' }).getAttribute('aria-pressed')).toBe('false')
   })
 })
 
@@ -206,6 +307,18 @@ describe('JsonGraph selection', () => {
     fireEvent.click(rowOf(view, '$.name'))
     expect(rowOf(view, '$.name').className).toContain('graphRowSelected')
   })
+
+  it('selects a row on a press-release inside a card', () => {
+    const view = renderGraph()
+    const surface = viewport(view)
+    surface.setPointerCapture = () => { throw new Error('a still press must not hand the pointer to the canvas') }
+    surface.releasePointerCapture = () => {}
+    const row = rowOf(view, '$.name')
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1 })
+    fireEvent.pointerUp(row, { pointerId: 1 })
+    fireEvent.click(row)
+    expect(row.className).toContain('graphRowSelected')
+  })
 })
 
 describe('JsonGraph search', () => {
@@ -225,6 +338,39 @@ describe('JsonGraph search', () => {
     fireEvent.change(view.getByRole('searchbox', { name: 'SEARCH' }), { target: { value: 'absent' } })
     expect(view.getByText('NO_MATCHES')).toBeTruthy()
     expect(view.getByRole('button', { name: 'NEXT_MATCH' }).hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('JsonGraph details panel', () => {
+  const panel = (view: View): HTMLElement | null => view.container.querySelector('pre')
+
+  it('stays hidden until a row is chosen', () => {
+    expect(panel(renderGraph())).toBeNull()
+  })
+
+  it('spells out a value the card had to clip', () => {
+    const long = 'q'.repeat(300)
+    const view = renderGraph(`{"note": "${long}"}`)
+    const row = rowOf(view, '$.note')
+    expect(row.textContent).toContain('…')
+    expect(row.title).toContain(long)
+    fireEvent.click(row)
+    expect(panel(view)?.textContent).toBe(long)
+    expect(view.getByText('SELECTED_VALUE')).toBeTruthy()
+    expect(view.getByText('$.note')).toBeTruthy()
+  })
+
+  it('shows the source text of a container row', () => {
+    const view = renderGraph()
+    fireEvent.click(rowOf(view, '$.deps'))
+    expect(panel(view)?.textContent).toBe('{"a": 1, "b": {"c": 2}}')
+  })
+
+  it('says so when a value is longer than the panel can hold', () => {
+    const view = renderGraph(`{"note": "${'w'.repeat(5000)}"}`)
+    fireEvent.click(rowOf(view, '$.note'))
+    expect(panel(view)?.textContent).toHaveLength(GRAPH_DETAIL_MAX_CHARS)
+    expect(view.getByText(`DETAIL_${GRAPH_DETAIL_MAX_CHARS}_5000`)).toBeTruthy()
   })
 })
 

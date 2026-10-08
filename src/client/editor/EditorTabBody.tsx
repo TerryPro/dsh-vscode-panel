@@ -156,6 +156,10 @@ export function EditorTabBody({
     noMatches: t('editor.jsonNoMatches'),
     matches: count => t('editor.jsonMatches', { count: String(count) }),
     nextMatch: t('editor.jsonNextMatch'),
+    expandAll: t('editor.jsonExpandAll'),
+    collapseAll: t('editor.jsonCollapseAll'),
+    selectedValue: t('editor.jsonSelectedValue'),
+    valueTruncated: (shown, total) => t('editor.jsonValueTruncated', { shown: String(shown), total: String(total) }),
     fit: t('editor.jsonFit'),
     zoomIn: t('editor.jsonZoomIn'),
     zoomOut: t('editor.jsonZoomOut'),
@@ -167,7 +171,8 @@ export function EditorTabBody({
     expandNode: t('editor.jsonExpandNode'),
     collapseNode: t('editor.jsonCollapseNode'),
     showMore: count => t('editor.jsonShowMore', { count: String(count) }),
-    panHint: t('editor.jsonPanHint'),
+    pan: t('editor.jsonPan'),
+    grid: t('editor.jsonGrid'),
   }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null

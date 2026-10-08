@@ -85,6 +85,36 @@
   cursor: default;
 }
 
+/* Square icon button for the canvas toolbar, on the same palette as .jsonAction. */
+.jsonIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.jsonIconButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.jsonIconButton:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.jsonIconButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* Right-hand readout: the zoom percentage, or the match count while searching. */
 .jsonCount {
   margin-inline-start: auto;
@@ -117,23 +147,32 @@
 
 /* --- Canvas: a pannable, zoomable surface of value cards ------------------- */
 
-/* The viewport clips the canvas; dragging it pans. */
+/* The canvas surface; panning is a mode, so the cursor only hints it when armed. */
 .graphViewport {
   position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
+}
+
+.graphViewportPan {
+  cursor: grab;
+  user-select: none;
+}
+
+.graphViewportPan[data-dragging='1'] {
+  cursor: grabbing;
+}
+
+/* Optional graph paper, spaced wide enough to read as a canvas, not as texture. */
+.graphViewportGrid {
   background-image:
     linear-gradient(to right, color-mix(in srgb, var(--dsw-alias-border-l1) 55%, transparent) 1px, transparent 1px),
     linear-gradient(to bottom, color-mix(in srgb, var(--dsw-alias-border-l1) 55%, transparent) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
-.graphViewport[data-dragging='1'] {
-  cursor: grabbing;
+  background-size: 40px 40px;
 }
 
 /* Canvas holds the transformed content; its own size is the unscaled layout. */
@@ -160,17 +199,6 @@
 
 .graphEdgeLit {
   stroke: var(--dsw-alias-brand-primary);
-}
-
-/* Key label on the wire: a background-coloured halo keeps it legible over the grid. */
-.graphEdgeLabel {
-  fill: var(--dsw-alias-label-secondary);
-  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11px;
-  paint-order: stroke;
-  stroke: var(--dsw-alias-bg-base);
-  stroke-width: 4;
-  stroke-linejoin: round;
 }
 
 /* One card per object or array, sized by json-graph.ts from its rows. */
@@ -287,12 +315,117 @@
   cursor: pointer;
 }
 
-/* Corner hint naming the gesture, kept quiet so it never reads as data. */
-.graphHint {
+/* Floating control bar, in the same idiom as the Mermaid preview's. */
+.jsonZoomBar {
   position: absolute;
-  inset-block-end: 8px;
-  inset-inline-start: 12px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.jsonZoomButton,
+.jsonZoomPercent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jsonZoomPercent {
+  min-width: 46px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.jsonZoomButton:hover,
+.jsonZoomPercent:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.jsonZoomButton:focus-visible,
+.jsonZoomPercent:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+/* A toggle that is on (grid shown, pan armed) reads as pressed. */
+.jsonZoomButton[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* --- Details panel: the whole value behind a clipped row ------------------- */
+
+.jsonInspector {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 34%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 6px 12px 8px;
+  border-block-start: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.jsonInspectorHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+
+.jsonInspectorTitle {
+  flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  pointer-events: none;
+}
+
+.jsonInspectorPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+/* Selectable and wrapping, which is the whole point of the panel. */
+.jsonInspectorValue {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.jsonInspectorNote {
+  flex: none;
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
 }
