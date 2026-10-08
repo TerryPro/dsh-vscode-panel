@@ -31,9 +31,7 @@ import {
   PANEL_HEADER_ATTRIBUTE,
   PANEL_HEADER_HEIGHT_PROPERTY,
   PANEL_RULE_ATTRIBUTE,
-  PANEL_RULE_LEFT_PROPERTY,
-  PANEL_RULE_TOP_PROPERTY,
-  PANEL_RULE_WIDTH_PROPERTY,
+  PANEL_RULE_OVERLAY_ATTRIBUTE,
   TRANSITION_CONVERSATION_WIDTH,
   TRANSITION_EDITOR_WIDTH,
   TRANSITION_SIDEBAR_WIDTH,
@@ -166,42 +164,39 @@ const CSS = `
   border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* The sidebar panel rule. It closes the panel header and must be collinear with
-   the middle column's tab bar, so it cannot be a border on that header: the
-   shell's .regionArea clips overflow and reclaims only 4px of the sidebar's 12px
-   inline padding on the left, which leaves the line 8px short of the column edge
-   (the visible gap). Nor can it be a background layer on the column or the
-   sidebar root, because each sits behind the next element's own fill and would
-   replace the macOS vibrancy gradients. Paint it on the frame instead: the frame
-   is already the columns' containing block, its ::before is the only pseudo the
-   shell claims, and a trailing pseudo lands above every column fill.
+/* The sidebar panel rules. They close a panel section and must span the whole
+   column, so they cannot be borders on those sections: the shell's .regionArea
+   clips overflow and reclaims only 4px of the sidebar's 12px inline padding on
+   the left, which leaves any line drawn in there 8px short of the column edge —
+   and a negative margin cannot cross the clip either. Nor can they be background
+   layers on the column or the sidebar root, because each sits behind the next
+   element's own fill and would replace the macOS vibrancy gradients.
 
-   Left, width, top, and the matching header height all come from
-   panel-rule-layout.ts, so no host padding is assumed.
+   They are therefore real elements appended to the frame: the frame already
+   contains the columns, is not clipped, and paints its trailing children above
+   every column fill. A pseudo-element cannot be used because the panel has more
+   than one rule and a frame has one ::after.
 
    The stroke is the tab bar's own declaration — the same border-bottom width and
    the same token — rather than a 1px background fill of the same size. Blink
    quantises a border's edges onto the device grid but paints a background at its
-   exact fractional width, so two visually identical CSS rules can render two
+   exact fractional width, so two visually identical CSS rules render two
    different lines: at the 125%/150% scales Windows defaults to, a 1px fill
    spreads over an extra device row and reads heavier than the border it
    continues. Identical primitive, identical geometry, identical colour. */
-[${FRAME_ATTRIBUTE}][${PANEL_RULE_ATTRIBUTE}]::after {
-  content: '';
+[${FRAME_ATTRIBUTE}] > [${PANEL_RULE_OVERLAY_ATTRIBUTE}] {
   position: absolute;
-  left: var(${PANEL_RULE_LEFT_PROPERTY});
-  top: var(${PANEL_RULE_TOP_PROPERTY});
-  width: var(${PANEL_RULE_WIDTH_PROPERTY});
+  /* left, top, and width come from panel-rule-layout.ts, per rule, so no host
+     padding is assumed and the lines cannot drift on another platform or zoom. */
   height: 0;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   pointer-events: none;
 }
 
-/* With the rule published, the header row is sized by the same measurement so
+/* With its rule published, the header row is sized by the same measurement so
    its content ends where the middle column's content begins, and its last row
    is reserved for the rule exactly as the tab bar reserves its own. Without a
-   measurement (collapsed middle column) the row keeps DSH's natural height and
-   the line is simply not drawn. */
+   measurement (collapsed middle column) the row keeps DSH's natural height. */
 [${FRAME_ATTRIBUTE}][${PANEL_RULE_ATTRIBUTE}] [${PANEL_HEADER_ATTRIBUTE}] {
   box-sizing: border-box;
   height: var(${PANEL_HEADER_HEIGHT_PROPERTY}, auto);

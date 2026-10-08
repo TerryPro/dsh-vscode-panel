@@ -16,17 +16,22 @@ export const EDITOR_TRANSITION_END_EVENT = 'dsh-workbench:editor-transition-end'
 /**
  * Sidebar panel rule markers and geometry.
  *
- * The rule closes a sidebar panel header and must be collinear with the middle
- * column's tab bar. It is painted by a pseudo-element on the AppFrame rather
- * than as a border on the header, and its box plus the matching header height
- * are measured at runtime (see panel-rule-layout.ts).
+ * A rule closes a panel section and must span the sidebar column's full width.
+ * It cannot be a border on that section: the shell's `.regionArea` clips overflow
+ * and reclaims only 4px of the sidebar's 12px inline padding on the left, so a
+ * border drawn in there stops 8px short of the column edge — the visible gap.
+ * Rules are therefore painted by overlay elements appended to the AppFrame, which
+ * already contains the columns and is not clipped.
+ *
+ * `[panel-header]` marks the header that closes against the middle column's tab
+ * bar (`[panel-rule-anchor]`); `[panel-rule-section]` marks any other section that
+ * simply needs its bottom edge closed, such as the commit box.
  */
 export const PANEL_RULE_ANCHOR_ATTRIBUTE = 'data-dsh-workbench-panel-rule-anchor'
 export const PANEL_HEADER_ATTRIBUTE = 'data-dsh-workbench-panel-header'
+export const PANEL_RULE_SECTION_ATTRIBUTE = 'data-dsh-workbench-panel-rule-section'
 export const PANEL_RULE_ATTRIBUTE = 'data-dsh-workbench-panel-rule'
-export const PANEL_RULE_LEFT_PROPERTY = '--dsh-workbench-panel-rule-left'
-export const PANEL_RULE_TOP_PROPERTY = '--dsh-workbench-panel-rule-top'
-export const PANEL_RULE_WIDTH_PROPERTY = '--dsh-workbench-panel-rule-width'
+export const PANEL_RULE_OVERLAY_ATTRIBUTE = 'data-dsh-workbench-panel-rule-overlay'
 export const PANEL_HEADER_HEIGHT_PROPERTY = '--dsh-workbench-panel-header-height'
 
 export interface EditorTransitionEventDetail {

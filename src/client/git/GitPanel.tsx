@@ -542,7 +542,7 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
       {status?.available === false && <div className={css.emptyState}>{status.message}</div>}
       {status?.available === true && showingChanges && (
         <>
-          <div className={css.commitBox}>
+          <div className={css.commitBox} data-dsh-workbench-panel-rule-section="">
             <textarea
               value={message}
               placeholder={t('git.commitPlaceholder')}
