@@ -8,8 +8,8 @@
  * branch leads. Positions come from `buildGraphLayout` (pure, deterministic), so
  * the canvas only draws and transforms. Dragging pans, the wheel zooms around the
  * cursor, and the toolbar fits or rescales the whole document. Folding is stored
- * under the same per-file path keys the tree uses, so the two structured views
- * agree, and a row still reveals its own text in the editor when one is on screen.
+ * per file by document path, and a row still reveals its own text in the editor
+ * when one is on screen.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -34,8 +34,8 @@ import {
   type GraphEdge,
   type GraphRow,
 } from './json-graph.ts'
-import { isJsonTreeRenderable, parseJsonDocument, type JsonNodeKind } from './json-parse.ts'
-import { allContainerKeys, JSON_DEFAULT_EXPAND_DEPTH } from './json-tree-view.ts'
+import { isJsonViewRenderable, parseJsonDocument, type JsonNodeKind } from './json-parse.ts'
+import { allContainerKeys, GRAPH_DEFAULT_EXPAND_DEPTH } from './json-graph.ts'
 import css from './json.module.css'
 
 /** User-facing copy the canvas needs, resolved by the caller from the locale. */
@@ -86,10 +86,10 @@ const ZOOM_STEP = 1.25
 const WHEEL_STEP = 1.1
 
 export function JsonGraph({ source, path, labels, view = null, split = false, style }: JsonGraphProps) {
-  const renderable = useMemo(() => isJsonTreeRenderable(source), [source])
+  const renderable = useMemo(() => isJsonViewRenderable(source), [source])
   const parsed = useMemo(() => (renderable ? parseJsonDocument(source) : null), [renderable, source])
   const root = parsed?.root ?? null
-  const presetCollapsed = useMemo(() => allContainerKeys(root, JSON_DEFAULT_EXPAND_DEPTH), [root])
+  const presetCollapsed = useMemo(() => allContainerKeys(root, GRAPH_DEFAULT_EXPAND_DEPTH), [root])
   const [folded, setFolded] = useState<Set<string> | null>(() => readJsonCollapsed(path))
   const [revealed, setRevealed] = useState<ReadonlyMap<string, number>>(() => new Map())
   const [query, setQuery] = useState('')

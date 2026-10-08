@@ -8,8 +8,8 @@
  * their text with a fixed monospace advance, each nesting level becomes a column,
  * and a parent is centred against the span its children gathered.
  *
- * Folding is keyed by document path (`$.a[0]`), the same identity the tree view
- * persists, so both structured views stay in step.
+ * Folding is keyed by document path (`$.a[0]`) and persisted per file, so the
+ * canvas reopens the way the reader left it.
  */
 
 import { jsonPathKey, type JsonNode, type JsonNodeKind } from './json-parse.ts'
@@ -36,6 +36,9 @@ export const GRAPH_TOGGLE_WIDTH = 20
 /** Elements listed per array before a “show more” row, and how much of a value is shown. */
 export const GRAPH_PAGE_SIZE = 20
 export const GRAPH_VALUE_MAX_CHARS = 48
+
+/** Container levels left open the first time a document is shown. */
+export const GRAPH_DEFAULT_EXPAND_DEPTH = 3
 
 /** Zoom band the canvas clamps to. */
 export const GRAPH_SCALE_MIN = 0.25
@@ -113,6 +116,17 @@ interface CardDraft {
   x: number
   y: number
   hasMore: boolean
+}
+
+/** Every container's path key at or below `minDepth`, for the folding presets. */
+export function allContainerKeys(root: JsonNode | null, minDepth = GRAPH_DEFAULT_EXPAND_DEPTH): Set<string> {
+  const keys = new Set<string>()
+  const visit = (node: JsonNode): void => {
+    if ((node.kind === 'object' || node.kind === 'array') && node.depth >= minDepth) keys.add(jsonPathKey(node.path))
+    for (const child of node.children) visit(child)
+  }
+  if (root !== null) visit(root)
+  return keys
 }
 
 /** Build the cards and edges for a parsed document, laid out left to right. */

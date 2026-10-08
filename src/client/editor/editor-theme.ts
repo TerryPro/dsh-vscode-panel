@@ -4,8 +4,9 @@ import { tags as t } from '@lezer/highlight'
 
 /**
  * The monospace face and metrics every code surface shares. Besides the editor
- * and its autocomplete tooltip, the JSON tree reads these values too (guarded by
- * its spec) so a split view shows a document in one typeface at one size.
+ * and its autocomplete tooltip, the JSON value cards read these values too
+ * (guarded by their spec) so a split view shows a document in one typeface at
+ * one size.
  */
 export const editorCodeFontFamily = 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace'
 export const editorCodeFontSize = '13px'

@@ -13,11 +13,9 @@
     "tests/workbench-sidebar.spec.tsx",
     "tests/workbench-editor.spec.tsx",
     "tests/json-parse.spec.ts",
-    "tests/json-tree-view.spec.ts",
     "tests/json-collapse.spec.ts",
     "tests/json-split.spec.ts",
     "tests/json-graph.spec.ts",
-    "tests/json-graph-canvas.spec.tsx",
-    "tests/json-tree.spec.tsx"
+    "tests/json-graph-canvas.spec.tsx"
   ]
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isJsonTreeRenderable,
+  isJsonViewRenderable,
   jsonLineOfOffset,
   jsonNodeAtOffset,
   jsonPathAtOffset,
@@ -216,8 +216,8 @@ describe('jsonUtf8Length and size gate', () => {
     expect(jsonUtf8Length('a\u00e9')).toBe(3)
   })
 
-  it('refuses to parse a document past the tree budget', () => {
-    expect(isJsonTreeRenderable('{"a": 1}')).toBe(true)
-    expect(isJsonTreeRenderable(`"${'x'.repeat(2 * 1024 * 1024 + 1)}"`)).toBe(false)
+  it('refuses to parse a document past the view budget', () => {
+    expect(isJsonViewRenderable('{"a": 1}')).toBe(true)
+    expect(isJsonViewRenderable(`"${'x'.repeat(2 * 1024 * 1024 + 1)}"`)).toBe(false)
   })
 })

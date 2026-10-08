@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { parseJsonDocument, type JsonNode } from '../src/client/json/json-parse.ts'
 import {
+  allContainerKeys,
   buildGraphLayout,
   clampGraphScale,
   fitTransform,
   matchingCardIds,
   zoomAround,
   GRAPH_CARD_MAX_WIDTH,
+  GRAPH_DEFAULT_EXPAND_DEPTH,
   GRAPH_GAP_X,
   GRAPH_MARGIN,
   GRAPH_PAGE_SIZE,
@@ -182,6 +184,29 @@ describe('matchingCardIds', () => {
     expect(matchingCardIds(layout, '11.17')).toEqual(['$.deps'])
     expect(matchingCardIds(layout, 'nope')).toEqual([])
     expect(matchingCardIds(layout, '   ')).toEqual([])
+  })
+})
+
+describe('allContainerKeys', () => {
+  const root = rootOf('{"a": [1, {"b": 1}], "c": {"d": {"e": {"f": 1}}}}')
+
+  it('collects containers at or below the requested depth', () => {
+    expect(allContainerKeys(root, 3)).toEqual(new Set(['$.c.d.e']))
+    expect(allContainerKeys(root, 2)).toEqual(new Set(['$.a[1]', '$.c.d', '$.c.d.e']))
+    expect(allContainerKeys(root, 0).has('$')).toBe(true)
+  })
+
+  it('defaults to the expand depth the canvas opens a document at', () => {
+    expect(allContainerKeys(root)).toEqual(allContainerKeys(root, GRAPH_DEFAULT_EXPAND_DEPTH))
+  })
+
+  it('returns nothing for an absent document', () => {
+    expect(allContainerKeys(null)).toEqual(new Set())
+  })
+
+  it('folds exactly the branches the preset names', () => {
+    const layout = buildGraphLayout(root, { collapsed: allContainerKeys(root) })
+    expect(layout.cards.map(card => card.id)).toEqual(['$', '$.a', '$.a[1]', '$.c', '$.c.d'])
   })
 })
 

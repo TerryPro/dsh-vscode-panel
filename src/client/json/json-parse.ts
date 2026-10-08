@@ -1,7 +1,7 @@
 /**
  * Zero-dependency, position-preserving parser for JSON and JSONC documents.
  *
- * The tree view needs more than a JavaScript value: every node must remember the
+ * The structured views need more than a JavaScript value: every node must remember the
  * exact source span it was read from, so a row can reveal its own text in the
  * editor and so a later structural edit could patch the document without
  * reformatting the rest of it — the same "keep the file as written" rule the CSV
@@ -15,11 +15,11 @@
  * included, so they stay valid for `EditorView` selection ranges.
  */
 
-/** How many nodes the tree parses before truncating to protect the UI. */
+/** How many nodes the views parse before truncating to protect the UI. */
 export const JSON_RENDER_MAX_NODES = 20000
 
 /** Documents whose UTF-8 size exceeds this stay in the source view; parsing them would block the main thread. */
-export const JSON_TREE_MAX_BYTES = 2 * 1024 * 1024
+export const JSON_VIEW_MAX_BYTES = 2 * 1024 * 1024
 
 /** Nesting levels accepted before the parser gives up, keeping its recursion bounded. */
 export const JSON_MAX_DEPTH = 256
@@ -52,7 +52,7 @@ export interface JsonNode {
 
 /**
  * Stable diagnostic codes for a document the grammar could not read. The parser
- * deliberately carries no prose: the tree localizes these, so a Chinese or
+ * deliberately carries no prose: the views localize these, so a Chinese or
  * English UI reads the same code.
  */
 export type JsonParseErrorCode =
@@ -69,7 +69,7 @@ export type JsonParseErrorCode =
   | 'unexpected-value'
   | 'too-deep'
 
-/** One syntax problem, positioned so the tree can point at it. */
+/** One syntax problem, positioned so a view can point at it. */
 export interface JsonParseError {
   readonly offset: number
   readonly code: JsonParseErrorCode
@@ -127,9 +127,9 @@ export function jsonUtf8Length(text: string): number {
   return bytes
 }
 
-/** True when a document is small enough that parsing it for the tree cannot stall the UI. */
-export function isJsonTreeRenderable(text: string): boolean {
-  return jsonUtf8Length(text) <= JSON_TREE_MAX_BYTES
+/** True when a document is small enough that parsing it for a view cannot stall the UI. */
+export function isJsonViewRenderable(text: string): boolean {
+  return jsonUtf8Length(text) <= JSON_VIEW_MAX_BYTES
 }
 
 /** Parse a JSON/JSONC document into a tree whose nodes carry their source spans. */
@@ -161,7 +161,7 @@ export function parseJsonDocument(text: string, options: ParseJsonOptions = {}):
 
 /**
  * The document path of the value or key covering `offset` — the equivalent of
- * `jsonc-parser`'s `getLocation`, and the hook a later editor→tree reveal
+ * `jsonc-parser`'s `getLocation`, and the hook a later editor→canvas reveal
  * would use. Returns `null` for offsets outside any parsed value.
  */
 export function jsonPathAtOffset(document: JsonDocument, offset: number): readonly (string | number)[] | null {
@@ -190,7 +190,7 @@ function coversOffset(node: JsonNode, offset: number): boolean {
   return node.keyStart !== undefined && node.keyEnd !== undefined && offset >= node.keyStart && offset < node.keyEnd
 }
 
-/** Zero-based line holding `offset`, for scrolling an editor to a tree row. */
+/** Zero-based line holding `offset`, for scrolling an editor to a parsed value. */
 export function jsonLineOfOffset(text: string, offset: number): number {
   const limit = Math.max(0, Math.min(offset, text.length))
   let line = 0

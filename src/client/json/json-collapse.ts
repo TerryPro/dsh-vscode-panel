@@ -1,4 +1,4 @@
-/** Persisted per-file folded branches for the JSON tree view. */
+/** Persisted per-file folded branches of the JSON value graph. */
 
 /** localStorage key prefix, suffixed with the workspace path, holding a path-key list. */
 const KEY_PREFIX = 'dsh-workbench:json-collapse:'

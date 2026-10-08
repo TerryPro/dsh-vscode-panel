@@ -1,15 +1,10 @@
-/* Light-first value colours, shared by the tree and the graph; dark swaps below. */
-.jsonTree,
+/* Light-first value colours, in the code editor's own palette; dark swaps below. */
 .graph {
   --json-key: var(--dsw-alias-label-primary);
   --json-string: var(--dsw-static-amber-500);
   --json-number: var(--dsw-static-blue-500);
   --json-atom: var(--dsw-static-deepseek-400);
 
-  background: var(--dsw-alias-bg-base);
-}
-
-.jsonTree {
   position: relative;
   display: flex;
   flex: 1;
@@ -17,10 +12,10 @@
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
 }
 
 /* The dark theme mirrors the syntax colours the code editor already uses. */
-:global(body[data-ds-dark-theme]) .jsonTree,
 :global(body[data-ds-dark-theme]) .graph {
   --json-key: var(--dsw-static-blue-450);
   --json-string: var(--dsw-static-amber-500);
@@ -29,11 +24,11 @@
 }
 
 /* A split pane's leading edge, mirroring the Markdown/Mermaid/CSV dividers. */
-.jsonTreeSplit {
+.graphSplit {
   border-inline-start: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* Toolbar row above the tree: filter, folding presets and copy actions. */
+/* Toolbar row above the canvas: search, zoom controls and copy actions. */
 .jsonToolbar {
   display: flex;
   align-items: center;
@@ -90,6 +85,7 @@
   cursor: default;
 }
 
+/* Right-hand readout: the zoom percentage, or the match count while searching. */
 .jsonCount {
   margin-inline-start: auto;
   color: var(--dsw-alias-label-secondary);
@@ -98,7 +94,7 @@
   white-space: nowrap;
 }
 
-/* One-line notice above or below the tree: parse trouble, node cap, size cap. */
+/* One-line notice: parse trouble, node cap, size cap, copy outcome. */
 .jsonNote {
   flex: 0 0 auto;
   padding: 6px 12px;
@@ -111,134 +107,6 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
-/* The scrolling region holds the rows; the toolbar and notes stay fixed around it. */
-.jsonScroll {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  padding-block: 4px 12px;
-  padding-inline-start: 8px;
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-
-/*
- * One row. Only the row itself is a flex container; the key, value and badge
- * stay inline so a wrapped string flows inside the line instead of stacking.
- * The face and metrics mirror the source editor (editor-theme.ts) so the split
- * shows the same document in one typeface at one size.
- */
-.jsonRow {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  padding-block: 2px;
-  padding-inline-end: 12px;
-  color: var(--dsw-alias-label-primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.jsonRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.jsonRowSelected {
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, var(--dsw-alias-bg-base));
-}
-
-/* Fixed-width chevron slot so every nesting level lines up. */
-.jsonExpander {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.jsonKey {
-  color: var(--json-key);
-}
-
-/* Fixed-width index gutter so a long array lines up vertically, like row numbers. */
-.jsonIndex {
-  flex: none;
-  width: 4ch;
-  text-align: end;
-  color: var(--dsw-alias-label-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-/*
- * One indent guide per nesting level: the vertical rule that makes the hierarchy
- * readable without counting spaces. A row carries as many as its depth.
- */
-.jsonGuide {
-  flex: none;
-  width: 16px;
-  align-self: stretch;
-  border-inline-start: 1px solid var(--dsw-alias-border-l1);
-}
-
-/* Light the guides of a container's subtree while pointing at the container. */
-.jsonRowLit .jsonGuide {
-  border-inline-start-color: var(--dsw-alias-brand-primary);
-}
-
-/* The `{…}` preview of a folded container's contents, kept quieter than data. */
-.jsonPreview {
-  color: var(--dsw-alias-label-secondary);
-}
-
-/* The brace that ends a selected container, paired with its opening one. */
-.jsonPunctActive {
-  color: var(--dsw-alias-brand-primary);
-}
-
-.jsonPunctuation {
-  color: var(--dsw-alias-label-secondary);
-}
-
-.jsonString {
-  color: var(--json-string);
-}
-
-.jsonNumber {
-  color: var(--json-number);
-}
-
-.jsonAtom {
-  color: var(--json-atom);
-}
-
-.jsonInvalid {
-  color: var(--dsw-alias-state-error-primary);
-}
-
-/* Trailing `{…} 12 keys` pill shown on a folded container. */
-.jsonBadge {
-  padding: 0 6px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--dsw-alias-label-secondary) 18%, transparent);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-/* Hint that a folded long value expands on a row click; the row owns the click. */
-.jsonValueToggle {
-  color: var(--dsw-alias-label-secondary);
-}
-
-/* The “show more” cursor under a long array. */
-.jsonMore {
-  padding-block: 2px;
-}
-
 .jsonEmpty {
   margin: 0;
   padding: 24px;
@@ -247,21 +115,7 @@
   text-align: center;
 }
 
-/* --- Graph view: a pannable, zoomable canvas of value cards ----------------- */
-
-.graph {
-  position: relative;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  box-sizing: border-box;
-}
-
-.graphSplit {
-  border-inline-start: 1px solid var(--dsw-alias-border-l1);
-}
+/* --- Canvas: a pannable, zoomable surface of value cards ------------------- */
 
 /* The viewport clips the canvas; dragging it pans. */
 .graphViewport {
@@ -319,7 +173,7 @@
   stroke-linejoin: round;
 }
 
-/* One card per object or array, measured by json-graph.ts. */
+/* One card per object or array, sized by json-graph.ts from its rows. */
 .graphCard {
   position: absolute;
   box-sizing: border-box;
@@ -333,11 +187,12 @@
   user-select: none;
 }
 
+/* Outline of a card the search matched. */
 .graphCardMatch {
   border-color: var(--dsw-alias-brand-primary);
 }
 
-/* A row is one member; its height matches GRAPH_ROW_HEIGHT in the layout math. */
+/* A row is one member; its height is GRAPH_ROW_HEIGHT, the layout's vertical unit. */
 .graphRow {
   display: flex;
   align-items: center;
@@ -394,18 +249,42 @@
   color: var(--json-key);
 }
 
+/* Value colours, taken from the code editor's own syntax palette. */
+.jsonString {
+  color: var(--json-string);
+}
+
+.jsonNumber {
+  color: var(--json-number);
+}
+
+.jsonAtom {
+  color: var(--json-atom);
+}
+
+.jsonInvalid {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .graphValue {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* The `{3}` / `[2]` count of a container row, and its colon. */
 .graphCount {
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The “show more” control under a long array. */
 .graphMore {
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--dsw-alias-brand-primary);
+  font: inherit;
+  cursor: pointer;
 }
 
 /* Corner hint naming the gesture, kept quiet so it never reads as data. */
