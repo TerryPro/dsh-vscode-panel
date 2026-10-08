@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FishLogo,
@@ -15,7 +15,7 @@ import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { IconConversationPanelOutline16 } from './ConversationPanelIcon.tsx'
 import { IconEditorPanelOutline16 } from '../editor/EditorPanelIcon.tsx'
 import { createActivityDockMount } from '../layout/activity-dock-layout.ts'
-import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, type SidebarFooterLayout } from '../layout/sidebar-footer-layout.ts'
+import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE } from '../layout/sidebar-footer-layout.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
 import css from './shell.module.css'
 
@@ -39,7 +39,6 @@ export type ModeSwitchProps = PropsRuntime<'sidebar.footer.action'> & PropsLocal
 export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
   const state = useWorkbench(controller)
   const [target, setTarget] = useState<HTMLElement | null>(null)
-  const footerLayout = useRef<SidebarFooterLayout | null>(null)
   const items = [
     { mode: 'sessions' as const, label: t('mode.sessions'), icon: <IconQueueOutlineRegular size={18} /> },
     { mode: 'files' as const, label: t('mode.files'), icon: <IconFolderOpenOutlineMedium size={18} /> },
@@ -48,17 +47,12 @@ export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
   ]
   useLayoutEffect(() => {
     const mount = createActivityDockMount(css.activityDock!, setTarget, logger)
-    const footer = createSidebarFooterLayout(wide, logger)
-    footerLayout.current = footer
+    const footer = createSidebarFooterLayout(logger)
     return () => {
-      footerLayout.current = null
       footer.dispose()
       mount.dispose()
     }
-  }, [logger]) // wide updates through the stable footer layout below.
-  useLayoutEffect(() => {
-    footerLayout.current?.setWide(wide)
-  }, [wide])
+  }, [logger])
   const editorToggleLabel = state.editorExpanded ? t('editor.collapse') : t('editor.expand')
   const conversationToggleLabel = state.conversationExpanded ? t('editor.collapseConversation') : t('editor.expandConversation')
   const foldOfficialSidebar = (): void => {

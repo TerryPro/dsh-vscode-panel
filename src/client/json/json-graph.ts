@@ -66,6 +66,11 @@ export interface GraphRow {
   /** Set on the array “show more” row: the card it belongs to, and what it hides. */
   readonly moreFor: string | null
   readonly hidden: number
+  /** YAML decorations carried through from the node, for badges. */
+  readonly anchor?: string
+  readonly tag?: string
+  readonly aliasTarget?: string
+  readonly blockStyle?: 'literal' | 'folded'
 }
 
 export interface GraphCard {
@@ -293,6 +298,7 @@ function cardFor(
         text: rowText(child),
         display: child.display,
         kind: child.kind,
+        ...decorations(child),
         pathKey: jsonPathKey(child.path),
         childId,
         collapsible: childId !== null,
@@ -354,9 +360,33 @@ function cardFor(
 function rowText(node: JsonNode): string {
   if (node.kind === 'object') return `{${node.children.length}}`
   if (node.kind === 'array') return `[${node.children.length}]`
+  // An alias reads as the pointer it is, not as the (identical) value behind it.
+  if (node.aliasTarget !== undefined) return shorten(node.display)
+  // A block scalar keeps its lines in the source; the card shows the first one.
+  if (node.blockStyle !== undefined) return `${node.blockStyle === 'literal' ? '|' : '>'} ${shorten(firstLine(node.display))}`
   if (node.kind === 'unknown') return node.display === '' ? '⚠' : shorten(node.display)
   if (node.kind === 'string') return shorten(JSON.stringify(node.display))
   return node.display
+}
+
+function firstLine(text: string): string {
+  const line = text.split('\n', 1)[0] ?? ''
+  return line === '' ? text.trimStart().slice(0, GRAPH_VALUE_MAX_CHARS) : line
+}
+
+/** Carry the optional YAML decorations across without writing explicit `undefined`s. */
+function decorations(node: JsonNode): {
+  anchor?: string
+  tag?: string
+  aliasTarget?: string
+  blockStyle?: 'literal' | 'folded'
+} {
+  return {
+    ...(node.anchor === undefined ? {} : { anchor: node.anchor }),
+    ...(node.tag === undefined ? {} : { tag: node.tag }),
+    ...(node.aliasTarget === undefined ? {} : { aliasTarget: node.aliasTarget }),
+    ...(node.blockStyle === undefined ? {} : { blockStyle: node.blockStyle }),
+  }
 }
 
 function isBranch(node: JsonNode): boolean {

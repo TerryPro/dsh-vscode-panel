@@ -44,6 +44,25 @@ describe('WorkbenchController', () => {
     expect(activeTab(controller)).toMatchObject({ dirty: false, saving: false, file: { version: 'v2' } })
   })
 
+  it('opens JSON and YAML in the structured graph, and switches modes per tab', async () => {
+    const api = {
+      readFile: vi.fn(((_workspace: string, path: string) => Promise.resolve(
+        file(path, path.endsWith('.yaml') ? 'a: 1\n' : '{"a": 1}', 'v1'),
+      ))),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'cfg.yaml')
+    expect(activeTab(controller)).toMatchObject({ path: 'cfg.yaml', structuredMode: 'graph' })
+
+    controller.setStructuredMode('source')
+    expect(activeTab(controller)?.structuredMode).toBe('source')
+
+    await controller.openFile('workspace-1', 'cfg.json')
+    expect(activeTab(controller)).toMatchObject({ path: 'cfg.json', structuredMode: 'graph' })
+    // Each tab keeps its own mode choice.
+    expect(controller.store.getSnapshot().tabs.find(tab => tab.path === 'cfg.yaml')?.structuredMode).toBe('source')
+  })
+
   it('loads image files through the binary endpoint without a text read', async () => {
     const image = { path: 'assets/logo.png', content: 'AQID', mimeType: 'image/png', version: 'v1', size: 3 }
     const api = {

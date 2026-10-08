@@ -5,7 +5,7 @@ import type {
   DraftChangeSource,
   CsvViewMode,
   HtmlViewMode,
-  JsonViewMode,
+  StructuredViewMode,
   MarkdownViewMode,
   MermaidViewMode,
   WorkbenchFileTab,
@@ -140,8 +140,8 @@ export class WorkbenchEdits {
     this.patchFileTab(tabId, (tab) => { tab.csvMode = mode })
   }
 
-  /** Switch one JSON/JSONC file tab between graph, tree, split and source views. */
-  setJsonMode(mode: JsonViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.jsonMode = mode })
+  /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
+  setStructuredMode(mode: StructuredViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.patchFileTab(tabId, (tab) => { tab.structuredMode = mode })
   }
 }

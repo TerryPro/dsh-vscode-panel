@@ -17,7 +17,7 @@ import { CsvTable, type CsvTableLabels } from '../csv/CsvTable.tsx'
 import { delimiterForCsvPath, isCsvPath } from '../csv/csv-path.ts'
 import { clampCsvSplitRatio, readCsvSplitRatio, saveCsvSplitRatio } from '../csv/csv-split.ts'
 import { JsonGraph, type JsonGraphLabels } from '../json/JsonGraph.tsx'
-import { isJsonPath } from '../json/json-path.ts'
+import { isStructuredPath } from '../json/json-path.ts'
 import { clampJsonSplitRatio, readJsonSplitRatio, saveJsonSplitRatio } from '../json/json-split.ts'
 import { MermaidPreview, type MermaidPreviewLabels } from '../mermaid/MermaidPreview.tsx'
 import { MermaidSplitDivider } from '../mermaid/MermaidSplitDivider.tsx'
@@ -59,18 +59,18 @@ export function EditorTabBody({
   const isHtmlTab = tab.kind === 'file' && tab.file !== null && isHtmlPath(tab.path)
   const isMermaidTab = tab.kind === 'file' && tab.file !== null && isMermaidPath(tab.path)
   const isCsvTab = tab.kind === 'file' && tab.file !== null && isCsvPath(tab.path)
-  const isJsonTab = tab.kind === 'file' && tab.file !== null && isJsonPath(tab.path)
+  const isStructuredTab = tab.kind === 'file' && tab.file !== null && isStructuredPath(tab.path)
   const csvDelimiter = tab.kind === 'file' ? delimiterForCsvPath(tab.path) : undefined
   const mermaidMode = tab.kind === 'file' && tab.mermaidMode !== undefined ? tab.mermaidMode : 'split'
   const csvMode = tab.kind === 'file' && tab.csvMode !== undefined ? tab.csvMode : 'table'
-  const jsonMode = tab.kind === 'file' && tab.jsonMode !== undefined ? tab.jsonMode : 'graph'
+  const structuredMode = tab.kind === 'file' && tab.structuredMode !== undefined ? tab.structuredMode : 'graph'
   const showEditor = tab.kind === 'file'
     && tab.file !== null
     && !(isHtmlTab && tab.htmlMode !== 'source')
     && !(tab.file.markdown && tab.markdownMode === 'preview')
     && !(isMermaidTab && mermaidMode === 'preview')
     && !(isCsvTab && csvMode === 'table')
-    && !(isJsonTab && jsonMode === 'graph')
+    && !(isStructuredTab && structuredMode === 'graph')
   // Read an interactive preview's local dependency relative to the opened HTML file;
   // the resolved path is still scope-checked by the workspace backend.
   const htmlBasePath = tab.kind === 'file' ? tab.path : undefined
@@ -158,6 +158,7 @@ export function EditorTabBody({
     nextMatch: t('editor.jsonNextMatch'),
     expandAll: t('editor.jsonExpandAll'),
     collapseAll: t('editor.jsonCollapseAll'),
+    aliasOf: path => t('editor.jsonAliasOf', { path }),
     selectedValue: t('editor.jsonSelectedValue'),
     valueTruncated: (shown, total) => t('editor.jsonValueTruncated', { shown: String(shown), total: String(total) }),
     fit: t('editor.jsonFit'),
@@ -292,7 +293,7 @@ export function EditorTabBody({
                   />
                 </>
               )
-              : isJsonTab && jsonMode === 'graph'
+              : isStructuredTab && structuredMode === 'graph'
               ? (
                 <JsonGraph
                   key={`json-graph-${tab.id}`}
@@ -301,7 +302,7 @@ export function EditorTabBody({
                   labels={graphLabels}
                 />
               )
-              : isJsonTab && jsonMode === 'split'
+              : isStructuredTab && structuredMode === 'split'
                 ? (
                   <>
                     <div className={css.mermaidSplitEditor} style={{ flexGrow: jsonSplitRatio, flexBasis: 0 }}>
@@ -381,11 +382,11 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={csvMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setCsvMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
-            {isJsonTab && (
+            {isStructuredTab && (
               <div className={css.editorStatusBarSwitch} role="group" aria-label={t('editor.jsonGraph')}>
-                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'graph' || undefined} aria-label={t('editor.jsonGraph')} title={t('editor.jsonGraph')} onClick={() => { controller.setJsonMode('graph', tab.id) }}><IconGraphOutline16 /></button>
-                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setJsonMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
-                <button type="button" className={css.editorStatusBarAction} data-active={jsonMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setJsonMode('source', tab.id) }}><IconSourceOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={structuredMode === 'graph' || undefined} aria-label={t('editor.jsonGraph')} title={t('editor.jsonGraph')} onClick={() => { controller.setStructuredMode('graph', tab.id) }}><IconGraphOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={structuredMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setStructuredMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={structuredMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setStructuredMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
             {showEditor && (

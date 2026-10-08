@@ -1,14 +1,15 @@
-/** 将插件操作与官方设置入口组织为互不覆盖的底部工具行。 */
+/** 让官方侧栏底栏保持原生上下排列，只为停靠列标记 Settings 触发器。 */
 
-export const SIDEBAR_FOOT_ATTRIBUTE = 'data-dsh-workbench-sidebar-foot'
-export const SIDEBAR_FOOT_ACTIONS_ATTRIBUTE = 'data-dsh-workbench-sidebar-foot-actions'
-export const SIDEBAR_SETTINGS_AREA_ATTRIBUTE = 'data-dsh-workbench-sidebar-settings-area'
 export const SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE = 'data-dsh-workbench-sidebar-settings-trigger'
 
 /**
- * The official Settings launcher is the single dialog-popup button in the
- * settings seat. It is not the seat's direct child — the registrant renders a
- * trigger row around it — so match the semantic control, not the position.
+ * The official Settings launcher is the dialog-popup button carried by the
+ * seat's first row. The registrant wraps it in that trigger row and mounts the
+ * whole Settings panel as a later sibling, so scoping the search to the first
+ * row keeps a dialog control inside an open panel from being mistaken for the
+ * launcher — which the dock would then hide. When an account launcher replaces
+ * the gear it opens a menu rather than a dialog, so nothing is tagged and the
+ * account row keeps its own geometry.
  */
 const SETTINGS_TRIGGER_SELECTOR = "button[aria-haspopup='dialog']"
 
@@ -17,76 +18,50 @@ export interface SidebarFooterLogger {
 }
 
 export interface SidebarFooterLayout {
-  setWide(wide: boolean): void
   dispose(): void
 }
 
 /**
- * 标记官方 footer.action 与 settings 的共同父级，不移动任何 React 节点。
- * 展开侧栏的同行布局完全由这些稳定属性驱动。
+ * The foot keeps DSH's own geometry: the `sidebar.footer.action` seat (a
+ * contributed widget such as a quota reader) stacks above the Settings seat.
+ * The workbench owns neither row — its collapse toggles and Settings gear live
+ * in the activity dock — so this only marks the official gear, which the dock
+ * hides to avoid a duplicate and clicks to open Settings. No React node moves.
  */
-export function createSidebarFooterLayout(
-  initiallyWide: boolean,
-  logger: SidebarFooterLogger,
-): SidebarFooterLayout {
-  let foot: HTMLElement | null = null
-  let actions: HTMLElement | null = null
-  let settings: HTMLElement | null = null
+export function createSidebarFooterLayout(logger: SidebarFooterLogger): SidebarFooterLayout {
   let settingsTrigger: HTMLButtonElement | null = null
-  let wide = initiallyWide
 
   const clear = (): void => {
-    foot?.removeAttribute(SIDEBAR_FOOT_ATTRIBUTE)
-    foot?.removeAttribute('data-wide')
-    actions?.removeAttribute(SIDEBAR_FOOT_ACTIONS_ATTRIBUTE)
-    settings?.removeAttribute(SIDEBAR_SETTINGS_AREA_ATTRIBUTE)
     settingsTrigger?.removeAttribute(SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE)
-    foot = null
-    actions = null
-    settings = null
     settingsTrigger = null
   }
 
   const reconcile = (): void => {
-    const actionSeat = document.querySelector<HTMLElement>('[data-slot="sidebar.footer.action"]')
     const settingsSeat = document.querySelector<HTMLElement>('[data-slot="sidebar.settings"]')
-    const nextActions = actionSeat?.parentElement ?? null
-    const nextSettings = settingsSeat?.parentElement ?? null
-    const nextFoot = nextSettings?.parentElement ?? null
-    const nextSettingsTrigger = settingsSeat?.querySelector<HTMLButtonElement>(SETTINGS_TRIGGER_SELECTOR) ?? null
-    if (nextFoot === null || nextActions === null || nextSettings === null || nextActions.parentElement !== nextFoot) {
-      clear()
-      return
-    }
-    if (foot === nextFoot && actions === nextActions && settings === nextSettings && settingsTrigger === nextSettingsTrigger) {
-      foot.toggleAttribute('data-wide', wide)
-      return
-    }
-
+    const nextSettingsTrigger = findLauncher(settingsSeat)
+    if (nextSettingsTrigger === settingsTrigger) return
     clear()
-    foot = nextFoot
-    actions = nextActions
-    settings = nextSettings
     settingsTrigger = nextSettingsTrigger
-    nextFoot.setAttribute(SIDEBAR_FOOT_ATTRIBUTE, '')
-    nextFoot.toggleAttribute('data-wide', wide)
-    nextActions.setAttribute(SIDEBAR_FOOT_ACTIONS_ATTRIBUTE, '')
-    nextSettings.setAttribute(SIDEBAR_SETTINGS_AREA_ATTRIBUTE, '')
-    nextSettingsTrigger?.setAttribute(SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, '')
-    logger.info('workbench-layout: aligned the compact Settings action beside the independent middle-editor control')
+    if (settingsTrigger === null) return
+    settingsTrigger.setAttribute(SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE, '')
+    logger.info('workbench-layout: released the native sidebar foot to its stacked order and tagged the Settings launcher')
   }
 
   reconcile()
   const observer = new MutationObserver(reconcile)
   observer.observe(document.body, { childList: true, subtree: true })
   return {
-    setWide: (next) => {
-      wide = next
-      foot?.toggleAttribute('data-wide', wide)
-    },
     dispose: () => {
       observer.disconnect()
       clear()
     },
   }
+}
+
+/** The launcher lives in the seat's first row, never in the panel after it. */
+function findLauncher(seat: HTMLElement | null | undefined): HTMLButtonElement | null {
+  const row = seat?.firstElementChild
+  if (!(row instanceof HTMLElement)) return null
+  const candidate = row.matches(SETTINGS_TRIGGER_SELECTOR) ? row : row.querySelector(SETTINGS_TRIGGER_SELECTOR)
+  return candidate instanceof HTMLButtonElement ? candidate : null
 }

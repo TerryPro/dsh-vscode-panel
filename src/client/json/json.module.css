@@ -277,6 +277,14 @@
   color: var(--json-key);
 }
 
+/* `&anchor` and `!!tag`, kept quieter than the data they decorate. */
+.graphMark {
+  flex: none;
+  padding-inline-end: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
 /* Value colours, taken from the code editor's own syntax palette. */
 .jsonString {
   color: var(--json-string);

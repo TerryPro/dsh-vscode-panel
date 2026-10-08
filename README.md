@@ -99,7 +99,9 @@ Files, Git state, editor tabs, and terminals follow the selected **Workspace**; 
 
 - Keep the official DSH conversation and input flow intact in the right column.
 - Resize the middle and right columns with the official AppFrame divider behavior. The initial conversation width scales with the viewport, and its drag range grows on large displays while preserving the middle editor's usable width.
-- Collapse the middle editor from the sidebar footer; selecting a file, Diff, or terminal opens it again. A conversation-collapse action sits beside it on the same footer rail, so both stay reachable even when the middle editor is closed.
+- Collapse the middle editor from the activity dock; selecting a file, Diff, or terminal opens it again. The conversation-collapse action sits beside it on the same dock rail, so both stay reachable even when the middle editor is closed.
+- The sidebar foot keeps DSH's native stacked order: a contributed widget (such as a quota reader) stays above the account/Settings row instead of being squeezed onto one line beside it.
+- When a global `main` panel opens — the Plugins page, or one registered by another plugin such as the Qoder quota page — it appears in the right column as DSH intends while the middle column keeps showing your open files instead of going blank; closing the panel restores the conversation.
 - Drag the left sidebar to resize it within a clamped range; the sidebar keeps a visible boundary with the editor and a divider under the menu bar.
 - Keep files and Git available for a Workspace even before its Session contains messages.
 - Adapt the composer, menus, failure messages, and assistant timing statistics when the conversation becomes narrow.
@@ -129,7 +131,7 @@ dsh plugin --profile web remove @lsq64737/dsh-workbench-layout
 2. Use the sidebar modes to switch among Sessions, Files, Git, and Terminal.
 3. Select a file, Diff, commit file, or terminal to open it in the middle column; use the status-bar switches to change a Markdown/CSV/JSON/Mermaid/HTML file between its structured, split, and source views.
 4. Drag the middle/right divider to choose the amount of space assigned to editing and conversation.
-5. Use the sidebar footer actions to collapse or restore the middle column and the conversation.
+5. Use the activity dock to collapse or restore the middle column and the conversation.
 
 Git features require the selected Workspace root to be a Git repository. Remote operations use credentials already configured for Git on the machine running DSH; the plugin does not request or store remote credentials.
 
@@ -153,7 +155,7 @@ Git features require the selected Workspace root to be a Git repository. Remote 
 - Terminal processes end when their tab closes, the page reloads, the connection ends, the Workspace changes, or the plugin stops. Their availability and concurrency follow the host's own terminal configuration.
 - The plugin reorders the official AppFrame through stable client markers because DSH does not currently expose a dedicated conversation-column placement API. A future AppFrame rewrite may require a plugin update.
 - Structured viewers apply size, node, and depth caps so very large CSV/JSON documents stay responsive; content beyond a cap is shown as source or truncated rather than fully rendered.
-- In the Windows desktop app a collapsed sidebar has zero width and DSH hides the sidebar's browser and footer rows, so the mode switch and the middle-editor toggle are unavailable until the sidebar is expanded again. On macOS, in a browser, and on Linux the collapsed sidebar keeps its icon rail and both controls stay reachable.
+- In the Windows desktop app a collapsed sidebar has zero width and DSH hides the sidebar's browser and footer rows, so the account/Settings row is unavailable until the sidebar is expanded again. The activity dock is an independent column, so the mode switch, the middle-editor and conversation toggles, and Settings stay reachable in every fold state on every platform.
 - On very narrow windows, the official AppFrame concession temporarily closes the middle editor and restores it when enough width is available.
 
 ## Development

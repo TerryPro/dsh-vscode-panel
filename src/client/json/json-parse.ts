@@ -48,6 +48,15 @@ export interface JsonNode {
   readonly display: string
   /** Diagnostic code recorded where the scanner gave up, for `kind: 'unknown'` nodes. */
   readonly error?: JsonParseErrorCode
+  /**
+   * YAML-only decorations, absent on JSON nodes: the `&name` a node defines, the
+   * `!!tag` it declares, the path key of the node an `*alias` points at, and the
+   * block-scalar style (`|` keeps lines, `>` folds them).
+   */
+  readonly anchor?: string
+  readonly tag?: string
+  readonly aliasTarget?: string
+  readonly blockStyle?: 'literal' | 'folded'
 }
 
 /**
@@ -73,6 +82,11 @@ export type JsonParseErrorCode =
 export interface JsonParseError {
   readonly offset: number
   readonly code: JsonParseErrorCode
+  /**
+   * The reporting parser's own wording, when it has one (YAML errors carry no
+   * stable codes). Views must not show it: it is not localised.
+   */
+  readonly detail?: string
 }
 
 /** One skipped comment, kept so callers can count them without rescanning. */

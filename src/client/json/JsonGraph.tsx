@@ -1,5 +1,5 @@
 /**
- * Graph view of a JSON/JSONC document: a canvas of value cards wired by labelled
+ * Structured graph of a JSON or YAML document: a canvas of value cards wired by
  * edges, in the grammar JSON Crack made popular — one card per object or array,
  * one `key: value` row per member, a `+` / `−` control where a row points at
  * another card.
@@ -37,7 +37,8 @@ import {
   type GraphEdge,
   type GraphRow,
 } from './json-graph.ts'
-import { isJsonViewRenderable, parseJsonDocument, type JsonNodeKind } from './json-parse.ts'
+import { type JsonNodeKind } from './json-parse.ts'
+import { parseStructuredDocument } from './structured-parse.ts'
 import { allContainerKeys, GRAPH_DEFAULT_EXPAND_DEPTH } from './json-graph.ts'
 import css from './json.module.css'
 import {
@@ -77,6 +78,8 @@ export interface JsonGraphLabels {
   expandNode: string
   collapseNode: string
   showMore: (count: number) => ReactNode
+  /** Tooltip for an `*alias` row, naming the node it points at. */
+  aliasOf: (path: string) => string
   /** Heading of the panel that spells out the selected row in full. */
   selectedValue: string
   /** Shown when a value is too long for the panel to spell out entirely. */
@@ -109,9 +112,8 @@ const WHEEL_STEP = 1.1
 const PAN_THRESHOLD = 4
 
 export function JsonGraph({ source, path, labels, view = null, split = false, style }: JsonGraphProps) {
-  const renderable = useMemo(() => isJsonViewRenderable(source), [source])
-  const parsed = useMemo(() => (renderable ? parseJsonDocument(source) : null), [renderable, source])
-  const root = parsed?.root ?? null
+  const parsed = useMemo(() => parseStructuredDocument(path, source), [path, source])
+  const root = parsed.document?.root ?? null
   const presetCollapsed = useMemo(() => allContainerKeys(root, GRAPH_DEFAULT_EXPAND_DEPTH), [root])
   const [folded, setFolded] = useState<Set<string> | null>(() => readJsonCollapsed(path))
   const [revealed, setRevealed] = useState<ReadonlyMap<string, number>>(() => new Map())
@@ -301,7 +303,7 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
 
   const surfaceClass = split ? `${css.graph} ${css.graphSplit}` : css.graph ?? ''
   const filtering = query.trim() !== ''
-  if (!renderable) {
+  if (!parsed.renderable) {
     return (
       <section className={surfaceClass} style={style} aria-label={labels.graph}>
         <p className={css.jsonNote}>{labels.tooLarge}</p>
@@ -328,8 +330,8 @@ export function JsonGraph({ source, path, labels, view = null, split = false, st
         <button type="button" className={css.jsonIconButton} disabled={selected === null} aria-label={labels.copyPath} title={labels.copyPath} onClick={() => { void copy('path') }}><IconCopyPath16 /></button>
         {filtering && <span className={css.jsonCount}>{matches.length === 0 ? labels.noMatches : labels.matches(matches.length)}</span>}
       </div>
-      {(parsed?.errors.length ?? 0) > 0 && <p className={`${css.jsonNote} ${css.jsonNoteError}`}>{labels.invalid}</p>}
-      {parsed !== null && parsed.truncated && <p className={css.jsonNote}>{labels.truncated(parsed.totalNodes)}</p>}
+      {((parsed.document?.errors.length ?? 0) > 0) && <p className={`${css.jsonNote} ${css.jsonNoteError}`}>{labels.invalid}</p>}
+      {parsed.document !== null && parsed.document.truncated && <p className={css.jsonNote}>{labels.truncated(parsed.document.totalNodes)}</p>}
       {note !== null && <p className={note.kind === 'error' ? `${css.jsonNote} ${css.jsonNoteError}` : css.jsonNote}>{note.text}</p>}
       {layout.cards.length === 0
         ? <p className={css.jsonEmpty}>{labels.empty}</p>
@@ -417,12 +419,15 @@ function renderRow(
   toggle: (row: GraphRow) => void,
 ): ReactNode {
   const full = graphValueText(row, source)
+  // An alias row is a pointer, so its tooltip names the node it aims at instead.
+  const title = row.aliasTarget === undefined ? full : labels.aliasOf(row.aliasTarget)
   return (
     <div
       className={`${css.graphRow} ${selectedKey === row.pathKey ? css.graphRowSelected : ''}`}
       data-row={row.pathKey}
       data-kind={row.kind}
-      title={full}
+      {...(row.aliasTarget === undefined ? {} : { 'data-alias': row.aliasTarget })}
+      title={title}
       onClick={() => { activate(row) }}
     >
       {row.collapsible
@@ -438,6 +443,8 @@ function renderRow(
           </button>
         )
         : <span className={css.graphSpacer} aria-hidden="true" />}
+      {row.anchor !== undefined && <span className={css.graphMark} data-mark="anchor">&{row.anchor}</span>}
+      {row.tag !== undefined && <span className={css.graphMark} data-mark="tag">!!{row.tag}</span>}
       {row.key !== null && <span className={css.graphKey}>{row.key}</span>}
       {row.key !== null && <span className={css.graphCount}>:</span>}
       <span className={`${css.graphValue} ${valueClass(row.kind)}`}>{row.text}</span>

@@ -1,33 +1,8 @@
-/* The official footer owns separate action and Settings seats. In the wide
-   sidebar, arrange those existing siblings as an independent two-column tool
-   row; no React node is moved and neither hit target overlays the other. */
-[data-dsh-workbench-sidebar-foot][data-wide] {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: center;
-  column-gap: 8px;
-}
-
-[data-dsh-workbench-sidebar-foot][data-wide] > [data-dsh-workbench-sidebar-foot-actions] {
-  grid-column: 2;
-  grid-row: 1;
-  justify-content: flex-end;
-  width: auto;
-}
-
-[data-dsh-workbench-sidebar-foot][data-wide] > [data-dsh-workbench-sidebar-settings-area] {
-  grid-column: 1;
-  grid-row: 1;
-  width: max-content;
-  max-width: 100%;
-}
-
-[data-dsh-workbench-sidebar-foot][data-wide] [data-dsh-workbench-sidebar-settings-trigger] {
-  width: auto;
-  min-height: 32px;
-  height: 32px;
-  margin: 0;
-}
+/* The official footer keeps its native top-to-bottom order: the
+   `sidebar.footer.action` seat (a contributed widget, e.g. a quota reader)
+   stacks above the Settings/account seat. The workbench owns neither row — its
+   collapse toggles and Settings gear live in the activity dock — so the foot is
+   deliberately left to DSH's own geometry in both fold states. */
 
 /* Hide the sidebar's large "deepseek HARNESS" brand row; the mark now lives in
    the activity dock's top-left corner instead. The brand is rendered through

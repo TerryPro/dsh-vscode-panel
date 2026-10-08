@@ -33,6 +33,13 @@ import {
   TRANSITION_SIDEBAR_WIDTH,
 } from './editor-layout-contract.ts'
 import {
+  createGlobalPanelLayout,
+  EDITOR_HOST_ATTRIBUTE,
+  GLOBAL_PANEL_ATTRIBUTE,
+  type GlobalPanelLayout,
+  type GlobalPanelSource,
+} from './global-panel-layout.ts'
+import {
   createDetailsTrackLayout,
   DETAILS_TRACK_ATTRIBUTE,
   DETAILS_TRACK_DRAGGING_ATTRIBUTE,
@@ -366,6 +373,18 @@ const CSS = `
   left: var(${FLOATING_MENU_LEFT_PROPERTY}, 12px) !important;
   z-index: 1000 !important;
 }
+
+/* A global \`main\` panel (the Plugins page, or one another plugin registers)
+   replaces the Conversation in the center column, and DSH then hides every
+   Session subtree of the right column — which is where the workbench editor
+   lives, since it takes the session-scoped \`rightbar.session\` seat. While the
+   reorder keeps the panel on the right, hold open exactly the Session host that
+   was on screen before the panel opened, so the files stay visible beside it.
+   The official host rule is \`._session[hidden]{display:none}\` (0,2,0); this
+   selector is heavier and only ever matches the single claimed host. */
+[${FRAME_ATTRIBUTE}][${GLOBAL_PANEL_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}]) > :nth-child(3) [${EDITOR_HOST_ATTRIBUTE}] {
+  display: contents !important;
+}
 `
 
 /** 安装可收起的列顺序样式，并为工作台右栏提供响应式会话轨道。 */
@@ -373,6 +392,7 @@ export function installWorkbenchLayout(
   ctx: ClientContext,
   visibility: WorkbenchEditorVisibilityStore,
   fileController: ConversationFileController,
+  panelInfo: GlobalPanelSource,
 ): void {
   ctx.effect(() => {
     const style = document.createElement('style')
@@ -385,6 +405,7 @@ export function installWorkbenchLayout(
     let conversationLayout: ConversationLayout | undefined
     let conversationFileRouting: ConversationFileRouting | undefined
     let editorTransition: EditorTrackTransition | undefined
+    let globalPanel: GlobalPanelLayout | undefined
     let editorExpanded = visibility.getSnapshot().editorExpanded
     const synchronizeVisibility = (): void => {
       const nextExpanded = visibility.getSnapshot().editorExpanded
@@ -397,6 +418,8 @@ export function installWorkbenchLayout(
     const attach = (): void => {
       const next = document.querySelector<HTMLElement>('[data-shell-overlay]')?.parentElement ?? null
       if (next === frame) return
+      globalPanel?.dispose()
+      globalPanel = undefined
       conversationLayout?.dispose()
       conversationLayout = undefined
       conversationFileRouting?.dispose()
@@ -420,6 +443,7 @@ export function installWorkbenchLayout(
         editorExpanded,
         availableWidth => detailsTrack?.resolvePreferredWidth(availableWidth) ?? 0,
       )
+      globalPanel = createGlobalPanelLayout(frame, panelInfo, ctx.logger)
       const conversationColumn = frame.children.item(1)
       if (conversationColumn instanceof HTMLElement) {
         conversationLayout = createConversationLayout(conversationColumn, ctx.logger)
@@ -434,6 +458,7 @@ export function installWorkbenchLayout(
     return () => {
       documentObserver.disconnect()
       unsubscribeVisibility()
+      globalPanel?.dispose()
       conversationLayout?.dispose()
       conversationFileRouting?.dispose()
       editorTransition?.dispose()

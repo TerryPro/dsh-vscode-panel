@@ -26,6 +26,10 @@ import {
   resolveResponsiveDetailsDefault,
 } from '../src/client/layout/details-track-layout.ts'
 import { EDITOR_COLLAPSED_ATTRIBUTE, installWorkbenchLayout } from '../src/client/layout/layout-styles.ts'
+import {
+  EDITOR_HOST_ATTRIBUTE,
+  GLOBAL_PANEL_ATTRIBUTE,
+} from '../src/client/layout/global-panel-layout.ts'
 import { CONVERSATION_COLLAPSED_ATTRIBUTE } from '../src/client/layout/editor-layout-contract.ts'
 
 afterEach(() => {
@@ -69,7 +73,7 @@ describe('workbench layout presentation', () => {
     const ctx = contextWithDispose(value => { dispose = value })
     const visibility = editorVisibility()
 
-    installWorkbenchLayout(ctx, visibility, fileController())
+    installWorkbenchLayout(ctx, visibility, fileController(), panelSelection())
     expect(frame.hasAttribute('data-dsh-workbench-frame')).toBe(true)
     expect(frame.querySelector(`[${CONVERSATION_ROOT_ATTRIBUTE}]`)).not.toBeNull()
     expect(frame.style.gridTemplateColumns).toBe('312px minmax(0, 1fr) 360px')
@@ -146,7 +150,7 @@ describe('workbench layout presentation', () => {
     let dispose: (() => void) | undefined
 
     try {
-      installWorkbenchLayout(contextWithDispose(value => { dispose = value }), editorVisibility(), fileController())
+      installWorkbenchLayout(contextWithDispose(value => { dispose = value }), editorVisibility(), fileController(), panelSelection())
       actions.setAttribute(ASSISTANT_METRICS_WRAP_ATTRIBUTE, '')
 
       expect(actions.hasAttribute(ASSISTANT_ACTIONS_ATTRIBUTE)).toBe(true)
@@ -167,7 +171,7 @@ describe('workbench layout presentation', () => {
     const ctx = contextWithDispose(value => { dispose = value })
     const visibility = editorVisibility()
 
-    installWorkbenchLayout(ctx, visibility, fileController())
+    installWorkbenchLayout(ctx, visibility, fileController(), panelSelection())
     expect(frame.hasAttribute('data-dsh-workbench-fallback-details')).toBe(true)
     expect(frame.style.getPropertyValue(DETAILS_TRACK_SIDEBAR_WIDTH)).toBe('280px')
     expect(frame.style.getPropertyValue(DETAILS_TRACK_WIDTH)).toBe('448px')
@@ -200,7 +204,7 @@ describe('workbench layout presentation', () => {
     let dispose: (() => void) | undefined
     const ctx = contextWithDispose(value => { dispose = value })
 
-    installWorkbenchLayout(ctx, editorVisibility(), fileController())
+    installWorkbenchLayout(ctx, editorVisibility(), fileController(), panelSelection())
     expect(frame.style.getPropertyValue(DETAILS_TRACK_SIDEBAR_WIDTH)).toBe('280px')
 
     frame.style.gridTemplateColumns = '56px minmax(0, 1fr) 0px'
@@ -229,7 +233,7 @@ describe('workbench layout presentation', () => {
     const ctx = contextWithDispose(value => { dispose = value })
     const visibility = editorVisibility()
 
-    installWorkbenchLayout(ctx, visibility, fileController())
+    installWorkbenchLayout(ctx, visibility, fileController(), panelSelection())
     expect(frame.hasAttribute(CONVERSATION_COLLAPSED_ATTRIBUTE)).toBe(false)
 
     visibility.setConversationExpanded(false)
@@ -248,7 +252,7 @@ describe('workbench layout presentation', () => {
     let dispose: (() => void) | undefined
     const ctx = contextWithDispose(value => { dispose = value })
 
-    installWorkbenchLayout(ctx, editorVisibility(), fileController())
+    installWorkbenchLayout(ctx, editorVisibility(), fileController(), panelSelection())
     const handle = frame.querySelector(`[${SIDEBAR_TRACK_HANDLE_ATTRIBUTE}]`)
     expect(handle).not.toBeNull()
     expect(frame.style.getPropertyValue(DETAILS_TRACK_SIDEBAR_WIDTH)).toBe('280px')
@@ -269,7 +273,7 @@ describe('workbench layout presentation', () => {
     let dispose: (() => void) | undefined
     const ctx = contextWithDispose(value => { dispose = value })
 
-    installWorkbenchLayout(ctx, editorVisibility(), fileController())
+    installWorkbenchLayout(ctx, editorVisibility(), fileController(), panelSelection())
     expect(frame.style.getPropertyValue(DETAILS_TRACK_WIDTH)).toBe('614px')
     expect(detailsHandle).not.toBeNull()
 
@@ -280,6 +284,96 @@ describe('workbench layout presentation', () => {
     expect(detailsHandle?.getAttribute('aria-valuemax')).toBe('1000')
     expect(detailsHandle?.getAttribute('aria-valuenow')).toBe('914')
     expect(ctx.logger.info).toHaveBeenCalledWith(expect.stringContaining('resized conversation track to 914px'))
+
+    dispose?.()
+  })
+
+  it('holds the middle editor open while a global main panel replaces the conversation', () => {
+    const { frame, sessionHost } = appFrameFixture('active', 312)
+    document.body.appendChild(frame)
+    let dispose: (() => void) | undefined
+    const ctx = contextWithDispose(value => { dispose = value })
+    const panels = panelSelection()
+
+    installWorkbenchLayout(ctx, editorVisibility(), fileController(), panels)
+    expect(frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(false)
+    expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+
+    // DSH hides every Session subtree once a global panel owns the center slot.
+    panels.select('plugins')
+    expect(frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(true)
+    sessionHost.hidden = true
+    expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+
+    const style = document.head.querySelector<HTMLStyleElement>('[data-dsh-workbench-layout]')
+    expect(style?.textContent).toContain(`[${GLOBAL_PANEL_ATTRIBUTE}]:not([${EDITOR_COLLAPSED_ATTRIBUTE}]) > :nth-child(3) [${EDITOR_HOST_ATTRIBUTE}]`)
+    expect(style?.textContent).toContain('display: contents !important')
+
+    // Returning to the conversation keeps the claim through the frame where DSH
+    // has released the panel but not yet un-hidden the subtree, so the editor
+    // never blinks; the CSS stops applying with the marker gone.
+    panels.select(null)
+    expect(frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(false)
+    expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+    sessionHost.hidden = false
+    expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+
+    dispose?.()
+    expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(false)
+    expect(frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(false)
+  })
+
+  it('re-claims a Session subtree re-created while the global panel is open', async () => {
+    const first = appFrameFixture('active', 312)
+    document.body.appendChild(first.frame)
+    let dispose: (() => void) | undefined
+    const panels = panelSelection()
+    installWorkbenchLayout(
+      contextWithDispose(value => { dispose = value }),
+      editorVisibility(),
+      fileController(),
+      panels,
+    )
+    expect(first.sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+
+    panels.select('plugins')
+    first.sessionHost.hidden = true
+
+    // The controller replaces the subtree underneath the open panel: the new host
+    // mounts hidden, so the claim must move to it instead of stranding the column.
+    const replacement = document.createElement('div')
+    replacement.dataset.sidebarRightSession = 'session-2'
+    replacement.hidden = true
+    first.sessionHost.replaceWith(replacement)
+
+    await vi.waitFor(() => {
+      expect(replacement.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+    })
+    expect(first.sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(false)
+
+    panels.select(null)
+    replacement.hidden = false
+    expect(replacement.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
+
+    dispose?.()
+    expect(replacement.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(false)
+    expect(first.frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(false)
+  })
+
+  it('claims the Session subtree even when it mounts hidden under an open panel', () => {
+    const { frame, sessionHost } = appFrameFixture('active', 312)
+    sessionHost.hidden = true
+    document.body.appendChild(frame)
+    let dispose: (() => void) | undefined
+
+    installWorkbenchLayout(
+      contextWithDispose(value => { dispose = value }),
+      editorVisibility(),
+      fileController(),
+      panelSelection('plugins'),
+    )
+    expect(frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(true)
+    expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(true)
 
     dispose?.()
   })
@@ -304,7 +398,15 @@ function appFrameFixture(phase: 'hero' | 'active', sidebarWidth = 280, frameWidt
   conversationSlot.appendChild(conversation)
   conversationColumn.appendChild(conversationSlot)
   const details = document.createElement('div')
-  details.appendChild(document.createElement('div'))
+  details.dataset.rightbarCol = ''
+  const sessionHost = document.createElement('div')
+  sessionHost.dataset.sidebarRightSession = 'session-1'
+  const dockPanel = document.createElement('div')
+  dockPanel.dataset.sidebarRightPanel = 'push'
+  const editor = document.createElement('section')
+  editor.dataset.dshWorkbenchEditor = ''
+  sessionHost.append(dockPanel, editor)
+  details.appendChild(sessionHost)
   const overlay = document.createElement('div')
   overlay.dataset.shellOverlay = ''
   const detailsHandle = phase === 'active' ? document.createElement('div') : null
@@ -315,7 +417,7 @@ function appFrameFixture(phase: 'hero' | 'active', sidebarWidth = 280, frameWidt
   vi.spyOn(sidebar, 'getBoundingClientRect').mockReturnValue(rect(sidebarWidth))
   expect(conversationColumn.querySelector(":scope > [data-slot='conversation.session'] > [data-phase]")).toBe(conversation)
   expect(conversationColumn.querySelector(':scope > textarea[data-phase]')).toBeNull()
-  return { frame, conversation, detailsHandle }
+  return { frame, conversation, detailsHandle, details, sessionHost, dockPanel, editor }
 }
 
 function dispatchPointer(target: HTMLElement, type: string, clientX: number): void {
@@ -347,6 +449,22 @@ function editorVisibility(initial = true) {
     },
     setConversationExpanded: (next: boolean) => {
       conversationExpanded = next
+      listeners.forEach(listener => { listener() })
+    },
+  }
+}
+
+function panelSelection(initial: string | null = null) {
+  let activePanelId = initial
+  const listeners = new Set<() => void>()
+  return {
+    getSnapshot: () => ({ activePanelId }),
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    select: (next: string | null) => {
+      activePanelId = next
       listeners.forEach(listener => { listener() })
     },
   }

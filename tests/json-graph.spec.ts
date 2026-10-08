@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseJsonDocument, type JsonNode } from '../src/client/json/json-parse.ts'
+import { parseYamlDocument } from '../src/client/yaml/yaml-parse.ts'
 import {
   allContainerKeys,
   buildGraphLayout,
@@ -235,6 +236,47 @@ describe('graphValueText', () => {
 
   it('falls back to the preview when a row carries no span', () => {
     expect(graphValueText({ ...rowOf('$.deps'), start: 0, end: 0 }, text)).toBe('{1}')
+  })
+})
+
+describe('buildGraphLayout with YAML nodes', () => {
+  const aliasSource = `base: &b
+  x: 1
+copy: *b
+`
+  const aliasLayout = buildGraphLayout(parseYamlDocument(aliasSource).root)
+
+  it('wires an anchored node but never its alias', () => {
+    expect(aliasLayout.cards.map(card => card.id)).toEqual(['$', '$.base'])
+    expect(aliasLayout.edges.map(edge => edge.to)).toEqual(['$.base'])
+    const copy = card(aliasLayout, '$').rows.find(row => row.pathKey === '$.copy')
+    expect(copy).toMatchObject({ aliasTarget: '$.base', collapsible: false, text: '*b' })
+  })
+
+  it('carries anchor and tag decorations onto the rows', () => {
+    expect(card(aliasLayout, '$').rows.find(row => row.pathKey === '$.base')?.anchor).toBe('b')
+    const tagged = buildGraphLayout(parseYamlDocument('v: !!str 7\n').root)
+    // The tag forces a string, so the row quotes it like any other text value.
+    expect(card(tagged, '$').rows[0]).toMatchObject({ tag: 'str', kind: 'string', text: '"7"' })
+  })
+
+  it('shows a block scalar as one line and keeps its lines for the panel', () => {
+    const source = `script: |
+  a
+  b
+`
+    const layout = buildGraphLayout(parseYamlDocument(source).root)
+    const row = card(layout, '$').rows.find(candidate => candidate.pathKey === '$.script')
+    if (row === undefined) throw new Error('no script row')
+    expect(row.text).toBe('| a')
+    expect(row.blockStyle).toBe('literal')
+    expect(graphValueText(row, source)).toBe('a\nb\n')
+  })
+
+  it('draws a document stream as one array card', () => {
+    const layout = buildGraphLayout(parseYamlDocument('a: 1\n---\nb: 2\n').root)
+    expect(layout.cards.map(card => card.id)).toEqual(['$', '$[0]', '$[1]'])
+    expect(card(layout, '$').rows.map(row => `${row.key}: ${row.text}`)).toEqual(['document 1: {1}', 'document 2: {1}'])
   })
 })
 

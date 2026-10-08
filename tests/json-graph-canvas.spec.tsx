@@ -39,6 +39,7 @@ const labels: JsonGraphLabels = {
   expandNode: 'EXPAND',
   collapseNode: 'COLLAPSE',
   showMore: count => `SHOW_MORE_${count}`,
+  aliasOf: path => `ALIAS_OF_${path}`,
   pan: 'PAN',
   grid: 'GRID',
 }
@@ -371,6 +372,41 @@ describe('JsonGraph details panel', () => {
     fireEvent.click(rowOf(view, '$.note'))
     expect(panel(view)?.textContent).toHaveLength(GRAPH_DETAIL_MAX_CHARS)
     expect(view.getByText(`DETAIL_${GRAPH_DETAIL_MAX_CHARS}_5000`)).toBeTruthy()
+  })
+})
+
+describe('JsonGraph with YAML', () => {
+  it('badges an anchor and points an alias at its target', () => {
+    const view = renderGraph('base: &b\n  x: 1\ncopy: *b\n', 'cfg.yaml')
+    expect(rowOf(view, '$.base').textContent).toContain('&b')
+    const copy = rowOf(view, '$.copy')
+    expect(copy.dataset.alias).toBe('$.base')
+    expect(copy.title).toBe('ALIAS_OF_$.base')
+    expect(copy.textContent).toContain('*b')
+    // The alias is a pointer, so it gets no card of its own.
+    expect(cards(view)).toEqual(['$', '$.base'])
+  })
+
+  it('shows a block scalar as one line and in full in the panel', () => {
+    const view = renderGraph('script: |\n  line1\n  line2\n', 'cfg.yaml')
+    const row = rowOf(view, '$.script')
+    expect(row.textContent).toContain('| line1')
+    fireEvent.click(row)
+    expect(view.container.querySelector('pre')?.textContent).toBe('line1\nline2\n')
+  })
+
+  it('draws one row per document in a stream', () => {
+    const view = renderGraph('a: 1\n---\nb: 2\n', 'multi.yaml')
+    expect(cards(view)).toEqual(['$', '$[0]', '$[1]'])
+    expect(rowOf(view, '$[0]').textContent).toContain('document 1')
+  })
+
+  it('reads the repository’s own YAML patch file without complaints', () => {
+    const source = readFileSync(resolve(process.cwd(), 'cordis.patch.yml'), 'utf8')
+    const view = renderGraph(source, 'cordis.patch.yml')
+    expect(view.queryByText('INVALID')).toBeNull()
+    expect(view.queryByText('TOO_LARGE')).toBeNull()
+    expect(cards(view).length).toBeGreaterThan(1)
   })
 })
 

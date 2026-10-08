@@ -1,6 +1,7 @@
 /** Client-side recognition of the JSON-family files the workbench draws as a value graph. */
 
 import { basename } from '../../shared/path-name.ts'
+import { isYamlPath } from '../yaml/yaml-path.ts'
 
 /**
  * File extensions the workbench offers a structured graph for. `json5` is left
@@ -17,4 +18,12 @@ export function isJsonPath(path: string | undefined): boolean {
   const dot = name.lastIndexOf('.')
   if (dot <= 0) return false
   return (JSON_VIEW_EXTENSIONS as readonly string[]).includes(name.slice(dot + 1))
+}
+
+/**
+ * True for any file the structured graph can show, in either syntax. The graph
+ * itself does not care which; only the reader it calls does.
+ */
+export function isStructuredPath(path: string | undefined): boolean {
+  return isJsonPath(path) || isYamlPath(path)
 }

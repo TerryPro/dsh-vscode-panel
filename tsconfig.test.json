@@ -16,6 +16,8 @@
     "tests/json-collapse.spec.ts",
     "tests/json-split.spec.ts",
     "tests/json-graph.spec.ts",
-    "tests/json-graph-canvas.spec.tsx"
+    "tests/json-graph-canvas.spec.tsx",
+    "tests/yaml-parse.spec.ts",
+    "tests/structured-parse.spec.ts"
   ]
 }

@@ -12,6 +12,13 @@ const CSS_SOURCES = new Map<string, string>()
 const CSS_VIRTUAL_IDS = new Map<string, string>()
 const requireFromConfig = createRequire(import.meta.url)
 
+/**
+ * The browser entry of `yaml`. Its package exports map prefers a Node build that
+ * pulls in `buffer` and `process`, neither of which the Host's web runtime has,
+ * so the client bundle resolves the path directly instead.
+ */
+const YAML_BROWSER_ENTRY = resolvePath('node_modules/yaml/browser/index.js')
+
 const CLIENT_EXTERNALS = [
   'react',
   'react/jsx-runtime',
@@ -57,6 +64,7 @@ export default defineConfig([
     plugins: [{
       name: 'dsh-workbench-css-inline',
       resolveId(source: string, importer: string | undefined) {
+        if (source === 'yaml') return YAML_BROWSER_ENTRY
         if (!source.endsWith('.css')) return null
         const absolute = source.startsWith('.')
           ? importer === undefined ? source : sourceAssetPath(source, importer)

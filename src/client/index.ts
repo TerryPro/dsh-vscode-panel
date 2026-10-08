@@ -72,6 +72,6 @@ export function apply(ctx: ClientContext): void {
     inject: () => ({ controller, activateWorkspace }),
   }, WorkbenchEditor))
 
-  installWorkbenchLayout(ctx, controller.store, controller)
+  installWorkbenchLayout(ctx, controller.store, controller, ctx.layout.panelInfo)
   ctx.logger.info('workbench-layout: stable native session action and official Workspace path header registered')
 }

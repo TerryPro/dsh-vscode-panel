@@ -14,7 +14,7 @@ import type {
   GitView,
   CsvViewMode,
   HtmlViewMode,
-  JsonViewMode,
+  StructuredViewMode,
   MarkdownViewMode,
   MermaidViewMode,
   SidebarMode,
@@ -375,9 +375,9 @@ export class WorkbenchController {
     this.edits.setCsvMode(mode, tabId)
   }
 
-  /** Switch one JSON/JSONC file tab between graph, tree, split and source views. */
-  setJsonMode(mode: JsonViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setJsonMode(mode, tabId)
+  /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
+  setStructuredMode(mode: StructuredViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.edits.setStructuredMode(mode, tabId)
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {
