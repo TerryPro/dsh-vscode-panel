@@ -16,6 +16,7 @@ import type {
 } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { EditorTabs } from './EditorTabs.tsx'
+import type { EditorTabMenuAction } from './EditorTabContextMenu.tsx'
 import { EditorTabBody } from './EditorTabBody.tsx'
 import { IconBoldOutline16, IconBulletListOutline16, IconInlineCodeOutline16, IconItalicOutline16, IconLinkOutline16, IconRevertOutline16, IconSplitHorizontalOutline16, IconSplitVerticalOutline16, IconTableOutline16 } from './EditorViewIcons.tsx'
 import { runMarkdownCommand, type MarkdownCommandKind } from '../markdown/markdown-format.ts'
@@ -43,6 +44,7 @@ interface EditorPaneProps {
   markdownLabels: MarkdownLabels
   showSplitControls?: boolean
   onRequestClose: (tabId: string) => void
+  onMenuAction: (action: EditorTabMenuAction, tab: WorkbenchTab) => void
 }
 
 export function EditorPane({
@@ -56,6 +58,7 @@ export function EditorPane({
   markdownLabels,
   showSplitControls,
   onRequestClose,
+  onMenuAction,
 }: EditorPaneProps) {
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const activeId = group.activeTabId
@@ -68,8 +71,10 @@ export function EditorPane({
           tabs={tabs}
           activeTabId={activeId}
           gitDecorations={state.gitDecorations}
+          split={state.editorSplit}
           onSelect={tabId => { controller.selectTab(tabId) }}
           onClose={onRequestClose}
+          onMenuAction={onMenuAction}
           t={t}
         />
         {tab !== undefined && tab.kind === 'file' && tab.file !== null && (

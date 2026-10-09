@@ -697,6 +697,59 @@ describe('WorkbenchController', () => {
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('consumed collapsed sidebar action files.newFile'))
   })
 
+  it('queues a reveal action carrying the tab path for the file tree', () => {
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() })
+    controller.setWorkspace('workspace-1')
+    const requestId = controller.requestSidebarAction('files.reveal', 'workspace-1', 'src/a.ts')
+
+    expect(controller.store.getSnapshot().sidebarAction).toMatchObject({
+      id: requestId,
+      action: 'files.reveal',
+      workspaceId: 'workspace-1',
+      path: 'src/a.ts',
+    })
+  })
+
+  it('splits the editor on a named tab and focuses the split-off pane', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+
+    controller.splitWithTab('file:first.ts', 'horizontal')
+    const state = controller.store.getSnapshot()
+    expect(state.editorSplit).toBe(true)
+    expect(state.editorSplitOrientation).toBe('horizontal')
+    expect(state.panes.secondary.tabIds).toEqual(['file:first.ts'])
+    expect(state.panes.primary.tabIds).toEqual(['file:second.ts'])
+    // VS Code hands focus to the new pane's editor.
+    expect(state.activeTabId).toBe('file:first.ts')
+    expect(state.activePane).toBe('secondary')
+  })
+
+  it('keeps the split-off tab in its own pane when it already sits in the other pane', async () => {
+    const api = {
+      readFile: vi.fn()
+        .mockResolvedValueOnce(file('first.ts', 'one', '1'))
+        .mockResolvedValueOnce(file('second.ts', 'two', '2')),
+    }
+    const controller = createController(api)
+    await controller.openFile('workspace-1', 'first.ts')
+    await controller.openFile('workspace-1', 'second.ts')
+    controller.toggleSplit('horizontal')
+
+    controller.splitWithTab('file:first.ts', 'vertical')
+    const state = controller.store.getSnapshot()
+    expect(state.editorSplit).toBe(true)
+    expect(state.editorSplitOrientation).toBe('vertical')
+    expect(state.panes.secondary.tabIds).toEqual(['file:first.ts'])
+    expect(state.panes.primary.tabIds).toEqual(['file:second.ts'])
+  })
+
   it('keeps Git file decorations Workspace-scoped and coalesces status refreshes', async () => {
     let finishStatus: ((value: {
       available: boolean

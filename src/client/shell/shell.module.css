@@ -88,6 +88,29 @@
   color: var(--dsw-alias-button-info-fill);
 }
 
+/* The back-to-conversation control injected into the official Plugins page
+   header. Geometry and colour mirror that page's own icon button — a 28px
+   square, `radius-sm`, caption colour lifting to secondary on hover — so the
+   exit reads as one of the page's own actions rather than an attachment. */
+.panelBackButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-caption);
+  cursor: pointer;
+}
+
+.panelBackButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
 .sidebarBody,
 .panelBody {
   display: flex;

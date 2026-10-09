@@ -34,6 +34,13 @@ export const PANEL_RULE_ATTRIBUTE = 'data-dsh-workbench-panel-rule'
 export const PANEL_RULE_OVERLAY_ATTRIBUTE = 'data-dsh-workbench-panel-rule-overlay'
 export const PANEL_HEADER_HEIGHT_PROPERTY = '--dsh-workbench-panel-header-height'
 
+/**
+ * Mount seat the workbench opens inside the official Plugins page header. The
+ * page contributes no header slot, so its missing way back to the Conversation
+ * is contributed through the DOM instead.
+ */
+export const PANEL_BACK_SEAT_ATTRIBUTE = 'data-dsh-workbench-panel-back-seat'
+
 export interface EditorTransitionEventDetail {
   expanded: boolean
 }

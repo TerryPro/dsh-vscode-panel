@@ -8,6 +8,7 @@ import {
   messageOf,
   tabIdentity,
   tabRequestKey,
+  tabsForCloseScope,
 } from '../src/client/model/tab-model.ts'
 
 describe('tab-model', () => {
@@ -44,4 +45,27 @@ describe('tab-model', () => {
     expect(diff.diff).toBeNull()
     expect(diff.loading).toBe(true)
   })
+
+  it('selects the batch-close subsets for the tab context menu', () => {
+    const tabs = [
+      fileLike('a', false),
+      fileLike('b', true),
+      { id: 'diff:c', kind: 'diff' as const, path: 'c.ts', diffKind: 'worktree' as const, diff: null, loading: false, error: null },
+      { id: 'terminal:1', kind: 'terminal' as const, sequence: 1, contentId: 'c', status: 'running' as const },
+    ]
+    expect(tabsForCloseScope(tabs, 'a', 'others').map(tab => tab.id)).toEqual(['b', 'diff:c', 'terminal:1'])
+    expect(tabsForCloseScope(tabs, 'b', 'right').map(tab => tab.id)).toEqual(['diff:c', 'terminal:1'])
+    // "Saved" keeps dirty drafts and live terminals, closes clean files and diffs.
+    expect(tabsForCloseScope(tabs, 'a', 'saved').map(tab => tab.id)).toEqual(['a', 'diff:c'])
+    expect(tabsForCloseScope(tabs, 'a', 'all').map(tab => tab.id)).toEqual(['a', 'b', 'diff:c', 'terminal:1'])
+    expect(tabsForCloseScope(tabs, 'missing', 'right')).toEqual([])
+  })
 })
+
+function fileLike(id: string, dirty: boolean) {
+  return {
+    ...emptyFileTab(`${id}.ts`),
+    id,
+    dirty,
+  }
+}

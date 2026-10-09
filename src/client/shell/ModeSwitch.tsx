@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FishLogo,
@@ -10,11 +10,14 @@ import {
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchController } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
+import type { WorkbenchPanelNavigation } from '../model/workbench-types.ts'
 import { IconSourceControlOutline16 } from '../git/SourceControlIcon.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { IconConversationPanelOutline16 } from './ConversationPanelIcon.tsx'
 import { IconEditorPanelOutline16 } from '../editor/EditorPanelIcon.tsx'
+import { IconBackToSessionOutline16 } from './BackToSessionIcon.tsx'
 import { createActivityDockMount } from '../layout/activity-dock-layout.ts'
+import { createPanelBackSeatLayout } from '../layout/panel-back-seat-layout.ts'
 import { createSidebarFooterLayout, SIDEBAR_SETTINGS_TRIGGER_ATTRIBUTE } from '../layout/sidebar-footer-layout.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
 import css from './shell.module.css'
@@ -29,6 +32,8 @@ const OFFICIAL_SIDEBAR_TOGGLE_SELECTOR = 'button[class*="_toggle"]'
 export type ModeSwitchProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<'workbench'> & {
   controller: WorkbenchController
   logger: { info(message: string): void }
+  /** Official root panel navigation, supplying the way back the shell itself lacks. */
+  panels: WorkbenchPanelNavigation
 }
 
 /**
@@ -36,9 +41,21 @@ export type ModeSwitchProps = PropsRuntime<'sidebar.footer.action'> & PropsLocal
  * every sidebar fold state. Sessions releases the sidebar shadow back to DSH
  * while the dock itself stays mounted.
  */
-export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
+export function ModeSwitch({ wide, controller, logger, panels, t }: ModeSwitchProps) {
   const state = useWorkbench(controller)
+  // Subscribe identity must be stable across renders, and the official source's
+  // `subscribe` needs its receiver, so bind both to the injected layout face.
+  const subscribePanel = useCallback(
+    (listener: () => void): (() => void) => panels.panelInfo.subscribe(listener),
+    [panels],
+  )
+  const readPanel = useCallback(
+    () => panels.panelInfo.getSnapshot().activePanelId,
+    [panels],
+  )
+  const activePanelId = useSyncExternalStore(subscribePanel, readPanel, readPanel)
   const [target, setTarget] = useState<HTMLElement | null>(null)
+  const [backSeat, setBackSeat] = useState<HTMLElement | null>(null)
   const items = [
     { mode: 'sessions' as const, label: t('mode.sessions'), icon: <IconQueueOutlineRegular size={18} /> },
     { mode: 'files' as const, label: t('mode.files'), icon: <IconFolderOpenOutlineMedium size={18} /> },
@@ -53,6 +70,15 @@ export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
       mount.dispose()
     }
   }, [logger])
+  // The Plugins page contributes no header slot, so its seat is opened through
+  // the DOM and the button is portalled into it, staying owned by this component.
+  // Only while a global panel is on screen: the seat's own reconciliation watches
+  // every DOM mutation, and no panel means no seat to find.
+  useLayoutEffect(() => {
+    if (activePanelId === null) return undefined
+    const seatLayout = createPanelBackSeatLayout(setBackSeat, logger)
+    return () => { seatLayout.dispose() }
+  }, [activePanelId, logger])
   const editorToggleLabel = state.editorExpanded ? t('editor.collapse') : t('editor.expand')
   const conversationToggleLabel = state.conversationExpanded ? t('editor.collapseConversation') : t('editor.expandConversation')
   const foldOfficialSidebar = (): void => {
@@ -86,10 +112,26 @@ export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
     trigger?.click()
   }
 
+  // One control answers for every global panel: the page header seat when the
+  // Plugins page provides one, the dock otherwise.
+  const backButton = (className: string, size: number) => (
+    <Tooltip label={t('mode.backToSession')} delayMs={500}>
+      <button
+        type="button"
+        className={className}
+        aria-label={t('mode.backToSession')}
+        onClick={() => { panels.selectPanel(null) }}
+      >
+        <IconBackToSessionOutline16 size={size} />
+      </button>
+    </Tooltip>
+  )
+
   return (
-    target === null
-      ? <span className={css.modeSwitchAnchor} aria-hidden />
-      : createPortal((
+    <>
+      {target === null
+        ? <span className={css.modeSwitchAnchor} aria-hidden />
+        : createPortal((
           <>
             <div className={css.dockBrand} aria-hidden="true">
               <FishLogo />
@@ -109,6 +151,16 @@ export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
                 </button>
               </Tooltip>
             ))}
+            {/* DSH's own sidebar rows only ever select a global panel — their click
+                handler is `selectPanel(id)`, never `selectPanel(null)` — so once one
+                is open the shell offers no control that leaves it. The dock supplies
+                that exit below the view icons, and only while a panel holds the
+                center column, so the standing cluster never shifts. The Plugins page
+                owns its exit in its own header instead, so the dock stands down
+                whenever that seat exists and one control answers for every panel. */}
+            {activePanelId === null || backSeat !== null ? null : (
+              backButton(css.modeButton!, 18)
+            )}
             <span className={css.activitySpacer} aria-hidden />
             <Tooltip label={editorToggleLabel} delayMs={500}>
               <button
@@ -144,8 +196,10 @@ export function ModeSwitch({ wide, controller, logger, t }: ModeSwitchProps) {
             </Tooltip>
           </div>
           </>
-        ), target)
-)
+        ), target)}
+      {backSeat === null ? null : createPortal(backButton(css.panelBackButton!, 18), backSeat)}
+    </>
+  )
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

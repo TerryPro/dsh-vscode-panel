@@ -2,12 +2,23 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorTabs } from '../src/client/editor/EditorTabs.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconCloseOutlineMedium: () => <span />,
+  IconCopyOutlineMedium: () => <span />,
+  IconFolderOpenOutlineMedium: () => <span />,
+  IconRefreshOutlineMedium: () => <span />,
+  IconTrashOutlineMedium: () => <span />,
+  Menu: ({ open, items, onSelect }: {
+    open: boolean
+    items: Array<{ id: string; label?: React.ReactNode; type?: string; disabled?: boolean }>
+    onSelect: (id: string) => void
+  }) => (open ? <div role="menu">{items.filter(item => item.type === undefined).map(item => (
+    <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => { onSelect(item.id) }}>{item.label}</button>
+  ))}</div> : null),
 }))
 
 afterEach(() => { cleanup() })
@@ -81,6 +92,61 @@ describe('文件标签栏', () => {
     )
     expect(view.getByRole('tab', { name: 'added.ts' }).parentElement?.dataset.gitDecoration).toBe('added')
     expect(view.getByRole('tab', { name: 'modified.ts' }).parentElement?.dataset.gitDecoration).toBe('modified')
+  })
+
+  it('右键标签打开 VS Code 风格菜单并按分组提供操作', () => {
+    const onMenuAction = vi.fn()
+    const view = render(
+      <EditorTabs
+        tabs={[tab('src/a.ts'), tab('src/b.ts')]}
+        activeTabId="file:src/a.ts"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        onMenuAction={onMenuAction}
+        t={(key: string) => key}
+      />,
+    )
+    expect(view.queryByRole('menu')).toBeNull()
+    fireEvent.contextMenu(view.getByRole('tab', { name: 'a.ts' }))
+
+    const menu = view.getByRole('menu')
+    const labels = [...menu.querySelectorAll('button')].map(button => button.textContent)
+    expect(labels).toEqual([
+      'editor.tabClose',
+      'editor.tabCloseOthers',
+      'editor.tabCloseRight',
+      'editor.tabCloseSaved',
+      'editor.tabCloseAll',
+      'editor.tabSave',
+      'editor.tabRevert',
+      'editor.tabCopyPath',
+      'editor.tabCopyRelativePath',
+      'editor.tabReveal',
+      'editor.tabSplitRight',
+      'editor.tabSplitDown',
+    ])
+    // Only one tab is to the right of the first, so Close Right is enabled; Save
+    // is disabled because the clean draft has nothing to write.
+    expect(menu.querySelector('button[disabled]')).not.toBeNull()
+    fireEvent.click(view.getByRole('menuitem', { name: 'editor.tabCloseRight' }))
+    expect(onMenuAction).toHaveBeenCalledWith('close-right', expect.objectContaining({ id: 'file:src/a.ts' }))
+    expect(view.queryByRole('menu')).toBeNull()
+  })
+
+  it('菜单打开时目标标签被关闭则收起菜单', () => {
+    const view = renderTabs()
+    fireEvent.contextMenu(view.getByRole('tab', { name: 'alpha.ts' }))
+    expect(view.getByRole('menu')).toBeTruthy()
+    view.rerender(
+      <EditorTabs
+        tabs={[tab('src/beta.ts'), tab('src/gamma.ts'), tab('src/delta.ts')]}
+        activeTabId="file:src/beta.ts"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        t={(key: string) => key}
+      />,
+    )
+    expect(view.queryByRole('menu')).toBeNull()
   })
 })
 

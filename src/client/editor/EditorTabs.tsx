@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IconCloseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchTab } from '../model/controller.ts'
@@ -6,20 +6,25 @@ import { diffKindText } from '../git/git-diff-labels.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { basename } from '../../shared/path-name.ts'
+import { EditorTabContextMenu, type EditorTabMenuAction, type EditorTabMenuTarget } from './EditorTabContextMenu.tsx'
 import css from './editor.module.css'
 
 export interface EditorTabsProps {
   tabs: readonly WorkbenchTab[]
   activeTabId: string | undefined
   gitDecorations?: GitDecorationMap
+  /** Whether this pane already shares the column, which retires the split rows. */
+  split?: boolean
   onSelect: (tabId: string) => void
   onClose: (tabId: string) => void
+  onMenuAction?: (action: EditorTabMenuAction, tab: WorkbenchTab) => void
   t: TranslateNS<'workbench'>
 }
 
 /** Compact scrollable file/Diff tabs following DSH's native active-tab underline. */
-export function EditorTabs({ tabs, activeTabId, gitDecorations, onSelect, onClose, t }: EditorTabsProps) {
+export function EditorTabs({ tabs, activeTabId, gitDecorations, split, onSelect, onClose, onMenuAction, t }: EditorTabsProps) {
   const tabListRef = useRef<HTMLDivElement>(null)
+  const [menuTarget, setMenuTarget] = useState<EditorTabMenuTarget | null>(null)
   useEffect(() => {
     const tabList = tabListRef.current
     if (tabList === null) return
@@ -35,66 +40,92 @@ export function EditorTabs({ tabs, activeTabId, gitDecorations, onSelect, onClos
     tabList.addEventListener('wheel', onWheel, { passive: false })
     return () => { tabList.removeEventListener('wheel', onWheel) }
   }, [])
+  // A tab that closes or is renamed underneath an open menu must not leave a
+  // stale row pointing at a tab the pool no longer holds.
+  useEffect(() => {
+    setMenuTarget(current => current !== null && tabs.some(tab => tab.id === current.tab.id) ? current : null)
+  }, [tabs])
 
   return (
-    <div ref={tabListRef} className={css.editorTabs} role="tablist" aria-label={t('editor.openFiles')}>
-      {tabs.map((tab) => {
-        const active = tab.id === activeTabId
-        const decoration = tab.kind === 'file' ? gitDecorations?.[tab.path] : undefined
-        const kind = tab.kind === 'diff' ? diffKindText(tab.diffKind, t) : undefined
-        const name = tab.kind === 'terminal'
-          ? t('terminal.name', { index: String(tab.sequence) })
-          : basename(tab.path)
-        const label = kind === undefined ? name : `${name} (${kind})`
-        const status = tab.kind === 'file'
-          ? tab.saving ? t('editor.saving') : tab.dirty ? t('editor.unsaved') : undefined
-          : tab.kind === 'diff'
-            ? tab.loading ? t('editor.loading') : undefined
-            : terminalStatus(tab.status, t)
-        return (
-          <div
-            key={tab.id}
-            className={css.editorTab}
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.setData('text/plain', tab.id)
-              event.dataTransfer.effectAllowed = 'move'
-            }}
-            data-active={active || undefined}
-            data-dirty={tab.kind === 'file' && tab.dirty || undefined}
-            data-tab-kind={tab.kind}
-            data-git-decoration={decoration}
-            title={[tab.kind === 'terminal' ? name : tab.path, kind, status].filter(Boolean).join(' · ')}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={active}
-              aria-label={label}
-              className={css.editorTabSelect}
-              onClick={() => { onSelect(tab.id) }}
+    <>
+      <div ref={tabListRef} className={css.editorTabs} role="tablist" aria-label={t('editor.openFiles')}>
+        {tabs.map((tab) => {
+          const active = tab.id === activeTabId
+          const decoration = tab.kind === 'file' ? gitDecorations?.[tab.path] : undefined
+          const kind = tab.kind === 'diff' ? diffKindText(tab.diffKind, t) : undefined
+          const name = tab.kind === 'terminal'
+            ? t('terminal.name', { index: String(tab.sequence) })
+            : basename(tab.path)
+          const label = kind === undefined ? name : `${name} (${kind})`
+          const status = tab.kind === 'file'
+            ? tab.saving ? t('editor.saving') : tab.dirty ? t('editor.unsaved') : undefined
+            : tab.kind === 'diff'
+              ? tab.loading ? t('editor.loading') : undefined
+              : terminalStatus(tab.status, t)
+          return (
+            <div
+              key={tab.id}
+              className={css.editorTab}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData('text/plain', tab.id)
+                event.dataTransfer.effectAllowed = 'move'
+              }}
+              data-active={active || undefined}
+              data-dirty={tab.kind === 'file' && tab.dirty || undefined}
+              data-tab-kind={tab.kind}
+              data-git-decoration={decoration}
+              title={[tab.kind === 'terminal' ? name : tab.path, kind, status].filter(Boolean).join(' · ')}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setMenuTarget({ tab, rect: new DOMRect(event.clientX, event.clientY, 0, 0) })
+              }}
+              onAuxClick={(event) => {
+                // VS Code gesture: the middle button closes the tab it lands on.
+                if (event.button !== 1) return
+                event.preventDefault()
+                onClose(tab.id)
+              }}
             >
-              <span className={css.editorTabName}>{name}</span>
-              {kind !== undefined && <span className={css.editorTabKind}>{kind}</span>}
-              {tab.kind === 'file' && (tab.dirty || tab.saving) && (
-                <span className={css.editorTabStatus} data-saving={tab.saving || undefined} aria-label={status} />
-              )}
-              {tab.kind === 'terminal' && (
-                <span className={css.editorTabStatus} data-terminal-status={tab.status} aria-label={status} />
-              )}
-            </button>
-            <button
-              type="button"
-              className={css.editorTabClose}
-              aria-label={t('editor.closeTab', { name: label })}
-              onClick={() => { onClose(tab.id) }}
-            >
-              <IconCloseOutlineMedium size={13} />
-            </button>
-          </div>
-        )
-      })}
-    </div>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-label={label}
+                className={css.editorTabSelect}
+                onClick={() => { onSelect(tab.id) }}
+              >
+                <span className={css.editorTabName}>{name}</span>
+                {kind !== undefined && <span className={css.editorTabKind}>{kind}</span>}
+                {tab.kind === 'file' && (tab.dirty || tab.saving) && (
+                  <span className={css.editorTabStatus} data-saving={tab.saving || undefined} aria-label={status} />
+                )}
+                {tab.kind === 'terminal' && (
+                  <span className={css.editorTabStatus} data-terminal-status={tab.status} aria-label={status} />
+                )}
+              </button>
+              <button
+                type="button"
+                className={css.editorTabClose}
+                aria-label={t('editor.closeTab', { name: label })}
+                onClick={() => { onClose(tab.id) }}
+              >
+                <IconCloseOutlineMedium size={13} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <EditorTabContextMenu
+        target={menuTarget}
+        tabs={tabs}
+        split={split === true}
+        onClose={() => { setMenuTarget(null) }}
+        onSelect={(action, tab) => { onMenuAction?.(action, tab) }}
+        t={t}
+      />
+    </>
   )
 }
 

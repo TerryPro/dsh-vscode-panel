@@ -30,6 +30,7 @@ import {
   assignGroupActive,
   closeSplit,
   findPane,
+  focusedPaneId,
   reconcilePanes,
   selectInPanes,
 } from './editor-pane-model.ts'
@@ -108,10 +109,15 @@ export class WorkbenchController {
   requestSidebarAction(
     action: WorkbenchSidebarAction,
     workspaceId = this.store.getSnapshot().workspaceId,
+    path?: string,
   ): number | undefined {
     if (workspaceId === undefined) return undefined
     const id = ++this.sidebarActionId
-    this.store.update((state) => { state.sidebarAction = { id, action, workspaceId } })
+    this.store.update((state) => {
+      state.sidebarAction = path === undefined
+        ? { id, action, workspaceId }
+        : { id, action, workspaceId, path }
+    })
     this.logger.info(`workbench-layout: queued collapsed sidebar action ${action} for ${JSON.stringify(workspaceId)}`)
     return id
   }
@@ -230,6 +236,44 @@ export class WorkbenchController {
     const clamped = Math.min(0.8, Math.max(0.2, ratio))
     if (this.store.getSnapshot().editorSplitRatio === clamped) return
     this.store.update((state) => { state.editorSplitRatio = clamped })
+  }
+
+  /** Split the editor on one named tab: move it into the other pane beside the focused one. */
+  splitWithTab(tabId: string, orientation: EditorSplitOrientation): void {
+    const state = this.store.getSnapshot()
+    if (!state.tabs.some(tab => tab.id === tabId)) return
+    const focused = focusedPaneId(state)
+    const source = findPane(state, tabId)
+    if (source !== undefined && source !== focused) {
+      // The tab already sits in the other pane, so the split only needs opening/rotating.
+      this.store.update((draft) => {
+        draft.editorSplitOrientation = orientation
+        draft.editorSplit = true
+      })
+      this.logger.info(`workbench-layout: split editor ${orientation} with pane tab ${JSON.stringify(tabId)}`)
+      return
+    }
+    this.store.update((draft) => {
+      const group = draft.panes[focused]
+      const position = group.tabIds.indexOf(tabId)
+      const wasActive = group.activeTabId === tabId
+      group.tabIds = group.tabIds.filter(id => id !== tabId)
+      if (wasActive) {
+        assignGroupActive(group, group.tabIds[position] ?? group.tabIds[position - 1] ?? group.tabIds.at(-1))
+      }
+      const other: EditorPaneId = focused === 'primary' ? 'secondary' : 'primary'
+      const destination = draft.panes[other]
+      if (!destination.tabIds.includes(tabId)) destination.tabIds.push(tabId)
+      assignGroupActive(destination, tabId)
+      draft.editorSplit = true
+      draft.editorSplitOrientation = orientation
+      // VS Code hands focus to the split-off editor in its new pane, so the
+      // moved tab's pane becomes the active one before reconciliation resolves
+      // the global active tab from it.
+      draft.activePane = other
+      reconcilePanes(draft)
+    })
+    this.logger.info(`workbench-layout: split editor ${orientation} on tab ${JSON.stringify(tabId)}`)
   }
 
   /** Make one pane the active one so it holds the globally focused tab. */

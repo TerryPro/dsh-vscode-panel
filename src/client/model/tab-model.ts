@@ -27,6 +27,30 @@ export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * The batch-close subset the tab context menu needs: which pool tabs one action
+ * selects. Pure so the menu's semantics stay testable without a DOM.
+ */
+export function tabsForCloseScope(
+  tabs: readonly WorkbenchTab[],
+  tabId: string,
+  scope: 'others' | 'right' | 'saved' | 'all',
+): WorkbenchTab[] {
+  const index = tabs.findIndex(tab => tab.id === tabId)
+  switch (scope) {
+    case 'others':
+      return tabs.filter(tab => tab.id !== tabId)
+    case 'right':
+      return index < 0 ? [] : tabs.slice(index + 1)
+    case 'saved':
+      // A terminal holds a live process, so it is never "saved"; a file tab only
+      // counts once its draft matches disk.
+      return tabs.filter(tab => tab.kind === 'diff' || (tab.kind === 'file' && !tab.dirty))
+    case 'all':
+      return [...tabs]
+  }
+}
+
 export function emptyFileTab(path: string): WorkbenchFileTab {
   return {
     id: fileTabId(path),

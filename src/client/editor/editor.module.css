@@ -76,6 +76,15 @@
   display: none;
 }
 
+/* Zero-size portal anchor for the tab context menu; it is positioned from the
+   pointer rect, so the rendered anchor never takes part in the layout. */
+.tabMenuAnchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
 .editorTab {
   position: relative;
   display: flex;

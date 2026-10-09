@@ -9,6 +9,7 @@ import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/editor
 const workbenchState = vi.hoisted(() => ({ current: {} as WorkbenchState }))
 
 vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbenchState.current }))
+vi.mock('../src/client/core/clipboard.ts', () => ({ copyTextToClipboard: vi.fn(() => Promise.resolve()) }))
 vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
   CodeEditor: ({ ariaLabel, gitOriginal, gitLabels }: {
     ariaLabel: string
@@ -31,10 +32,22 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Button: ({ children, variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props}>{children}</button>,
   FishLogo: () => <span data-fish-logo="" />,
   IconCloseOutlineMedium: () => <span data-close-icon="" />,
+  IconCopyOutlineMedium: () => <span />,
+  IconFolderOpenOutlineMedium: () => <span />,
+  IconRefreshOutlineMedium: () => <span />,
+  IconTrashOutlineMedium: () => <span />,
   MarkdownText: ({ text }: { text: string }) => <article>{text}</article>,
+  Menu: ({ open, items, onSelect }: {
+    open: boolean
+    items: Array<{ id: string; label?: React.ReactNode; type?: string; disabled?: boolean }>
+    onSelect: (id: string) => void
+  }) => (open ? <div role="menu">{items.filter(item => item.type === undefined).map(item => (
+    <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => { onSelect(item.id) }}>{item.label}</button>
+  ))}</div> : null),
   Modal: ({ open, title, description, footer }: { open: boolean; title: string; description?: string; footer?: React.ReactNode }) => open
     ? <div role="dialog" aria-label={title}><p>{description}</p>{footer}</div>
     : null,
+  Toast: ({ text }: { text: string }) => <div role="status">{text}</div>,
   Tooltip: ({ children, label }: { children: React.ReactNode; label: string }) => <span data-tooltip-label={label}>{children}</span>,
 }))
 
@@ -360,7 +373,103 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(view.queryByRole('separator')).toBeNull()
     expect(view.queryByRole('button', { name: '自动换行' })).toBeNull()
   })
+
+  /** Open the tab context menu of the named tab and pick one row. */
+  function useTabMenu(view: ReturnType<typeof renderEditor>, controller: ReturnType<typeof controllerFake>, tabName: string) {
+    return (actionId: string) => {
+      fireEvent.contextMenu(view.getByRole('tab', { name: tabName }))
+      fireEvent.click(view.getByRole('menuitem', { name: menuLabels[actionId] ?? actionId }))
+    }
+  }
+
+  it('closes the tabs to the right of the clicked tab from the menu', () => {
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    useTabMenu(view, controller, 'a.ts')('close-right')
+    expect(controller.closeTab).toHaveBeenCalledWith('file:README.md')
+    expect(controller.closeTab).not.toHaveBeenCalledWith('file:src/a.ts')
+  })
+
+  it('pauses a batch close on a dirty tab and resumes after discarding', () => {
+    fileTab(1).dirty = true
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+
+    useTabMenu(view, controller, 'a.ts')('close-others')
+    expect(controller.selectTab).toHaveBeenCalledWith('file:README.md')
+    expect(view.getByRole('dialog', { name: '关闭未保存的文件？' })).toBeTruthy()
+
+    fireEvent.click(view.getByRole('button', { name: '放弃更改' }))
+    expect(controller.closeTab).toHaveBeenCalledWith('file:README.md', true)
+    expect(view.queryByRole('dialog')).toBeNull()
+  })
+
+  it('saves or reverts the clicked tab through the menu', () => {
+    fileTab(0).dirty = true
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    useTabMenu(view, controller, 'a.ts')('save')
+    expect(controller.save).toHaveBeenCalledWith('file:src/a.ts')
+    useTabMenu(view, controller, 'a.ts')('revert')
+    expect(controller.revert).toHaveBeenCalledWith('file:src/a.ts')
+  })
+
+  it('copies the absolute path of the clicked tab through the host resolver', async () => {
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    useTabMenu(view, controller, 'a.ts')('copy-path')
+    await vi.waitFor(() => {
+      expect(controller.api.absolutePath).toHaveBeenCalledWith('workspace-1', 'src/a.ts')
+      expect(view.getAllByRole('status').map(node => node.textContent)).toContain('已复制路径。')
+    })
+  })
+
+  it('reveals the clicked tab in the file tree sidebar', () => {
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    useTabMenu(view, controller, 'a.ts')('reveal')
+    expect(controller.setSidebarMode).toHaveBeenCalledWith('files')
+    expect(controller.requestSidebarAction).toHaveBeenCalledWith('files.reveal', 'workspace-1', 'src/a.ts')
+  })
+
+  it('splits the editor on the clicked tab', () => {
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    useTabMenu(view, controller, 'a.ts')('split-right')
+    expect(controller.splitWithTab).toHaveBeenCalledWith('file:src/a.ts', 'horizontal')
+  })
+
+  it('hides the split rows once the column already has two panes', () => {
+    workbenchState.current.editorSplit = true
+    workbenchState.current.panes = {
+      primary: { tabIds: ['file:src/a.ts'], activeTabId: 'file:src/a.ts' },
+      secondary: { tabIds: ['file:README.md'], activeTabId: 'file:README.md' },
+    }
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    fireEvent.contextMenu(view.getByRole('tab', { name: 'a.ts' }))
+    expect(view.queryByRole('menuitem', { name: '向右拆分' })).toBeNull()
+    expect((view.getByRole('menuitem', { name: '关闭右侧标签页' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('closes a tab with the middle mouse button', () => {
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    const tabNode = view.getByRole('tab', { name: 'a.ts' })
+    fireEvent(tabNode, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+    expect(controller.closeTab).toHaveBeenCalledWith('file:src/a.ts')
+  })
 })
+
+const menuLabels: Record<string, string> = {
+  'close-right': '关闭右侧标签页',
+  'close-others': '关闭其他',
+  save: '保存',
+  revert: '还原文件',
+  'copy-path': '复制路径',
+  reveal: '在文件目录中显示',
+  'split-right': '向右拆分',
+}
 
 function editorProps(controller: ReturnType<typeof controllerFake>): WorkbenchEditorProps {
   return {
@@ -388,6 +497,7 @@ function renderEditor(controller: ReturnType<typeof controllerFake>) {
 function controllerFake() {
   return {
     store: { getSnapshot: () => workbenchState.current },
+    api: { absolutePath: vi.fn(() => Promise.resolve({ absolutePath: '/workspace/one/src/a.ts' })) },
     save: vi.fn(() => Promise.resolve(true)),
     selectTab: vi.fn(),
     closeTab: vi.fn(() => true),
@@ -406,9 +516,12 @@ function controllerFake() {
     setSession: vi.fn(),
     toggleConversation: vi.fn(),
     toggleSplit: vi.fn(),
+    splitWithTab: vi.fn(),
     setSplitRatio: vi.fn(),
     focusPane: vi.fn(),
     moveTabToPane: vi.fn(),
+    setSidebarMode: vi.fn(),
+    requestSidebarAction: vi.fn(() => 1),
   }
 }
 

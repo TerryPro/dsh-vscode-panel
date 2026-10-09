@@ -9,7 +9,7 @@ const workbench = vi.hoisted(() => ({
   current: {
     activeTabId: undefined as string | undefined,
     tabs: [] as Array<{ id: string; kind: 'file'; path: string; dirty: boolean }>,
-    sidebarAction: undefined as { id: number; action: 'files.newFile' | 'files.newDirectory'; workspaceId: string } | undefined,
+    sidebarAction: undefined as { id: number; action: string; workspaceId: string; path?: string } | undefined,
     gitDecorations: {} as Record<string, 'conflict' | 'untracked' | 'deleted' | 'added' | 'modified' | 'renamed'>,
   },
 }))
@@ -175,6 +175,38 @@ describe('文件目录', () => {
     expect(await view.findByRole('textbox', { name: '文件名' })).toBeTruthy()
     expect(controller.consumeSidebarAction).toHaveBeenCalledOnce()
     expect(controller.consumeSidebarAction).toHaveBeenCalledWith(7)
+  })
+
+  it('在文件目录中显示命令展开到目标文件并选中它', async () => {
+    workbench.current = {
+      activeTabId: 'file:src/deep/a.ts',
+      tabs: [{ id: 'file:src/deep/a.ts', kind: 'file', path: 'src/deep/a.ts', dirty: false }],
+      sidebarAction: { id: 9, action: 'files.reveal', workspaceId: 'workspace-1', path: 'src/deep/a.ts' },
+    }
+    const listing = (path: string) => ({
+      path,
+      truncated: false,
+      entries: path === ''
+        ? [{ name: 'src', path: 'src', kind: 'directory' as const }]
+        : path === 'src'
+          ? [{ name: 'deep', path: 'src/deep', kind: 'directory' as const }]
+          : [{ name: 'a.ts', path: 'src/deep/a.ts', kind: 'file' as const }],
+    })
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(((_workspace: string, path: string) => Promise.resolve(listing(path)))) },
+      consumeSidebarAction: vi.fn(),
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+
+    const revealed = await view.findByRole('treeitem', { name: 'a.ts' })
+    expect(controller.consumeSidebarAction).toHaveBeenCalledWith(9)
+    expect(revealed.getAttribute('data-selected')).toBe('true')
+    // Every ancestor directory along the path is expanded, not just the root.
+    expect(await view.findByRole('treeitem', { name: 'deep' })).toBeTruthy()
   })
 
   it('点击空白区域后取消文件高亮并将新建目标恢复到工作区根目录', async () => {

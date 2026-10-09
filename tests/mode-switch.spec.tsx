@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModeSwitch } from '../src/client/shell/ModeSwitch.tsx'
+import { PANEL_BACK_SEAT_ATTRIBUTE } from '../src/client/layout/editor-layout-contract.ts'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   FishLogo: () => <svg data-icon="brand" />,
@@ -25,12 +26,35 @@ const toggleEditor = vi.fn()
 const toggleConversation = vi.fn()
 const logger = { info: vi.fn() }
 
+/**
+ * The official panel-navigation face the dock drives. `activePanelId` is held in
+ * a module-level box so a test can move the shell between the Conversation and a
+ * global panel, exactly as `ctx.layout.selectPanel` would.
+ */
+const panelState = { activePanelId: null as string | null }
+const panelListeners = new Set<() => void>()
+const selectPanel = vi.fn((panelId: string | null) => {
+  panelState.activePanelId = panelId
+  for (const listener of panelListeners) listener()
+})
+const panels = {
+  panelInfo: {
+    getSnapshot: () => ({ activePanelId: panelState.activePanelId }),
+    subscribe: (fn: () => void) => {
+      panelListeners.add(fn)
+      return () => { panelListeners.delete(fn) }
+    },
+  },
+  selectPanel,
+}
+
 const t = (key: string): string => ({
   'mode.sessions': '会话',
   'mode.files': '文件',
   'mode.git': 'Git',
   'mode.terminal': '终端',
   'mode.settings': '设置',
+  'mode.backToSession': '返回会话',
   'mode.bar': '工作台视图',
   'editor.collapse': '收起中栏',
   'editor.expand': '展开中栏',
@@ -42,7 +66,7 @@ const t = (key: string): string => ({
 // so props are passed through an untyped bag exactly as the shell would supply them.
 function renderSwitch(wide: boolean) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const props: any = { wide, controller: { setSidebarMode, toggleEditor, toggleConversation }, logger, t }
+  const props: any = { wide, controller: { setSidebarMode, toggleEditor, toggleConversation }, logger, panels, t }
   return render(<ModeSwitch {...props} />)
 }
 
@@ -51,6 +75,8 @@ describe('工作台活动栏', () => {
     setSidebarMode.mockClear()
     toggleEditor.mockClear()
     toggleConversation.mockClear()
+    selectPanel.mockClear()
+    panelState.activePanelId = null
     workbench.editorExpanded = true
     workbench.sidebarMode = 'git'
     workbench.conversationExpanded = true
@@ -66,8 +92,7 @@ describe('工作台活动栏', () => {
     const dock = appRoot.firstElementChild
     expect(dock).not.toBeNull()
     expect(dock?.querySelector('[role="toolbar"]')).not.toBeNull()
-    expect(dock?.querySelectorAll('button')).toHaveLength(7) // 4 views + editor + conversation + settings
-    expect(dock?.querySelector('[aria-label="Git"] svg')?.getAttribute('width')).toBe('18')
+    expect(dock?.querySelectorAll('button')).toHaveLength(7) // 4 views + editor + conversation + settings    expect(dock?.querySelector('[aria-label="Git"] svg')?.getAttribute('width')).toBe('18')
 
     // The AppFrame grid reserves the dock width as inline padding so nothing is covered.
     const frame = document.querySelector('[data-shell-overlay]')?.parentElement
@@ -136,6 +161,44 @@ describe('工作台活动栏', () => {
     expect(collapsedView.getByRole('button', { name: '展开对话栏' }).getAttribute('aria-pressed')).toBe('false')
   })
 
+  it('全局面板打开时给出返回会话的出口，会话态不显示该按钮', () => {
+    const closed = renderSwitch(true)
+    // The Conversation owns the center column, so there is nothing to return from.
+    expect(closed.queryByRole('button', { name: '返回会话' })).toBeNull()
+    closed.unmount()
+
+    panelState.activePanelId = 'plugins'
+    const view = renderSwitch(true)
+    const back = view.getByRole('button', { name: '返回会话' })
+    fireEvent.click(back)
+    expect(selectPanel).toHaveBeenCalledWith(null)
+    expect(panelState.activePanelId).toBeNull()
+  })
+
+  it('插件页自带头部席位时，出口只出现在该席位而不重复出现在停靠列', () => {
+    panelState.activePanelId = 'plugins'
+    pluginPanelFixture()
+    const view = renderSwitch(true)
+
+    const seats = document.querySelectorAll(`[${PANEL_BACK_SEAT_ATTRIBUTE}]`)
+    expect(seats).toHaveLength(1)
+    const back = within(seats[0] as HTMLElement).getByRole('button', { name: '返回会话' })
+    // The dock's own rail must not carry a second copy of the same control.
+    const dock = document.querySelector('[data-dsh-workbench-activity-dock]')
+    expect(within(dock as HTMLElement).queryByRole('button', { name: '返回会话' })).toBeNull()
+
+    fireEvent.click(back)
+    expect(selectPanel).toHaveBeenCalledWith(null)
+  })
+
+  it('其它全局面板没有头部席位，出口由停靠列承担', () => {
+    panelState.activePanelId = 'qoder-quota'
+    const view = renderSwitch(true)
+    expect(document.querySelector(`[${PANEL_BACK_SEAT_ATTRIBUTE}]`)).toBeNull()
+    const dock = document.querySelector('[data-dsh-workbench-activity-dock]')
+    expect(within(dock as HTMLElement).getByRole('button', { name: '返回会话' })).not.toBeNull()
+  })
+
   it('停靠列与按钮遵循固定 48px 列与官方圆形几何', () => {
     const stylesheet = ['src/client/shell/shell.module.css', 'src/client/styles/global.module.css']
       .map((p) => readFileSync(resolve(process.cwd(), p), 'utf8')).join('\n')
@@ -159,6 +222,19 @@ afterEach(() => {
 
 function officialToggle(): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>('button[class*="_toggle"]')
+}
+
+/** The official Plugins page root with its list-view action row, as the shell renders them. */
+function pluginPanelFixture(): void {
+  const page = document.createElement('div')
+  page.setAttribute('data-plugin-panel', 'true')
+  const head = document.createElement('header')
+  head.setAttribute('data-window-drag', 'true')
+  const toolbar = document.createElement('div')
+  toolbar.className = 'fO69Vq_toolbar'
+  head.appendChild(toolbar)
+  page.appendChild(head)
+  document.body.appendChild(page)
 }
 
 function appFixtureElements() {

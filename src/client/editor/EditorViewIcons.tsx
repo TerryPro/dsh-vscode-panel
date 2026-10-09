@@ -165,6 +165,17 @@ export function IconSplitVerticalOutline16({ size = 16 }: { size?: number }) {
   )
 }
 
+/** 保存：软盘轮廓，表示写入磁盘。 */
+export function IconSaveOutline16({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 2.5h8L13.5 5v8.5a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" />
+      <path d="M5 2.5v3.5h5V2.5" />
+      <path d="M5 14.5V10h6v4.5" />
+    </svg>
+  )
+}
+
 /** 还原：向左回退的撤销箭头。 */
 export function IconRevertOutline16({ size = 16 }: { size?: number }) {
   return (

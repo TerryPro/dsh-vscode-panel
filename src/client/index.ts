@@ -40,7 +40,7 @@ export function apply(ctx: ClientContext): void {
     id: 'workbench-layout-modes',
     order: -100,
     locale: 'workbench',
-    inject: () => ({ controller, logger: ctx.logger }),
+    inject: () => ({ controller, logger: ctx.logger, panels: ctx.layout }),
   }, ModeSwitch))
 
   ctx.slots.inject('sidebar.workspaces', () => {

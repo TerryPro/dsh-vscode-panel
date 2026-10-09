@@ -1,5 +1,6 @@
 /** Shared browser-state type contract for the workbench controller. */
 
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { GitEditorBaseline, GitFileDiff, WorkspaceFile, WorkspaceImageFile } from '../../shared/contracts.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { GitFileLayout } from '../git/git-tree.ts'
@@ -32,11 +33,14 @@ export interface EditorPanes {
 export type WorkbenchSidebarAction =
   | 'files.newFile'
   | 'files.newDirectory'
+  | 'files.reveal'
 
 export interface WorkbenchSidebarActionRequest {
   id: number
   action: WorkbenchSidebarAction
   workspaceId: string
+  /** Workspace-relative path the action targets; only `files.reveal` needs one. */
+  path?: string
 }
 
 export interface WorkbenchFileTab {
@@ -132,4 +136,19 @@ export interface WorkbenchLogger {
 export interface WorkbenchEditorLayout {
   openRightbar(track: boolean, fullscreen: boolean): void
   closeRightbar(): void
+}
+
+/**
+ * The official root layout's global-panel navigation face (`ctx.layout`).
+ * A `main` panel — the Plugins page, or one another plugin registers — replaces
+ * the Conversation in DSH's center column, and the shell offers no control that
+ * leaves it: its sidebar rows only ever select a panel, never clear one. The
+ * activity dock drives `selectPanel(null)` so the workbench can supply the
+ * missing way back to the conversation.
+ */
+export interface WorkbenchPanelNavigation {
+  /** Selected central panel; `null` displays the current Conversation. */
+  readonly panelInfo: ObservableSnapshot<{ activePanelId: string | null }>
+  /** Clear the selected global panel and show the Conversation. */
+  selectPanel(panelId: null): void
 }

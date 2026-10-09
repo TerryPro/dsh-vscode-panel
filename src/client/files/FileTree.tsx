@@ -39,6 +39,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
   const activeTab = workbench.tabs.find(tab => tab.id === workbench.activeTabId)
   const activeWorkspace = useRef(workspaceId)
   activeWorkspace.current = workspaceId
+  const handledSidebarAction = useRef<number | undefined>(undefined)
   const [listings, setListings] = useState<Record<string, DirectoryListing | undefined>>({})
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']))
   const [loading, setLoading] = useState<Set<string>>(() => new Set())
@@ -145,10 +146,54 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     const request = workbench.sidebarAction
     if (request === undefined || request.workspaceId !== workspaceId || !request.action.startsWith('files.')) return
     if (listings[''] === undefined && error === null) return
+    // Reveal loads directories, which re-runs this effect. Consumption is a
+    // separate store write, so track the handled id and never act twice.
+    if (handledSidebarAction.current === request.id) return
+    handledSidebarAction.current = request.id
     controller.consumeSidebarAction(request.id)
     if (error !== null) return
+    if (request.action === 'files.reveal') {
+      if (request.path !== undefined) void revealPath(request.path)
+      return
+    }
     beginCreate(request.action === 'files.newFile' ? 'file' : 'directory')
   }, [controller, error, listings, workbench.sidebarAction, workspaceId])
+
+  /**
+   * Expand the tree down to one path and select it, so the editor tab menu's
+   * "Reveal in File Tree" lands on the row instead of just switching views.
+   */
+  const revealPath = async (path: string): Promise<void> => {
+    if (workspaceId === undefined) return
+    const targetWorkspace = workspaceId
+    const ancestors = ancestorDirectories(path)
+    setError(null)
+    let loaded: DirectoryListing[]
+    try {
+      loaded = await Promise.all(
+        ancestors.map(ancestor => controller.api.listDirectory(targetWorkspace, ancestor)),
+      )
+    } catch (reason: unknown) {
+      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      return
+    }
+    if (activeWorkspace.current !== targetWorkspace) return
+    const merged: Record<string, DirectoryListing> = {}
+    for (let index = 0; index < ancestors.length; index += 1) {
+      const ancestor = ancestors[index]
+      const listing = loaded[index]
+      if (ancestor !== undefined && listing !== undefined) merged[ancestor] = listing
+    }
+    setListings(previous => ({ ...previous, ...merged }))
+    setExpanded(previous => {
+      const next = new Set(previous)
+      for (const ancestor of ancestors) next.add(ancestor)
+      return next
+    })
+    const parent = parentPath(path)
+    const entry = (merged[parent] ?? listings[parent])?.entries.find(candidate => candidate.path === path)
+    setSelection({ path, kind: entry?.kind === 'directory' ? 'directory' : 'file' })
+  }
 
   const createEntry = async (draft: FileTreeCreateDraft, name: string): Promise<boolean> => {
     if (workspaceId === undefined) return false
@@ -412,6 +457,16 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
       />
     </div>
   )
+}
+
+/** Ancestor directory paths from the root down to one path's parent (excluding the path itself). */
+function ancestorDirectories(path: string): string[] {
+  const ancestors: string[] = ['']
+  const segments = path.split('/')
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    ancestors.push(segments.slice(0, index + 1).join('/'))
+  }
+  return ancestors
 }
 
 /**
