@@ -143,7 +143,16 @@ describe('中栏终端画布', () => {
   })
 
   it('尚未绑定会话时显示等待提示且不挂载视图', () => {
-    const controller = { terminalView: vi.fn(() => undefined), setTerminalStatus: vi.fn() }
+    const controller = {
+      terminalView: vi.fn(() => undefined),
+      terminalBinding: vi.fn(() => 'noSession' as const),
+      setTerminalStatus: vi.fn(),
+      setTerminalShell: vi.fn(),
+      setTerminalTitle: vi.fn(),
+      setTerminalRuntime: vi.fn(),
+      recordTerminalOwner: vi.fn(),
+      reopenTerminalHere: vi.fn(),
+    }
     const rendered = render(
       <TerminalSurface
         tab={terminalTab(3)}
@@ -153,6 +162,41 @@ describe('中栏终端画布', () => {
       />,
     )
     expect(rendered.getByText(zh['terminal.noSession'])).toBeTruthy()
+    // Nothing to attach to, so the model is never resolved for a view.
+    expect(controller.terminalView).not.toHaveBeenCalled()
+  })
+
+  it('原终端已消失时用重新打开替换无效的重试', () => {
+    const view = makeView({ phase: 'failed', writable: false, issue: 'missingTerminal', info: undefined })
+    const controller = controllerFake(view)
+    const rendered = render(
+      <TerminalSurface
+        tab={terminalTab(15)}
+        active
+        controller={controller as never}
+        t={translate}
+      />,
+    )
+    expect(rendered.getByText(zh['terminal.missingTerminal'])).toBeTruthy()
+    fireEvent.click(rendered.getByRole('button', { name: zh['terminal.reopen'] }))
+    // Retrying the same view re-reads the stale content binding and fails again,
+    // so recovery must take a new identity instead.
+    expect(controller.reopenTerminalHere).toHaveBeenCalledWith('terminal:15')
+    expect(view.refresh).not.toHaveBeenCalled()
+  })
+
+  it('会话终端数量达上限时说明原因但不提供无效重试', () => {
+    const view = makeView({ phase: 'failed', writable: false, issue: 'terminalLimit', info: undefined })
+    const rendered = render(
+      <TerminalSurface
+        tab={terminalTab(16)}
+        active
+        controller={controllerFake(view) as never}
+        t={translate}
+      />,
+    )
+    expect(rendered.getByText(zh['terminal.limitReached'])).toBeTruthy()
+    expect(rendered.queryByRole('button')).toBeNull()
   })
 
   it('为失败的终端提供原位重试入口', () => {
@@ -304,6 +348,7 @@ function makeView(patch: Record<string, unknown> = {}): FakeView {
     write: vi.fn(),
     resize: vi.fn(),
     acknowledge: vi.fn(),
+    rename: vi.fn(() => Promise.resolve()),
     refresh: vi.fn(() => Promise.resolve()),
     connect: vi.fn(),
     close: vi.fn(() => Promise.resolve()),
@@ -314,7 +359,13 @@ function makeView(patch: Record<string, unknown> = {}): FakeView {
 function controllerFake(view: FakeView) {
   return {
     terminalView: vi.fn(() => view),
+    terminalBinding: vi.fn(() => 'ready' as const),
     setTerminalStatus: vi.fn(),
+    setTerminalShell: vi.fn(),
+    setTerminalTitle: vi.fn(),
+    setTerminalRuntime: vi.fn(),
+    recordTerminalOwner: vi.fn(),
+    reopenTerminalHere: vi.fn(),
   }
 }
 

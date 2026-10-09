@@ -100,6 +100,7 @@ function controllerFixture() {
     toggleGitView: vi.fn(),
     openTerminal: vi.fn(),
     selectTab: vi.fn(),
+    terminalBinding: vi.fn(() => 'ready' as const),
   }
 }
 

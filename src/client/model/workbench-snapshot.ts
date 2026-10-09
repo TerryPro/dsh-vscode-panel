@@ -1,7 +1,6 @@
 /** Structural state cloning and per-Workspace snapshot trimming. */
 
 import type { WorkbenchState } from './workbench-types.ts'
-import { reconcilePanes } from './editor-pane-model.ts'
 
 export const INITIAL_STATE: WorkbenchState = {
   sidebarMode: 'files',
@@ -47,17 +46,19 @@ export function cloneState(state: WorkbenchState): WorkbenchState {
   }
 }
 
-/** Terminal processes are page-live resources and never survive a Workspace switch. */
-function stripTerminalTabs(state: WorkbenchState): WorkbenchState {
-  const cloned = cloneState(state)
-  cloned.tabs = cloned.tabs.filter(tab => tab.kind !== 'terminal')
-  reconcilePanes(cloned)
-  return cloned
-}
-
-/** Rail requests and terminal processes are page-live and never enter a Workspace snapshot. */
+/**
+ * Rail requests are one-shot and never enter a Workspace snapshot.
+ *
+ * Terminal tabs deliberately *do* survive a Workspace switch: their Host
+ * processes live in the browser's official terminal model, which a switch never
+ * touches, so dropping the tabs would orphan processes the user can no longer
+ * reach and hold their Session's terminal quota open. The kept list is the only
+ * handle back to them, and each tab keeps being addressed through the Session
+ * that allocated its process, so it stays live across the switch rather than
+ * going blank or reconnecting under a Session that owns nothing for it.
+ */
 export function stripWorkspaceEphemera(state: WorkbenchState): WorkbenchState {
-  const stripped = stripTerminalTabs(state)
-  delete stripped.sidebarAction
-  return stripped
+  const cloned = cloneState(state)
+  delete cloned.sidebarAction
+  return cloned
 }

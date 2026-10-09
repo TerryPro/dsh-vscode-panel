@@ -106,7 +106,7 @@ describe('workbench-snapshot', () => {
     expect(state.tabs).toHaveLength(1)
   })
 
-  it('stripWorkspaceEphemera removes page-live terminal tabs and the pending rail action', () => {
+  it('stripWorkspaceEphemera keeps terminal tabs and drops only the pending rail action', () => {
     const file = emptyFileTab('a.ts')
     const state = makeState({
       tabs: [file, { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'c', status: 'running' }],
@@ -114,8 +114,14 @@ describe('workbench-snapshot', () => {
       panes: { primary: { tabIds: [file.id, 'terminal:1'] }, secondary: { tabIds: [] } },
     })
     const stripped = stripWorkspaceEphemera(state)
-    expect(stripped.tabs.every(tab => tab.kind !== 'terminal')).toBe(true)
+    // A terminal tab is the only handle back to a Host process that outlives the
+    // Workspace switch, so dropping it would orphan the process and hold its
+    // Session's terminal quota open. Only the one-shot rail request is ephemeral.
+    expect(stripped.tabs.map(tab => tab.id)).toEqual([file.id, 'terminal:1'])
     expect(stripped.sidebarAction).toBeUndefined()
-    expect(stripped.panes.primary.tabIds).toEqual([file.id])
+    expect(stripped.panes.primary.tabIds).toEqual([file.id, 'terminal:1'])
+    // The snapshot stays independent of the live state it was taken from.
+    stripped.tabs.pop()
+    expect(state.tabs).toHaveLength(2)
   })
 })

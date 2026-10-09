@@ -17,26 +17,33 @@
   padding: 6px 8px 12px 0;
 }
 
-.terminalRow {
-  display: flex;
-  align-items: center;
-  height: 30px;
+/* One terminal: its row plus the status line under it. The fill and the radius
+   live here rather than on the row so the two read as a single item, and
+   `data-active` is carried by the entry because the status line must highlight
+   with the row it describes. */
+.terminalEntry {
   border-radius: 8px;
   color: var(--dsw-alias-label-primary);
 }
 
-/* Adjacent rows both carry a hover or active fill, so without a gap the two
+/* Adjacent entries both carry a hover or active fill, so without a gap the two
    boxes read as one block and the rounded corners are wasted. */
-.terminalRow + .terminalRow {
+.terminalEntry + .terminalEntry {
   margin-top: 4px;
 }
 
-.terminalRow:hover {
+.terminalEntry:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.terminalRow[data-active] {
+.terminalEntry[data-active] {
   background: var(--dsw-alias-interactive-bg-active);
+}
+
+.terminalRow {
+  display: flex;
+  align-items: center;
+  height: 30px;
 }
 
 .terminalSelect {
@@ -71,6 +78,14 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
+/* `unclaimed` is not a process phase: no Session has allocated this tab's process
+   yet, so there is nothing to confirm. A hollow ring says "unknown" where any fill
+   would claim a state the workbench never observed. */
+.terminalStatusDot[data-status='unclaimed'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-label-tertiary);
+}
+
 .terminalRowName {
   min-width: 0;
   overflow: hidden;
@@ -87,6 +102,7 @@
   white-space: nowrap;
 }
 
+.terminalRename,
 .terminalClose {
   display: inline-flex;
   flex: none;
@@ -94,7 +110,6 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  margin-right: 3px;
   padding: 0;
   border: none;
   border-radius: 6px;
@@ -104,10 +119,24 @@
   opacity: 0;
 }
 
-.terminalRow:hover .terminalClose,
-.terminalRow[data-active] .terminalClose,
+.terminalClose {
+  margin-right: 3px;
+}
+
+/* Both actions only appear on the item they belong to, so the row stays quiet
+   while browsing and the affordance is there the moment the pointer arrives. */
+.terminalEntry:hover .terminalRename,
+.terminalEntry:hover .terminalClose,
+.terminalEntry[data-active] .terminalRename,
+.terminalEntry[data-active] .terminalClose,
+.terminalRename:focus-visible,
 .terminalClose:focus-visible {
   opacity: 1;
+}
+
+.terminalRename:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 .terminalClose:hover {
@@ -115,39 +144,115 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* The status line sits inside the entry's fill, so it inherits the item's own
+   horizontal rhythm rather than starting a new column of its own. */
+.terminalStatusLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 8px 5px 9px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.terminalStatusItem {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.terminalStatusLabel {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+}
+
+.terminalStatusValue {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminalStatusExit {
+  margin-left: auto;
+  flex: none;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.terminalStatusExit[data-status='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.terminalRenameField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: var(--dsw-font-xs-13);
+}
+
 .panelHeader {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   min-height: 34px;
   padding: 2px 12px 7px 8px;
   color: var(--dsw-alias-label-secondary);
   font: var(--dsw-font-xs-strong-13);
 }
 
-.iconButton {
+/* The header title is a fixed label, never a wrapping column: the sidebar can be
+   dragged narrow, and a two-line "终/端" would push the whole row taller than the
+   measured panel-header rule. */
+.panelTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Own seat for the primitives Menu anchor. The runtime layout stylesheet widens
+   any `[class*="_root"]` node in the sidebar to `width: 100% !important`, and the
+   Menu root carries a hashed `_root_*` class: unconfined, that override stretched
+   the anchor across the header, pulling the plus away from the chevron and
+   squeezing the title into a vertical stack. A fixed-width seat keeps the
+   override harmless at 100% of the button. */
+.newTerminalSeat {
+  flex: none;
+  width: 46px;
+}
+
+/* The new-terminal action is one split affordance: the plus reads as the primary
+   gesture and the chevron says "this opens a list". Both glyphs sit in a pill
+   that matches the panel's 28px icon-button footprint. */
+.newTerminalButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  gap: 3px;
+  box-sizing: border-box;
+  width: 100%;
   height: 28px;
-  padding: 0;
+  padding: 0 8px;
   border: none;
-  border-radius: 50%;
+  border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
-.iconButton:hover {
+.newTerminalButton:hover,
+.newTerminalButton[aria-expanded='true'] {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 
-.iconButton:disabled {
-  cursor: default;
-  opacity: 0.45;
+.newTerminalButton > svg:last-child {
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .emptyState,
@@ -159,6 +264,18 @@
 }
 
 .terminalSurface {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--dsw-alias-bg-base);
+}
+
+/* The emulator's own box: the only row that shrinks when the status strip takes
+   its height, and the positioning context for the absolutely-placed viewport and
+   the ended-process note. */
+.terminalScreen {
   position: relative;
   display: flex;
   flex: 1;
@@ -166,6 +283,87 @@
   min-height: 0;
   overflow: hidden;
   background: var(--dsw-alias-bg-base);
+}
+
+/* One strip per terminal, answering the same questions the editor's does. Height,
+   border, fill, and type match `.editorStatusBar` exactly so switching tabs never
+   moves the bottom edge of the pane. */
+.terminalStatusBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background-color: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  line-height: 1;
+  user-select: none;
+}
+
+.terminalStatusBarItem {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The launch directory is the one value that can outgrow any pane, so it alone
+   gives ground; every other fact keeps its full text and the strip stays scannable. */
+.terminalStatusBarItem[data-shrink] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminalStatusBarSpacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.terminalStatusBarExit {
+  flex: none;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.terminalStatusBarExit[data-status='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* The phase leads the strip as dot plus label, so the two read as one fact rather
+   than as a stray mark beside the first item. */
+.terminalStatusBarPhase {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The phase dot repeats the sidebar row's vocabulary at strip scale, so one
+   terminal reads the same state in both places. */
+.terminalStatusBarDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.terminalStatusBarDot[data-status='running'] {
+  background: var(--dsw-alias-brand-text);
+}
+
+.terminalStatusBarDot[data-status='error'] {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+/* `unclaimed` is not a process phase: a hollow ring says "unknown" where any fill
+   would claim a state the workbench never observed. */
+.terminalStatusBarDot[data-status='unclaimed'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-label-tertiary);
 }
 
 .terminalViewport {
@@ -199,9 +397,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-.treeRow,
-  .modeButton,
-  .iconButton {
+  .newTerminalButton,
+  .terminalClose {
     transition: none;
   }
 }

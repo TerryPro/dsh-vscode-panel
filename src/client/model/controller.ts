@@ -2,6 +2,7 @@
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ClientTerminals, TerminalView } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import type { WebTerminalInfo } from '@deepseek-ai/dsh-api-terminal-controller/types'
 import type { GitCommit, GitStatus } from '../../shared/contracts.ts'
 import { WorkbenchApi } from './api.ts'
 import type { GitHunkPeekStorageOperation } from '../git/git-hunk-peek-resize.ts'
@@ -18,9 +19,11 @@ import type {
   MarkdownViewMode,
   MermaidViewMode,
   SidebarMode,
+  TerminalBinding,
   TerminalStatus,
   WorkbenchEditorLayout,
   WorkbenchLogger,
+  WorkbenchShellChoice,
   WorkbenchSidebarAction,
   WorkbenchState,
   WorkbenchTerminalTab,
@@ -179,8 +182,22 @@ export class WorkbenchController {
     await this.data.openConversationFile(workspaceId, path)
   }
 
-  openTerminal(workspaceId = this.store.getSnapshot().workspaceId): string | undefined {
-    return this.terminalRuntime.openTerminal(workspaceId)
+  openTerminal(workspaceId = this.store.getSnapshot().workspaceId, shellPath?: string): string | undefined {
+    return this.terminalRuntime.openTerminal(workspaceId, shellPath)
+  }
+
+  /**
+   * List the shells the Host verifies for the current Session so a new terminal
+   * can pick PowerShell, CMD, or any other installed shell instead of being
+   * locked to the process default.
+   */
+  listShells(signal: AbortSignal): Promise<{ shells: readonly WorkbenchShellChoice[]; selectedShell: string | undefined }> {
+    return this.terminalRuntime.listShells(signal)
+  }
+
+  /** Remember a shell as this browser's default for terminals opened without a choice. */
+  selectShell(path: string): void {
+    this.terminalRuntime.selectShell(path)
   }
 
   /** Mirror the official view phase onto the tab so the tab and rail dots stay in sync. */
@@ -188,14 +205,49 @@ export class WorkbenchController {
     this.terminalRuntime.setTerminalStatus(tabId, status)
   }
 
+  /** Mirror the shell the official process reports onto the tab so rows can name it. */
+  setTerminalShell(tabId: string, shellName: string | undefined): void {
+    this.terminalRuntime.setTerminalShell(tabId, shellName)
+  }
+
+  /** Mirror the Host's terminal title onto the tab, adopting only a name the user chose. */
+  setTerminalTitle(tabId: string, title: string | undefined, shellName: string | undefined): void {
+    this.terminalRuntime.setTerminalTitle(tabId, title, shellName)
+  }
+
+  /** Mirror the Host-reported process facts (launch directory, grid, exit code) onto the tab. */
+  setTerminalRuntime(tabId: string, info: WebTerminalInfo | undefined): void {
+    this.terminalRuntime.setTerminalRuntime(tabId, info)
+  }
+
+  /** Name one terminal, locally and on the Host so the name survives a reload. */
+  renameTerminal(tabId: string, title: string): void {
+    this.terminalRuntime.renameTerminal(tabId, title)
+  }
+
   /** Record the Session the active Workspace belongs to so official terminal views scope to it. */
   setSession(sessionId: string | undefined): void {
     this.terminalRuntime.setSession(sessionId)
   }
 
-  /** Resolve the official terminal model for one tab, or undefined without a Session or service. */
+  /** Resolve the official terminal model for one tab, or undefined when it cannot be driven from here. */
   terminalView(tab: WorkbenchTerminalTab): TerminalView | undefined {
     return this.terminalRuntime.terminalView(tab)
+  }
+
+  /** Whether one terminal tab can reach its Host process from the Session on screen. */
+  terminalBinding(tab: WorkbenchTerminalTab): TerminalBinding {
+    return this.terminalRuntime.terminalBinding(tab)
+  }
+
+  /** Record the Session that really allocated a tab's process, once its first view answers. */
+  recordTerminalOwner(tabId: string): void {
+    this.terminalRuntime.recordTerminalOwner(tabId)
+  }
+
+  /** Give one inert tab a fresh process in the Session on screen, keeping its identity and shell. */
+  reopenTerminalHere(tabId: string): boolean {
+    return this.terminalRuntime.reopenTerminalHere(tabId)
   }
 
   /** Open the second pane on the neighbouring tab, flip the divider, or close it. */

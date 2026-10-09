@@ -9,13 +9,15 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TerminalView, TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller/client'
 import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
-import type { TerminalStatus } from '../model/controller.ts'
+import type { TerminalBinding, TerminalStatus } from '../model/controller.ts'
 import {
   EDITOR_TRANSITION_END_EVENT,
   EDITOR_TRANSITION_START_EVENT,
   isEditorTrackExpanded,
   isEditorTrackTransitioning,
 } from '../layout/editor-layout-contract.ts'
+import { terminalName } from './terminal-name.ts'
+import { TerminalStatusBar } from './TerminalStatusBar.tsx'
 import css from './terminal.module.css'
 
 export interface TerminalSurfaceProps {
@@ -33,7 +35,8 @@ export interface TerminalSurfaceProps {
  * emulator and forwards input, resize, and frame acknowledgement.
  */
 export function TerminalSurface({ tab, active, controller, t }: TerminalSurfaceProps) {
-  const view = controller.terminalView(tab)
+  const binding = controller.terminalBinding(tab)
+  const view = binding === 'ready' ? controller.terminalView(tab) : undefined
   const state = useTerminalView(view)
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
@@ -85,6 +88,32 @@ export function TerminalSurface({ tab, active, controller, t }: TerminalSurfaceP
     if (state !== undefined) controller.setTerminalStatus(tab.id, viewStatus(state))
   }, [controller, state, tab.id])
 
+  // A tab opened before any Session was bound claims the Session that actually
+  // allocated its process, so a later switch knows which Session owns it.
+  const hasProcess = state?.info !== undefined
+  useEffect(() => {
+    if (hasProcess && tab.ownerSessionId === undefined) controller.recordTerminalOwner(tab.id)
+  }, [controller, hasProcess, tab.id, tab.ownerSessionId])
+
+  // Mirror the shell the Host resolved, so a row names the shell its process
+  // actually runs — the only label that is right for a restored process too.
+  useEffect(() => {
+    controller.setTerminalShell(tab.id, state?.info?.shell.name)
+  }, [controller, state?.info?.shell.name, tab.id])
+
+  // Mirror the Host's title. A fresh terminal is titled after its shell, so the
+  // model only adopts a title that differs from it, which keeps an unnamed tab
+  // reading "Terminal 3" instead of "pwsh".
+  useEffect(() => {
+    controller.setTerminalTitle(tab.id, state?.title, state?.info?.shell.name)
+  }, [controller, state?.title, state?.info?.shell.name, tab.id])
+
+  // Mirror the process facts the status line reports. Keyed on the fields rather
+  // than the info object, which the Host rebuilds on every output frame.
+  useEffect(() => {
+    controller.setTerminalRuntime(tab.id, state?.info)
+  }, [controller, state?.info?.cwd, state?.info?.cols, state?.info?.rows, state?.info?.exitCode, tab.id])
+
   // Write the next pending frame once the emulator has parsed the previous one.
   useLayoutEffect(() => {
     const terminal = terminalRef.current
@@ -106,24 +135,27 @@ export function TerminalSurface({ tab, active, controller, t }: TerminalSurfaceP
     })
   }, [state?.render, view])
 
-  const overlay = terminalOverlay(state, view, t)
+  const overlay = terminalOverlay(binding, state, view, tab, controller, t)
   return (
     <div className={css.terminalSurface} data-dsh-workbench-terminal="">
-      <div
-        ref={hostRef}
-        className={css.terminalViewport}
-        aria-label={t('terminal.name', { index: String(tab.sequence) })}
-      />
-      {overlay !== undefined && (
-        <div className={css.terminalEnded} role="status">
-          <span>{overlay.message}</span>
-          {overlay.action !== undefined && (
-            <Button size="sm" variant="outline" onClick={overlay.action.onClick}>
-              {overlay.action.label}
-            </Button>
-          )}
-        </div>
-      )}
+      <div className={css.terminalScreen}>
+        <div
+          ref={hostRef}
+          className={css.terminalViewport}
+          aria-label={terminalName(tab, t)}
+        />
+        {overlay !== undefined && (
+          <div className={css.terminalEnded} role="status">
+            <span>{overlay.message}</span>
+            {overlay.action !== undefined && (
+              <Button size="sm" variant="outline" onClick={overlay.action.onClick}>
+                {overlay.action.label}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      <TerminalStatusBar tab={tab} binding={binding} t={t} />
     </div>
   )
 }
@@ -236,18 +268,42 @@ function viewStatus(state: TerminalViewState): TerminalStatus {
   return 'connecting'
 }
 
-/** Map the official view phase/issue onto a status line and a single recovery action. */
+/**
+ * Map the official view phase onto a status line and a single recovery action.
+ *
+ * A tab left behind by a Session switch is no longer a special case here: it is
+ * resolved through its owning Session, so its real phase arrives over its own
+ * stream and the ordinary states below describe it. The one case that still needs
+ * an explicit offer is a tab whose Host process has gone: retrying the view cannot
+ * help, because the saved binding still names the dead identity, so the model
+ * keeps treating the tab as a restore view that may not allocate a replacement.
+ */
 function terminalOverlay(
+  binding: TerminalBinding,
   state: TerminalViewState | undefined,
   view: TerminalView | undefined,
+  tab: WorkbenchTerminalTab,
+  controller: WorkbenchController,
   t: TranslateNS<'workbench'>,
 ): TerminalOverlay | undefined {
+  if (binding === 'noSession') return { message: t('terminal.noSession') }
   if (view === undefined) return { message: t('terminal.noSession') }
   if (state === undefined) return undefined
   const { phase, issue, info, writable } = state
+  // The Host terminal behind this tab's content identity is gone. Retrying the
+  // view cannot help: the saved binding still names the dead identity, so the
+  // model keeps treating this as a restore view that may not allocate a
+  // replacement, and every retry re-reports the same miss. Recovery has to drop
+  // that binding and take a new content identity, which is exactly what
+  // `reopenTerminalHere` does.
   if (issue === 'missingTerminal') {
-    return { message: t('terminal.missingTerminal'), action: { label: t('terminal.retry'), onClick: () => { void view.refresh() } } }
+    return { message: t('terminal.missingTerminal'), action: { label: t('terminal.reopen'), onClick: () => { controller.reopenTerminalHere(tab.id) } } }
   }
+  // The Host reports its own quota in English; the official model already mapped
+  // `terminal/limit-reached` onto this issue, so the workbench says it in the
+  // user's language. Retrying cannot succeed while the Session is still at its
+  // limit, so no action is offered — closing a tab is what frees a slot.
+  if (issue === 'terminalLimit') return { message: t('terminal.limitReached') }
   if (phase === 'disconnected') {
     return { message: t('terminal.disconnected'), action: { label: t('terminal.restart'), onClick: () => { view.connect() } } }
   }

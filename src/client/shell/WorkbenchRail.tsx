@@ -8,8 +8,11 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconCommitGraphOutline16 } from '../git/CommitGraphIcon.tsx'
 import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
+import type { TerminalDot } from '../model/controller.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from '../files/CreateEntryIcons.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
+import { terminalDot } from '../terminal/terminal-dot.ts'
+import { terminalName } from '../terminal/terminal-name.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
 import css from './shell.module.css'
 
@@ -70,13 +73,13 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
           </span>
         </RailButton>
         {terminals.map(terminal => {
-          const name = t('terminal.name', { index: String(terminal.sequence) })
+          const name = terminalName(terminal, t)
           return (
             <RailButton
               key={terminal.id}
               label={name}
               active={terminal.id === state.activeTabId}
-              status={terminal.status}
+              status={terminalDot(terminal, controller.terminalBinding(terminal))}
               onClick={() => { controller.selectTab(terminal.id) }}
             >
               <IconTerminalOutline16 size={18} />
@@ -106,7 +109,7 @@ function RailButton({
   children: React.ReactNode
   active?: boolean
   disabled?: boolean
-  status?: WorkbenchTerminalTab['status']
+  status?: TerminalDot
   onClick(): void
 }) {
   return (

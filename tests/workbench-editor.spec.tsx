@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkbenchFileTab, WorkbenchState } from '../src/client/model/controller.ts'
+import type { TerminalBinding, WorkbenchFileTab, WorkbenchState } from '../src/client/model/controller.ts'
 import { zh } from '../src/client/core/locales.ts'
 import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/editor/WorkbenchEditor.tsx'
 
@@ -199,6 +199,31 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(controller.save).not.toHaveBeenCalled()
     fireEvent.click(view.getByRole('button', { name: '关闭 终端 1' }))
     expect(controller.closeTab).toHaveBeenCalledWith('terminal:1')
+  })
+
+  it('marks a tab strip terminal unclaimed when no session can address its process', () => {
+    workbenchState.current.tabs.push(terminalTab(1))
+    focusPrimaryTab('terminal:1')
+    const controller = controllerFake()
+    controller.terminalBinding.mockReturnValue('noSession')
+    const view = renderEditor(controller)
+
+    // The tab strip and the sidebar row must claim the same thing about the same
+    // terminal: nothing has allocated a process, so neither may say "running".
+    const dot = view.getByLabelText('尚未分配会话')
+    expect(dot.getAttribute('data-terminal-status')).toBe('unclaimed')
+    expect(view.queryByLabelText('正在运行')).toBeNull()
+  })
+
+  it('shows a renamed terminal under its name in the tab strip', () => {
+    workbenchState.current.tabs.push({ ...terminalTab(1), title: '构建服务' })
+    focusPrimaryTab('terminal:1')
+    const view = renderEditor(controllerFake())
+
+    // One name resolution feeds every surface, so the strip can never fall back
+    // to the old number while the sidebar row already shows the new name.
+    expect(view.getByText('构建服务')).toBeTruthy()
+    expect(view.queryByText('终端 1')).toBeNull()
   })
 
   it('offers explicit choices instead of overwriting a draft changed by another program', () => {
@@ -514,6 +539,9 @@ function controllerFake() {
     ensureGitBaseline: vi.fn(() => Promise.resolve()),
     setDiffViewMode: vi.fn(),
     setSession: vi.fn(),
+    // Annotate the return so a test can move a tab to another binding state;
+    // `as const` here would pin the literal and reject mockReturnValue.
+    terminalBinding: vi.fn((): TerminalBinding => 'ready'),
     toggleConversation: vi.fn(),
     toggleSplit: vi.fn(),
     splitWithTab: vi.fn(),

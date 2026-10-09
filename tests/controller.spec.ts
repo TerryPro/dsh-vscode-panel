@@ -952,7 +952,9 @@ describe('WorkbenchController', () => {
     expect(controller.terminalView(tab)).toBeUndefined()
     controller.setSession('session-1')
     expect(controller.terminalView(tab)).toBe(view)
-    expect(terminals.view).toHaveBeenCalledWith('session-1', tab.id, tab.contentId)
+    // The content identity doubles as the occurrence key, so a reopened tab that
+    // takes a new identity cannot be handed back its dead cached view.
+    expect(terminals.view).toHaveBeenCalledWith('session-1', tab.contentId, tab.contentId, undefined, undefined)
 
     controller.setTerminalStatus(tab.id, 'running')
     expect(activeTab(controller)).toMatchObject({ kind: 'terminal', status: 'running' })
@@ -960,23 +962,296 @@ describe('WorkbenchController', () => {
     expect(activeTab(controller)).toMatchObject({ kind: 'terminal', status: 'exited' })
 
     controller.closeTab(tab.id)
-    expect(terminals.close).toHaveBeenCalledWith('session-1', tab.id, tab.contentId)
+    expect(terminals.close).toHaveBeenCalledWith('session-1', tab.contentId, tab.contentId)
   })
 
-  it('keeps multiple terminals in one Workspace but terminates their state on Workspace switch', async () => {
+  it('opens a terminal on a Host-discovered shell and mirrors its resolved name', async () => {
+    const view = { id: 'term-1' }
+    const terminals = {
+      view: vi.fn(() => view),
+      close: vi.fn(),
+      selectShell: vi.fn(),
+      launchShells: vi.fn(() => Promise.resolve({
+        shells: [
+          { path: 'C:\\Windows\\System32\\cmd.exe', name: 'cmd', args: [] },
+          { path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', name: 'pwsh', args: ['-NoLogo'] },
+        ],
+        selectedShell: 'C:\\Windows\\System32\\cmd.exe',
+      })),
+    } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
+
+    const discovery = await controller.listShells(new AbortController().signal)
+    expect(discovery.shells).toEqual([
+      { path: 'C:\\Windows\\System32\\cmd.exe', name: 'cmd' },
+      { path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', name: 'pwsh' },
+    ])
+    expect(discovery.selectedShell).toBe('C:\\Windows\\System32\\cmd.exe')
+
+    const pwsh = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+    controller.selectShell(pwsh)
+    expect(terminals.selectShell).toHaveBeenCalledWith(pwsh)
+
+    const terminalId = controller.openTerminal('workspace-1', pwsh)!
+    const tab = controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+    expect(tab.shellPath).toBe(pwsh)
+    // The picked path reaches the official model as its explicit shell choice.
+    expect(controller.terminalView(tab)).toBe(view)
+    expect(terminals.view).toHaveBeenCalledWith('session-1', tab.contentId, tab.contentId, undefined, pwsh)
+
+    controller.setTerminalShell(terminalId, 'pwsh')
+    expect(controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId)).toMatchObject({ shellName: 'pwsh' })
+    controller.setTerminalShell(terminalId, undefined)
+    expect(controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId)).not.toHaveProperty('shellName')
+  })
+
+  it('reports no shells without a Session instead of probing a bare Workspace', async () => {
+    const terminals = {
+      view: vi.fn(), close: vi.fn(), selectShell: vi.fn(), launchShells: vi.fn(),
+    } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+
+    await expect(controller.listShells(new AbortController().signal))
+      .resolves.toEqual({ shells: [], selectedShell: undefined })
+    expect(terminals.launchShells).not.toHaveBeenCalled()
+
+    const terminalId = controller.openTerminal('workspace-1')!
+    const tab = controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+    // No Session means no official model yet, and the tab carries no shell intent.
+    expect(controller.terminalView(tab)).toBeUndefined()
+    expect(tab).not.toHaveProperty('shellPath')
+  })
+
+  it('keeps a Workspace terminal tabs and their processes across a Workspace switch', async () => {
     const api = { readFile: vi.fn(() => Promise.resolve(file('kept.ts', 'kept', '1'))) }
-    const controller = createController(api)
+    const terminals = { view: vi.fn(), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController(api as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
     await controller.openFile('workspace-1', 'kept.ts')
-    const first = controller.openTerminal()
-    const second = controller.openTerminal()
+    const first = controller.openTerminal()!
+    const second = controller.openTerminal()!
+    const firstContentId = (controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === first) as WorkbenchTerminalTab).contentId
     expect(controller.store.getSnapshot().tabs.filter(tab => tab.kind === 'terminal')).toHaveLength(2)
     expect(first).not.toBe(second)
 
+    // Switching Workspaces must not close anything: the Host processes live in the
+    // browser's terminal model, so dropping their tabs would orphan them and hold
+    // their Session's terminal quota open with no way back.
     controller.setWorkspace('workspace-2')
+    expect(terminals.close).not.toHaveBeenCalled()
+    expect(controller.store.getSnapshot().tabs.filter(tab => tab.kind === 'terminal')).toHaveLength(0)
+
     controller.setWorkspace('workspace-1')
-    expect(controller.store.getSnapshot().tabs).toEqual([
-      expect.objectContaining({ kind: 'file', path: 'kept.ts' }),
-    ])
+    const restored = controller.store.getSnapshot().tabs.filter(
+      (tab): tab is WorkbenchTerminalTab => tab.kind === 'terminal',
+    )
+    expect(restored.map(tab => tab.id)).toEqual([first, second])
+    // The same content identity comes back, so the official model reattaches to the
+    // process that is still running rather than allocating a blank replacement.
+    expect(restored[0]!.contentId).toBe(firstContentId)
+  })
+
+  /**
+   * The contract behind "switching sessions must not disconnect a terminal".
+   *
+   * The Host resolves any Session's Agent on demand, so a tab keeps being
+   * addressed through the Session that allocated its process. Asking for the
+   * Session on screen instead is what used to orphan the process: the owner's
+   * binding is not found there, and the model allocates a blank replacement.
+   */
+  it('keeps driving a kept tab through the Session that owns its process', () => {
+    const view = { id: 'term-1' }
+    const terminals = { view: vi.fn(() => view), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
+    const terminalId = controller.openTerminal()!
+    const owned = () => controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+    expect(controller.terminalBinding(owned())).toBe('ready')
+    expect(controller.terminalView(owned())).toBe(view)
+    expect(terminals.view).toHaveBeenCalledTimes(1)
+    expect(terminals.view).toHaveBeenCalledWith('session-1', expect.anything(), expect.anything(), undefined, undefined)
+
+    // The Workspace moves to another Session: the tab stays live on its owner.
+    controller.setSession('session-2')
+    expect(controller.terminalBinding(owned())).toBe('ready')
+    expect(controller.terminalView(owned())).toBe(view)
+    // The same owning Session is addressed, so the official cache hands back the
+    // very same model: same stream, same screen, no reallocation.
+    expect(terminals.view).toHaveBeenLastCalledWith('session-1', expect.anything(), expect.anything(), undefined, undefined)
+    expect(terminals.view.mock.calls.every(call => call[0] === 'session-1')).toBe(true)
+  })
+
+  /**
+   * A tab opened before any Session existed starts allocating in whichever
+   * Session appears first. If the Workspace moves on while that allocation is
+   * still in flight, the owner must be recorded as the Session the process was
+   * actually asked for, not the one that happens to be on screen when the first
+   * frame arrives — otherwise the tab would later be addressed in a Session that
+   * never allocated anything for it.
+   */
+  it('records the Session a tab really allocated in when the switch lands mid-allocation', () => {
+    const view = { id: 'term-1' }
+    const terminals = { view: vi.fn(() => view), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    // Opened with no Session bound, so the tab has no owner yet.
+    const terminalId = controller.openTerminal()!
+    const owned = () => controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+    expect(owned().ownerSessionId).toBeUndefined()
+
+    controller.setSession('session-1')
+    controller.terminalView(owned())
+    controller.setSession('session-2')
+    controller.recordTerminalOwner(terminalId)
+
+    expect(owned().ownerSessionId).toBe('session-1')
+    expect(terminals.view).toHaveBeenLastCalledWith('session-1', expect.anything(), expect.anything(), undefined, undefined)
+  })
+
+  it('adopts a Host title only when it is not the shell default, and never erases a name', () => {
+    const terminals = { view: vi.fn(() => ({ id: 'term-1', rename: vi.fn() })), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
+    const terminalId = controller.openTerminal()!
+    const owned = () => controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+
+    // The Host titles a fresh terminal after its shell: that is not a user name.
+    controller.setTerminalTitle(terminalId, 'pwsh', 'pwsh')
+    expect(owned().title).toBeUndefined()
+    controller.setTerminalTitle(terminalId, 'build server', 'pwsh')
+    expect(owned().title).toBe('build server')
+    // A later default-named frame must not undo the name the user chose.
+    controller.setTerminalTitle(terminalId, 'pwsh', 'pwsh')
+    expect(owned().title).toBe('build server')
+  })
+
+  it('names a terminal locally and pushes the same name to the Host', () => {
+    const rename = vi.fn(() => Promise.resolve())
+    const terminals = { view: vi.fn(() => ({ id: 'term-1', rename })), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
+    const terminalId = controller.openTerminal()!
+
+    controller.renameTerminal(terminalId, '  测试数据库  ')
+
+    const tab = controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+    expect(tab.title).toBe('测试数据库')
+    expect(rename).toHaveBeenCalledWith('测试数据库')
+    // A blank name is not a name: the row keeps what it had and nothing is sent.
+    controller.renameTerminal(terminalId, '   ')
+    expect(tab.title).toBe('测试数据库')
+    expect(rename).toHaveBeenCalledTimes(1)
+  })
+
+  it('mirrors the Host process facts the status line reports', () => {
+    const terminals = { view: vi.fn(() => ({ id: 'term-1' })), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
+    const terminalId = controller.openTerminal()!
+    const owned = () => controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+
+    controller.setTerminalRuntime(terminalId, {
+      id: 'term-1', title: 'pwsh', shell: { name: 'pwsh', path: '/pwsh', args: [] },
+      cwd: 'F:\\repo', cols: 120, rows: 40, state: 'exited', exitCode: 3,
+    } as never)
+    expect(owned().runtime).toEqual({ cwd: 'F:\\repo', cols: 120, rows: 40, exitCode: 3 })
+    // No info means no line, rather than a row of zeros left over from the last run.
+    controller.setTerminalRuntime(terminalId, undefined)
+    expect(owned().runtime).toBeUndefined()
+  })
+
+  /**
+   * `reopenTerminalHere` is no longer the answer to a Session switch — a switched-
+   * away tab stays live on its owner — but it is still the only recovery for a tab
+   * whose Host process has disappeared, which the official model refuses to
+   * re-allocate under the identity it still has bound.
+   */
+  it('reopens a lost tab with a new identity and closes the old process in its owner Session', () => {
+    const terminals = { view: vi.fn(() => ({ id: 'term-1' })), close: vi.fn() } as unknown as ClientTerminals
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+    controller.setWorkspace('workspace-1')
+    controller.setSession('session-1')
+    const terminalId = controller.openTerminal('workspace-1', 'C:\\pwsh.exe')!
+    const before = controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+
+    controller.setSession('session-2')
+    expect(controller.reopenTerminalHere(terminalId)).toBe(true)
+    const after = controller.store.getSnapshot().tabs
+      .find(candidate => candidate.id === terminalId) as WorkbenchTerminalTab
+
+    // The dead process is released through the Session that still owns it; closing
+    // it under the current Session would resolve no identity and free nothing.
+    expect(terminals.close).toHaveBeenCalledWith('session-1', before.contentId, before.contentId)
+    // A fresh identity is required: the saved binding for the old one is what made
+    // the model refuse to allocate a replacement in the first place.
+    expect(after.contentId).not.toBe(before.contentId)
+    expect(after.ownerSessionId).toBe('session-2')
+    expect(after.status).toBe('connecting')
+    // The tab keeps its position and its chosen shell across the recovery.
+    expect(after.shellPath).toBe('C:\\pwsh.exe')
+    expect(controller.terminalBinding(after)).toBe('ready')
+  })
+
+  it('still mints unique identities when crypto.randomUUID is unavailable', () => {
+    // DSH Web is reachable over plain HTTP on a LAN address, where browsers
+    // expose no `crypto.randomUUID`; deriving an identity must not throw there.
+    const real = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+    Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true })
+    try {
+      const terminals = { view: vi.fn(() => ({ id: 'term-1' })), close: vi.fn() } as unknown as ClientTerminals
+      const open = () => {
+        const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+        controller.setWorkspace('workspace-1')
+        controller.setSession('session-1')
+        controller.openTerminal('workspace-1')
+        return (controller.store.getSnapshot().tabs
+          .find(candidate => candidate.kind === 'terminal') as WorkbenchTerminalTab).contentId
+      }
+      const first = open()
+      expect(first).not.toBe(open())
+      expect(first.startsWith('wbterm:')).toBe(true)
+    } finally {
+      if (real === undefined) delete globalThis.crypto
+      else Object.defineProperty(globalThis, 'crypto', real)
+    }
+  })
+
+  it('gives each page a fresh content identity so a reload cannot collide', () => {
+    const terminals = { view: vi.fn(() => ({ id: 'term-1' })), close: vi.fn() } as unknown as ClientTerminals
+    const open = () => {
+      // A new controller is a new page: its tab-id counter restarts at 1.
+      const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, undefined, terminals)
+      controller.setWorkspace('workspace-1')
+      controller.setSession('session-1')
+      controller.openTerminal('workspace-1')
+      return (controller.store.getSnapshot().tabs
+        .find(candidate => candidate.kind === 'terminal') as WorkbenchTerminalTab).contentId
+    }
+
+    // Content identities persist in localStorage across a reload while tab ids do
+    // not. Deriving one from the other made a reloaded page's first terminal
+    // inherit the previous page's binding, resolve to a dead Host terminal, and
+    // fail `missingTerminal` on every retry.
+    expect(open()).not.toBe(open())
   })
 
   it('preserves live terminal tabs when Git invalidates file and Diff tabs', async () => {

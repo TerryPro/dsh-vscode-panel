@@ -9,6 +9,7 @@ import type { GitLineDecorationLabels } from '../git/git-line-decorations.ts'
 import type {
   EditorGroup,
   EditorPaneId,
+  TerminalBinding,
   WorkbenchController,
   WorkbenchState,
   WorkbenchTab,
@@ -64,6 +65,10 @@ export function EditorPane({
   const activeId = group.activeTabId
   const tab = activeId === undefined ? undefined : tabs.find(candidate => candidate.id === activeId)
   const terminals = tabs.filter((candidate): candidate is WorkbenchTerminalTab => candidate.kind === 'terminal')
+  // Resolved once per pane so the tab strip and the sidebar row claim the same
+  // thing about the same terminal.
+  const terminalBindings: Record<string, TerminalBinding> = {}
+  for (const terminal of terminals) terminalBindings[terminal.id] = controller.terminalBinding(terminal)
   return (
     <>
       <header className={css.editorHeader} data-dsh-workbench-panel-rule-anchor="">
@@ -72,6 +77,7 @@ export function EditorPane({
           activeTabId={activeId}
           gitDecorations={state.gitDecorations}
           split={state.editorSplit}
+          terminalBindings={terminalBindings}
           onSelect={tabId => { controller.selectTab(tabId) }}
           onClose={onRequestClose}
           onMenuAction={onMenuAction}

@@ -197,6 +197,15 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
+/* `unclaimed` is not a process phase: no Session has allocated this tab's process
+   yet, so there is nothing to confirm. A hollow ring says "unknown" where any fill
+   would claim a state the workbench never observed — the same treatment the
+   sidebar row and the collapsed rail give it. */
+.editorTabStatus[data-terminal-status='unclaimed'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-label-tertiary);
+}
+
 .editorTabClose {
   display: grid;
   flex: none;

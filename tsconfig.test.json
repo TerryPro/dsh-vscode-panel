@@ -19,6 +19,7 @@
     "tests/json-graph-canvas.spec.tsx",
     "tests/yaml-parse.spec.ts",
     "tests/structured-parse.spec.ts",
+    "tests/locales.spec.ts",
     "tests/panel-rule-layout.spec.ts"
   ]
 }

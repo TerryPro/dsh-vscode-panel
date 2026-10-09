@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { IconCloseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchTab } from '../model/controller.ts'
+import type { TerminalBinding, TerminalDot } from '../model/controller.ts'
+import { terminalDot } from '../terminal/terminal-dot.ts'
+import { terminalName } from '../terminal/terminal-name.ts'
 import { diffKindText } from '../git/git-diff-labels.ts'
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
@@ -15,6 +18,12 @@ export interface EditorTabsProps {
   gitDecorations?: GitDecorationMap
   /** Whether this pane already shares the column, which retires the split rows. */
   split?: boolean
+  /**
+   * Whether each terminal tab has a Session to address its process through, keyed
+   * by tab id. The tab strip and the sidebar row must claim the same thing about
+   * the same terminal, so the owner resolves it once and passes it down.
+   */
+  terminalBindings?: Readonly<Record<string, TerminalBinding>>
   onSelect: (tabId: string) => void
   onClose: (tabId: string) => void
   onMenuAction?: (action: EditorTabMenuAction, tab: WorkbenchTab) => void
@@ -22,7 +31,7 @@ export interface EditorTabsProps {
 }
 
 /** Compact scrollable file/Diff tabs following DSH's native active-tab underline. */
-export function EditorTabs({ tabs, activeTabId, gitDecorations, split, onSelect, onClose, onMenuAction, t }: EditorTabsProps) {
+export function EditorTabs({ tabs, activeTabId, gitDecorations, split, terminalBindings, onSelect, onClose, onMenuAction, t }: EditorTabsProps) {
   const tabListRef = useRef<HTMLDivElement>(null)
   const [menuTarget, setMenuTarget] = useState<EditorTabMenuTarget | null>(null)
   useEffect(() => {
@@ -53,15 +62,20 @@ export function EditorTabs({ tabs, activeTabId, gitDecorations, split, onSelect,
           const active = tab.id === activeTabId
           const decoration = tab.kind === 'file' ? gitDecorations?.[tab.path] : undefined
           const kind = tab.kind === 'diff' ? diffKindText(tab.diffKind, t) : undefined
+          // One resolution feeds both the label and the dot, so the tab strip can
+          // never claim a phase the sidebar row contradicts.
+          const dot = tab.kind === 'terminal'
+            ? terminalDot(tab, terminalBindings?.[tab.id] ?? 'ready')
+            : undefined
           const name = tab.kind === 'terminal'
-            ? t('terminal.name', { index: String(tab.sequence) })
+            ? terminalName(tab, t)
             : basename(tab.path)
           const label = kind === undefined ? name : `${name} (${kind})`
           const status = tab.kind === 'file'
             ? tab.saving ? t('editor.saving') : tab.dirty ? t('editor.unsaved') : undefined
             : tab.kind === 'diff'
               ? tab.loading ? t('editor.loading') : undefined
-              : terminalStatus(tab.status, t)
+              : terminalStatus(dot, t)
           return (
             <div
               key={tab.id}
@@ -102,7 +116,7 @@ export function EditorTabs({ tabs, activeTabId, gitDecorations, split, onSelect,
                   <span className={css.editorTabStatus} data-saving={tab.saving || undefined} aria-label={status} />
                 )}
                 {tab.kind === 'terminal' && (
-                  <span className={css.editorTabStatus} data-terminal-status={tab.status} aria-label={status} />
+                  <span className={css.editorTabStatus} data-terminal-status={dot} aria-label={status} />
                 )}
               </button>
               <button
@@ -129,12 +143,19 @@ export function EditorTabs({ tabs, activeTabId, gitDecorations, split, onSelect,
   )
 }
 
-function terminalStatus(status: 'connecting' | 'running' | 'exited' | 'error', t: TranslateNS<'workbench'>): string {
+/**
+ * Label for a terminal tab's dot. `undefined` is a non-terminal tab, and
+ * `unclaimed` is not a process phase but "no Session has allocated this process
+ * yet", so the two must not read alike.
+ */
+function terminalStatus(status: TerminalDot | undefined, t: TranslateNS<'workbench'>): string | undefined {
   switch (status) {
+    case undefined: return undefined
     case 'connecting': return t('terminal.connecting')
     case 'running': return t('terminal.running')
     case 'exited': return t('terminal.exited')
     case 'error': return t('terminal.failed')
+    case 'unclaimed': return t('terminal.unclaimed')
   }
 }
 

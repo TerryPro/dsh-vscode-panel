@@ -14,6 +14,14 @@ export type CsvViewMode = 'table' | 'source' | 'split'
 export type StructuredViewMode = 'graph' | 'source' | 'split'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
+/**
+ * What a tab's status dot may claim.
+ *
+ * `unclaimed` is not a process phase: it marks a tab that has no Session to
+ * allocate its process in yet, so the dot must not claim a phase nothing has
+ * confirmed.
+ */
+export type TerminalDot = TerminalStatus | 'unclaimed'
 export type DraftChangeSource = 'input' | 'git-revert'
 /** Direction of the divider between the two split editor panes. */
 export type EditorSplitOrientation = 'horizontal' | 'vertical'
@@ -96,6 +104,76 @@ export interface WorkbenchTerminalTab {
   contentId: string
   /** Lightweight mirror of the official view phase for tab and rail status dots. */
   status: TerminalStatus
+  /**
+   * Shell this tab was opened with, as a Host-discovered executable path.
+   * Absent means "no choice yet": the official model then uses the remembered
+   * available shell or the execution environment's default. The resolved shell
+   * of a running process is always readable from its view state, so this field
+   * only records the *intent* for tabs that have not allocated a process yet.
+   */
+  shellPath?: string
+  /**
+   * Shell the running process actually reports (`pwsh`, `cmd`, `zsh`), mirrored
+   * from the official view state. This is what the row shows: it names the
+   * resolved shell of a restored process too, which `shellPath` never can.
+   */
+  shellName?: string
+  /**
+   * Session that owns this tab's Host process.
+   *
+   * The official service addresses a terminal through the Agent of the Session
+   * that allocated it — `follow`, `write`, `resize`, and `close` all take that
+   * Agent — so the tab records its owner and keeps being driven through *it*
+   * even after the Workspace moves on to another Session. That is what lets a
+   * terminal survive a Session switch: the Host resolves the owning Session's
+   * Agent on demand, so nothing here has to reconnect or reallocate.
+   */
+  ownerSessionId?: string
+  /**
+   * Name the user gave this terminal, shown over `terminal.name`.
+   *
+   * Mirrored to the Host as the terminal's own title, so a restored process
+   * reports it back and the name survives a reload rather than living only in
+   * this window.
+   */
+  title?: string
+  /**
+   * Process facts the Host reports, mirrored for the status line.
+   *
+   * `cwd` is the directory the shell *started* in: the Host documents that a
+   * shell changing directory does not update it, so the status line labels it as
+   * the launch directory rather than pretending to track `cd`.
+   */
+  runtime?: TerminalRuntime
+}
+
+/** Host-reported facts about one running terminal process. */
+export interface TerminalRuntime {
+  readonly cwd: string
+  readonly cols: number
+  readonly rows: number
+  /** Exit code once the process ended; null while it runs. */
+  readonly exitCode: number | null
+}
+
+/**
+ * Whether one terminal tab has a Session to address its process through.
+ *
+ * There is deliberately no "belongs to another Session" case: a tab keeps being
+ * driven through its own owner, which is exactly how a terminal outlives a
+ * Session switch. `noSession` is only the state before anything exists to
+ * allocate the process against.
+ */
+export type TerminalBinding = 'ready' | 'noSession'
+
+/**
+ * One Host-discovered shell offered at the workbench's new-terminal menu: the
+ * verified executable path the official model accepts as `shellPath`, plus its
+ * file name (`pwsh`, `bash`, `cmd`) for the row label.
+ */
+export interface WorkbenchShellChoice {
+  path: string
+  name: string
 }
 
 export type WorkbenchTab = WorkbenchFileTab | WorkbenchDiffTab | WorkbenchTerminalTab
