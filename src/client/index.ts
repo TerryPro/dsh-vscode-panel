@@ -34,6 +34,10 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register('workbench', { zh, en }), 'workbench-layout: dictionaries')
   ctx.effect(() => installOpenFileRefresh(controller), 'workbench-layout: open file refresh')
   ctx.effect(() => installGitDecorationRefresh(controller), 'workbench-layout: Git file decoration refresh')
+  // A shell teardown closes the browser's notebook event streams. The kernels are left
+  // running on purpose: the Host owns their reclaim timer, and a hot reload of this
+  // panel must not throw away a run that is still going.
+  ctx.effect(() => () => { controller.notebookRuntime.closeAllStreams() }, 'workbench-layout: notebook streams')
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',

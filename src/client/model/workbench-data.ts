@@ -8,6 +8,7 @@ import { isHtmlPath } from '../editor/html-preview.ts'
 import { isCsvPath } from '../csv/csv-path.ts'
 import { isStructuredPath } from '../json/json-path.ts'
 import { isMermaidPath } from '../mermaid/mermaid-path.ts'
+import { isNotebookPath } from '../notebook/notebook-path.ts'
 import { buildGitDecorations } from '../git/git-decorations.ts'
 import {
   buildGitLineVersions,
@@ -32,11 +33,14 @@ import type {
   WorkbenchFileTab,
   WorkbenchLogger,
   WorkbenchState,
+  WorkbenchTab,
 } from './workbench-types.ts'
 
-/** The shell hook the data runtime needs to reveal the editor without importing the controller. */
+/** The shell hook the data runtime needs, without importing the controller. */
 export interface DataHost {
   revealEditor(): void
+  /** Release the notebook runtime of a tab that is closing by any route. */
+  closeNotebookTab(tabId: string): void
 }
 
 /** Owns async tab IO, the per-Workspace snapshot cache, and the request-race fencing. */
@@ -206,6 +210,9 @@ export class WorkbenchData {
         tab.mermaidMode = isMermaidPath(path) ? 'split' : 'source'
         tab.csvMode = isCsvPath(path) ? 'table' : 'source'
         tab.structuredMode = isStructuredPath(path) ? 'graph' : 'source'
+        // A notebook opens as cells, which is the only view where its outputs are
+        // readable; Source stays one click away for the raw JSON.
+        tab.notebookMode = isNotebookPath(path) ? 'notebook' : 'source'
         tab.loading = false
         tab.error = null
       })
@@ -322,20 +329,24 @@ export class WorkbenchData {
   /** Clear file and Diff tabs after Git changes one Workspace; live terminals remain attached. */
   resetWorkspaceView(workspaceId = this.store.getSnapshot().workspaceId): void {
     if (workspaceId === undefined) return
+    const removed = this.store.getSnapshot().tabs.filter(tab => tab.kind !== 'terminal')
     this.updateWorkspaceState(workspaceId, (state) => {
       state.tabs = state.tabs.filter(tab => tab.kind === 'terminal')
       reconcilePanes(state)
     })
+    this.releaseNotebooks(removed)
     this.logger.info(`workbench-layout: cleared editor tabs after Git changed workspace ${JSON.stringify(workspaceId)}`)
   }
 
   /** Close tabs whose backing file is one entry or a descendant of one renamed/deleted directory. */
   closeWorkspaceEntries(workspaceId: string, path: string): void {
     const removedIds: string[] = []
+    const removedTabs: WorkbenchTab[] = []
     this.updateWorkspaceState(workspaceId, (state) => {
       state.tabs = state.tabs.filter((tab) => {
         if (tab.kind === 'terminal' || !isSameOrDescendantPath(tab.path, path)) return true
         removedIds.push(tab.id)
+        removedTabs.push(tab)
         return false
       })
       reconcilePanes(state)
@@ -345,10 +356,24 @@ export class WorkbenchData {
       this.fileRequests.delete(key)
       this.diffRequests.delete(key)
     }
+    this.releaseNotebooks(removedTabs)
     if (removedIds.length > 0) {
       this.logger.info(
         `workbench-layout: closed ${removedIds.length} tabs for changed workspace entry ${JSON.stringify(path)}`,
       )
+    }
+  }
+
+  /**
+   * Drop the notebook runtime of every tab that just left the pool.
+   *
+   * Tabs disappear through several routes (close, a Git reset, a rename or delete
+   * taking a directory), and each must release its kernel's event stream or a stream
+   * would remain attached to a notebook that is no longer on screen.
+   */
+  private releaseNotebooks(tabs: readonly WorkbenchTab[]): void {
+    for (const tab of tabs) {
+      if (tab.kind === 'file' && isNotebookPath(tab.path)) this.host.closeNotebookTab(tab.id)
     }
   }
 

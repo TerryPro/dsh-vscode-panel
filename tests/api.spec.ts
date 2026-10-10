@@ -5,7 +5,7 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 describe('Workbench browser API', () => {
   it('addresses file and Git requests by official Workspace id', async () => {
-    const fetch = vi.fn(() => Promise.resolve({
+    const fetch = vi.fn((_input: string, _init?: RequestInit) => Promise.resolve({
       ok: true,
       json: () => Promise.resolve({ path: '', entries: [], truncated: false }),
     }))
@@ -58,5 +58,47 @@ describe('Workbench browser API', () => {
     expect(JSON.parse(String(gitBaselineRequest.body))).toEqual({ workspaceId: 'workspace-1', path: 'src/a.ts' })
     expect(JSON.parse(String(gitGraphRequest.body))).toEqual({ workspaceId: 'workspace-1', offset: 0 })
     expect(`${String(fileRequest.body)}${String(gitGraphRequest.body)}`).not.toContain('sessionId')
+  })
+
+  it('addresses every kernel request by its own sub-path, never the bare prefix', async () => {
+    // The Host dispatches the kernel API by exact sub-path and answers the bare prefix
+    // with ENDPOINT_NOT_FOUND. `discover` once called `postKernel('')`, so the picker
+    // was permanently empty and auto-connect never fired — a bug invisible above the
+    // facade, because every caller mocks this class. Asserting the URLs here is the
+    // only place that can catch it.
+    const fetch = vi.fn((_input: string, _init?: RequestInit) => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    vi.stubGlobal('fetch', fetch)
+    const api = new WorkbenchApi()
+
+    await api.kernelDiscover('ws-1')
+    await api.kernelStart('ws-1', 'nb.ipynb', 'python3')
+    await api.kernelStatus('k1', 't1', 'ws-1')
+    await api.kernelExecute({ kernelId: 'k1', token: 't1', workspaceId: 'ws-1', code: 'x', cellId: 'c1' })
+    await api.kernelInterrupt('k1', 't1', 'ws-1')
+    await api.kernelInput('k1', 't1', 'ws-1', 'answer')
+    await api.kernelComplete({ kernelId: 'k1', token: 't1', workspaceId: 'ws-1', code: 'pr', cursorPos: 2 })
+    await api.kernelInspect({ kernelId: 'k1', token: 't1', workspaceId: 'ws-1', code: 'print', cursorPos: 5 })
+    await api.kernelIsComplete({ kernelId: 'k1', token: 't1', workspaceId: 'ws-1', code: 'x = 1' })
+    await api.kernelRestart({ kernelId: 'k1', token: 't1', workspaceId: 'ws-1', path: 'nb.ipynb' })
+    await api.kernelShutdown('k1', 't1', 'ws-1')
+
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      '/dsh-workbench-layout/kernel/discover',
+      '/dsh-workbench-layout/kernel/start',
+      '/dsh-workbench-layout/kernel/status',
+      '/dsh-workbench-layout/kernel/execute',
+      '/dsh-workbench-layout/kernel/interrupt',
+      '/dsh-workbench-layout/kernel/input',
+      '/dsh-workbench-layout/kernel/complete',
+      '/dsh-workbench-layout/kernel/inspect',
+      '/dsh-workbench-layout/kernel/is-complete',
+      '/dsh-workbench-layout/kernel/restart',
+      '/dsh-workbench-layout/kernel/shutdown',
+    ])
+    // None may collapse onto the bare prefix that the Host refuses.
+    for (const call of fetch.mock.calls) {
+      expect(call[0]).not.toBe('/dsh-workbench-layout/kernel')
+    }
+    expect(JSON.parse(String((fetch.mock.calls[0]![1] as RequestInit).body))).toEqual({ workspaceId: 'ws-1' })
   })
 })

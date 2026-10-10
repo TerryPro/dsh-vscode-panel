@@ -5,6 +5,7 @@ import type {
   DraftChangeSource,
   CsvViewMode,
   HtmlViewMode,
+  NotebookViewMode,
   StructuredViewMode,
   MarkdownViewMode,
   MermaidViewMode,
@@ -143,5 +144,15 @@ export class WorkbenchEdits {
   /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
   setStructuredMode(mode: StructuredViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.patchFileTab(tabId, (tab) => { tab.structuredMode = mode })
+  }
+
+  /**
+   * Switch one `.ipynb` file tab between the cell surface and its raw JSON source.
+   *
+   * No kernel teardown happens here: closing the cell surface must not interrupt a
+   * run, so the runtime keeps its connection until the tab itself closes.
+   */
+  setNotebookMode(mode: NotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.patchFileTab(tabId, (tab) => { tab.notebookMode = mode })
   }
 }

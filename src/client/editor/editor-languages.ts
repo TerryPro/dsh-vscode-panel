@@ -86,6 +86,9 @@ const EXTENSION_GRAMMARS: Record<string, Grammar> = {
   mdx: 'markdown',
   mmd: 'mermaid',
   mermaid: 'mermaid',
+  // A notebook's Source view is its raw JSON, so `.ipynb` highlights as JSON in the
+  // text editor; the cell surface is chosen from the path elsewhere, not here.
+  ipynb: 'json',
   php: 'php',
   py: 'python',
   rs: 'rust',

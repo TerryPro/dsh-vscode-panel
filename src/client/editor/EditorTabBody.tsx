@@ -23,6 +23,8 @@ import { MermaidPreview, type MermaidPreviewLabels } from '../mermaid/MermaidPre
 import { MermaidSplitDivider } from '../mermaid/MermaidSplitDivider.tsx'
 import { clampMermaidSplitRatio, readMermaidSplitRatio, saveMermaidSplitRatio } from '../mermaid/mermaid-split.ts'
 import { isMermaidPath } from '../mermaid/mermaid-path.ts'
+import { isNotebookPath } from '../notebook/notebook-path.ts'
+import { NotebookSurface, type NotebookLabels } from '../notebook/NotebookSurface.tsx'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
@@ -60,10 +62,12 @@ export function EditorTabBody({
   const isMermaidTab = tab.kind === 'file' && tab.file !== null && isMermaidPath(tab.path)
   const isCsvTab = tab.kind === 'file' && tab.file !== null && isCsvPath(tab.path)
   const isStructuredTab = tab.kind === 'file' && tab.file !== null && isStructuredPath(tab.path)
+  const isNotebookTab = tab.kind === 'file' && tab.file !== null && isNotebookPath(tab.path)
   const csvDelimiter = tab.kind === 'file' ? delimiterForCsvPath(tab.path) : undefined
   const mermaidMode = tab.kind === 'file' && tab.mermaidMode !== undefined ? tab.mermaidMode : 'split'
   const csvMode = tab.kind === 'file' && tab.csvMode !== undefined ? tab.csvMode : 'table'
   const structuredMode = tab.kind === 'file' && tab.structuredMode !== undefined ? tab.structuredMode : 'graph'
+  const notebookMode = tab.kind === 'file' && tab.notebookMode !== undefined ? tab.notebookMode : 'notebook'
   const showEditor = tab.kind === 'file'
     && tab.file !== null
     && !(isHtmlTab && tab.htmlMode !== 'source')
@@ -71,6 +75,8 @@ export function EditorTabBody({
     && !(isMermaidTab && mermaidMode === 'preview')
     && !(isCsvTab && csvMode === 'table')
     && !(isStructuredTab && structuredMode === 'graph')
+    // The cell surface owns its own editors, so the whole-file editor is not also shown.
+    && !(isNotebookTab && notebookMode === 'notebook')
   // Read an interactive preview's local dependency relative to the opened HTML file;
   // the resolved path is still scope-checked by the workspace backend.
   const htmlBasePath = tab.kind === 'file' ? tab.path : undefined
@@ -175,6 +181,56 @@ export function EditorTabBody({
     pan: t('editor.jsonPan'),
     grid: t('editor.jsonGrid'),
   }), [t])
+  const notebookLabels = useMemo<NotebookLabels>(() => ({
+    runCell: t('notebook.runCell'),
+    interrupt: t('notebook.interrupt'),
+    runAll: t('notebook.runAll'),
+    clearAllOutputs: t('notebook.clearAllOutputs'),
+    addCodeCell: t('notebook.addCodeCell'),
+    addTextCell: t('notebook.addTextCell'),
+    insertCodeBelow: t('notebook.insertCodeBelow'),
+    insertTextBelow: t('notebook.insertTextBelow'),
+    deleteCell: t('notebook.deleteCell'),
+    moveUp: t('notebook.moveUp'),
+    moveDown: t('notebook.moveDown'),
+    changeKind: t('notebook.changeKind'),
+    codeCell: t('notebook.codeCell'),
+    markdownCell: t('notebook.markdownCell'),
+    rawCell: t('notebook.rawCell'),
+    output: t('notebook.output'),
+    outputsShown: t('notebook.outputsShown'),
+    outputsHidden: t('notebook.outputsHidden'),
+    noOutputsYet: t('notebook.noOutputsYet'),
+    blankNotebook: t('notebook.blankNotebook'),
+    running: t('notebook.running'),
+    queued: t('notebook.queued'),
+    interrupted: t('notebook.interrupted'),
+    emptyNotebook: t('notebook.emptyNotebook'),
+    invalidNotebook: t('notebook.invalidNotebook'),
+    oldFormat: t('notebook.oldFormat'),
+    oversized: t('notebook.oversized'),
+    kernelLabel: t('notebook.kernelLabel'),
+    kernelIdle: t('notebook.kernelIdle'),
+    kernelBusy: t('notebook.kernelBusy'),
+    kernelStarting: t('notebook.kernelStarting'),
+    kernelDisconnected: t('notebook.kernelDisconnected'),
+    kernelFailed: t('notebook.kernelFailed'),
+    restartKernel: t('notebook.restartKernel'),
+    stopKernel: t('notebook.stopKernel'),
+    selectKernel: t('notebook.selectKernel'),
+    noKernelAvailable: t('notebook.noKernelAvailable'),
+    installHint: t('notebook.installHint'),
+    copyOutput: t('notebook.copyOutput'),
+    copied: t('notebook.copied'),
+    promptNumber: t('notebook.promptNumber'),
+    answerInput: t('notebook.answerInput'),
+    answerPlaceholder: t('notebook.answerPlaceholder'),
+    submit: t('notebook.submit'),
+    progressLabel: t('notebook.progressLabel'),
+    truncatedOutput: t('notebook.truncatedOutput'),
+    editMarkdown: t('notebook.editMarkdown'),
+    renderMarkdown: t('notebook.renderMarkdown'),
+  }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
   const outlineEntries = useMemo(() => {
@@ -234,10 +290,30 @@ export function EditorTabBody({
       gitLabels={gitLineLabels}
     />
   )
+  // A notebook is a surface of its own: it owns cell editors and kernel state, so it
+  // is built as one value rather than inlined into the already deep view chain below.
+  const notebookSurface = isNotebookTab && notebookMode === 'notebook'
+    ? (
+      <NotebookSurface
+        key={`notebook-${tab.id}`}
+        tabId={tab.id}
+        path={tab.path}
+        workspaceId={workspaceId}
+        draft={tab.draft}
+        editable={tab.externalChange === null && !tab.saving}
+        runtime={controller.notebookRuntime}
+        onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
+        labels={notebookLabels}
+        markdownLabels={markdownLabels}
+      />
+    )
+    : null
   return (
     <div className={css.editorFileArea}>
       <div className={css.editorFileBody}>
-        {isMermaidTab && mermaidMode === 'preview'
+        {notebookSurface !== null
+          ? notebookSurface
+          : isMermaidTab && mermaidMode === 'preview'
           ? <MermaidPreview key={`mermaid-${tab.id}`} source={tab.draft} labels={mermaidLabels} />
           : isMermaidTab && mermaidMode === 'split'
             ? (
@@ -373,6 +449,12 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'preview' || undefined} aria-label={t('editor.preview')} title={t('editor.preview')} onClick={() => { controller.setMermaidMode('preview', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'split' || undefined} aria-label={t('editor.split')} title={t('editor.split')} onClick={() => { controller.setMermaidMode('split', tab.id) }}><IconSplitViewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={mermaidMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setMermaidMode('source', tab.id) }}><IconSourceOutline16 /></button>
+              </div>
+            )}
+            {isNotebookTab && (
+              <div className={css.editorStatusBarSwitch} role="group" aria-label={t('notebook.modeNotebook')}>
+                <button type="button" className={css.editorStatusBarAction} data-active={notebookMode === 'notebook' || undefined} aria-label={t('notebook.modeNotebook')} title={t('notebook.modeNotebook')} onClick={() => { controller.setNotebookMode('notebook', tab.id) }}><IconPreviewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={notebookMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setNotebookMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
             {isCsvTab && (

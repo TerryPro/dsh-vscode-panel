@@ -26,7 +26,7 @@ This release is built and tested against DSH Web 0.2.0-rc.2; the peer ranges sti
 | Area | What it provides |
 | --- | --- |
 | Left sidebar | Sessions, file explorer, Git changes and Commit Graph, terminal list |
-| Middle editor | Multi-tab and multi-pane editing, Markdown/Mermaid/HTML/CSV/JSON/image viewers, per-file Diff, interactive terminals |
+| Middle editor | Multi-tab and multi-pane editing, Markdown/Mermaid/HTML/CSV/JSON/image viewers, `.ipynb` notebook editing and execution, per-file Diff, interactive terminals |
 | Right column | The original DSH conversation, task status, tools, and composer |
 
 Files, Git state, editor tabs, and terminals follow the selected **Workspace**; chat remains owned by the current **Session**. Layout, icons, colors, menus, dialogs, tooltips, and responsive behavior reuse DSH components and design tokens wherever the official client exposes them.
@@ -76,6 +76,23 @@ Files, Git state, editor tabs, and terminals follow the selected **Workspace**; 
 
 - **Mermaid** files (`.mmd`/`.mermaid`) render live to SVG, debounced so only the newest edit wins, with zoom in/out/fit/reset, a dark/light theme that follows the shell, and error messages that point at the offending line. The runtime bundle is served by the host and loaded on demand.
 - **HTML** files (`.html`/`.htm`/`.xhtml`) open in preview with three modes: **Static** (a locked-down `sandbox=""` iframe with a strict CSP that never runs scripts), **Interactive** (a script-capable opaque-origin sandbox that auto-bundles relative `.js`/`.css` dependencies into blob URLs at runtime, under file-size and resource-count caps), and **Source**. Editing the draft reflects live in the preview.
+
+### Notebooks: `.ipynb` editing and execution
+
+Modelled on the VS Code Jupyter extension, and built to fit this workbench's rules rather than to embed a Jupyter frontend.
+
+- **Cell editing.** Add, delete, move, split, merge, and convert cells between Code, Markdown, and Raw. Each code cell carries its Jupyter prompt number (`[ ]`, `[*]` while running, `[12]` once run) — and only a code cell does, since a prompt number on a Markdown cell would claim it has work left to do; a Markdown cell renders in place and switches between source and rendering through its own edit/render button (double-click and `Esc` work too). Edits are structural changes to the notebook JSON, applied through the same version-checked draft/save pipeline as every other file, so saving, dirty tracking, external-change prompts, and revert all behave as they do for text — and an output written by a run is persisted in the file exactly as Jupyter would store it.
+- **A real kernel, no native dependency.** The Host speaks the Jupyter messaging protocol itself: ZMTP 3.0 over TCP with the NULL handshake, HMAC-SHA256 signing, and the DEALER/SUB channels, implemented in plain Node. Nothing needs `libzmq`, `node-pty`, or a build step, and no browser code is added to the client bundle beyond the notebook view.
+- **Windows interrupts that actually work.** ipykernel's own `interrupt_request` is a no-op on Windows, so the kernel is launched through a small stdlib Python bridge that creates the Win32 event ipykernel waits on and signals it on demand. The same bridge owns the parent-process handle the kernel polls, which is what guarantees no kernel process outlives the DSH host — verified by killing the host and watching the port close.
+- **Kernel discovery.** The workspace's own `.venv`/`venv`/`env`/`.conda` (plus one level of sub-directories for monorepos) is preferred, then the `py` launcher, `PATH`, and `uv`-managed interpreters, then installed kernelspecs. Each candidate is *probed* — its version and whether `ipykernel` imports — rather than assumed, and a kernelspec is probed at the interpreter its own `argv` names, so a kernel installed into a prefix outside `PATH` is still startable. The picker lists what is unavailable and why; the plugin never installs anything on its own.
+- **Connects on open.** Opening a notebook scans the workspace and starts the best kernel by itself — the file's own `metadata.kernelspec` when it can be started here, otherwise the workspace's environment — so the status dot is green before you run anything, exactly as in VS Code. Nothing is started when the workspace has no usable kernel (the picker says why instead), and a background tab is never probed, because only the shown notebook is mounted.
+- **One kernel per notebook.** A second tab on the same file shares its namespace, a cold start that races produces one process, and closing a tab releases the browser's stream while leaving the kernel running for a moment's reconsideration — the Host's unattended timer reclaims it, the same policy the workbench's terminals follow. Restart replaces the session with a new id, so no stream can ever be asked to replay output from a kernel that no longer exists. Picking a *different* kernel from the auto-connected one swaps it cleanly, so the picker is never inert.
+- **Output that reads like a terminal.** Stream frames merge into blocks rather than one row per `print`; ipykernel's ANSI-coloured tracebacks are rendered, not shown as control codes; and a MIME bundle is drawn in its richest form (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml`, then HTML, LaTeX, JSON, Markdown, and plain text last), which is what makes a `pandas` frame a table and a matplotlib figure a picture. `tqdm`/matplotlib `update_display_data` redraws in place instead of stacking a hundred copies. A cell parked on `input()` shows a prompt and resumes on the answer. A cell only grows an output area once it has something to report — a never-run cell shows none, while a cell that ran and printed nothing says so, because that absence is itself the result.
+- **Live output that cannot be lost.** Events are numbered per kernel, so an `EventSource` stream that drops resumes from its cursor and replays the gap; where a stream cannot be held, the identical frames come from a poll route. A cursor older than the Host's buffer is reported as a resync rather than presented as a quiet run. A page reload does not interrupt a running cell.
+- **Security boundaries.** Kernel HTML is a rendering target, not trusted markup: script, handlers, framework directives, remote resources, and `data:text/html` are stripped before it reaches the DOM. Beyond DSH's loopback/origin fence, every kernel carries a token minted at start, so another page on the same machine can neither read a notebook's output nor interrupt its run. Paths, ports, and keys never leave the Host; output is bounded per chunk and per run, with the ceiling named in the cell.
+- **Shortcuts.** `Ctrl/Cmd+Enter` and `Shift+Enter` run the focused cell, `Ctrl+Alt+Enter` runs it and opens a fresh one below, `Ctrl+Shift+Enter` runs all, and `Esc` leaves a text cell's editor and shows it rendered again — the keyboard half of the cell's edit/render button. Creating a notebook from the file tree gives an empty file; its first cell seeds a valid nbformat document.
+
+`examples/python_data_analysis/sales_notebook.ipynb` is a ready-made tour of the above: it loads the CSV next to it, cleans the missing and negative rows that file deliberately contains, renders a `text/html` table, and finishes with a cell that fails, a cell that streams to stderr, and one meant to be interrupted.
 
 ### Git workspace
 
@@ -135,10 +152,13 @@ dsh plugin --profile web remove @lsq64737/dsh-workbench-layout
 1. Select a DSH Workspace.
 2. Use the sidebar modes to switch among Sessions, Files, Git, and Terminal.
 3. Select a file, Diff, commit file, or terminal to open it in the middle column; use the status-bar switches to change a Markdown/CSV/JSON/Mermaid/HTML file between its structured, split, and source views.
-4. Drag the middle/right divider to choose the amount of space assigned to editing and conversation.
-5. Use the activity dock to collapse or restore the middle column and the conversation.
+4. Open a `.ipynb` file to edit it as cells. The best kernel for the workspace connects by itself as soon as the notebook opens; run the focused cell with `Ctrl/Cmd+Enter`, or use Run All. The kernel picker names what is available and why anything is not, and lets you switch kernels.
+5. Drag the middle/right divider to choose the amount of space assigned to editing and conversation.
+6. Use the activity dock to collapse or restore the middle column and the conversation.
 
 Git features require the selected Workspace root to be a Git repository. Remote operations use credentials already configured for Git on the machine running DSH; the plugin does not request or store remote credentials.
+
+Notebook execution requires a Python environment reachable from the Workspace with `ipykernel` installed. The plugin only launches and talks to such an environment; it never installs one.
 
 ## Safety and privacy
 
@@ -150,6 +170,9 @@ Git features require the selected Workspace root to be a Git repository. Remote 
 - Pull and Sync are fast-forward only. Cherry-pick and Revert require a clean worktree and abort automatically when Git reports a conflict.
 - Git commands use fixed arguments without a shell, and terminal credential prompts are disabled for Git operations.
 - HTML previews run inside a sandboxed iframe; interactive previews stay in an opaque origin and only bundle size-capped relative resources.
+- Kernel HTML output is sanitized before it reaches the DOM: script, event handlers, framework directives, remote resources, and executable data URLs are removed.
+- Beyond DSH's loopback and origin fence, each kernel carries a token minted at start, so another page on the same machine can neither read a notebook's output nor interrupt its run. Paths, ports, and signing keys stay inside the Host.
+- Kernels are spawned per Workspace under both a per-Workspace and a whole-process ceiling, and an unattended idle kernel is stopped automatically. A notebook file is only ever written through the editor's version-checked save path.
 - Logs use Workspace ids and relative paths instead of recording host file paths.
 - A terminal grants shell access to the machine running DSH. Only expose DSH Web to users and networks you trust.
 
@@ -160,6 +183,8 @@ Git features require the selected Workspace root to be a Git repository. Remote 
 - Closing a terminal tab ends its process. Each Session caps terminals at the host's `maxTerminals` (default 8), and **exited terminals still count toward it** — a tab left behind by a Session switch holds its old Session's slot until you close it. A Session's terminals also end when the Host or that Session's owner is disposed. Availability and concurrency follow the host's own terminal configuration.
 - The plugin reorders the official AppFrame through stable client markers because DSH does not currently expose a dedicated conversation-column placement API. A future AppFrame rewrite may require a plugin update.
 - Structured viewers apply size, node, and depth caps so very large CSV/JSON documents stay responsive; content beyond a cap is shown as source or truncated rather than fully rendered.
+- Notebooks work with `.ipynb` (nbformat 4) and launch Python kernels only; a kernel for another language is listed in the picker with its reason but is not started. An older nbformat 3 file, or one whose contents are not JSON, says so and can be repaired in the Source view.
+- Closing a notebook tab does not end its kernel, so a mistabbed close is recoverable; an unattended idle kernel is reclaimed by the Host's timer, and restarting DSH releases all of them. Kernel `text/html` is sanitized before rendering, so script-dependent third-party widgets (some `ipywidgets` views) show their text fallback rather than an interactive control.
 - In the Windows desktop app a collapsed sidebar has zero width and DSH hides the sidebar's browser and footer rows, so the account/Settings row is unavailable until the sidebar is expanded again. The activity dock is an independent column, so the mode switch, the middle-editor and conversation toggles, and Settings stay reachable in every fold state on every platform.
 - On very narrow windows, the official AppFrame concession temporarily closes the middle editor and restores it when enough width is available.
 
@@ -173,11 +198,14 @@ npm run typecheck
 npm test
 npm run build
 npm run test:bundle
+npm run test:kernel   # optional: end-to-end notebook kernel check
 ```
 
-`npm run typecheck` covers the plugin sources plus the test harnesses that stub DSH snapshots (`workspace-binding`, `workbench-sidebar`, `workbench-editor`), so a host shape change fails the build instead of silently switching those checks off. Some remaining specs are not type-checked yet.
+`npm run typecheck` covers the plugin sources plus the test harnesses that stub DSH snapshots (`workspace-binding`, `workbench-sidebar`, `workbench-editor`) and the notebook suite, so a host shape change fails the build instead of silently switching those checks off. Some remaining specs are not type-checked yet.
 
-Source changes only take effect in DSH after `npm run build` regenerates `lib/client.js`; the client loads the bundle, not `src`.
+`npm run test:kernel` mounts the **built** host bundle in a minimal stand-in context and drives its real routes over HTTP against a real `ipykernel` — discovery, the origin and token fences, SSE replay after a dropped stream, the poll fallback, output translation, interrupting a long cell on Windows, two notebooks keeping separate namespaces, and no kernel process surviving teardown. It needs a Python with `ipykernel` reachable from the workspace, which is why it is not part of `npm test`.
+
+Source changes only take effect in DSH after `npm run build` regenerates `lib/client.js`; the client loads the bundle, not `src`. The same build copies `src/host/kernel/kernel-bridge.py` beside `lib/index.js`, which is where the Host looks for it at start time.
 
 ## License
 

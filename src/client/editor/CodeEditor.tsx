@@ -28,6 +28,21 @@ export interface CodeEditorProps {
   onChange: (value: string, source: CodeEditorChangeSource) => void
   ariaLabel: string
   path?: string
+  /**
+   * Grammar chosen from something other than the file path.
+   *
+   * A notebook cell is highlighted by the language its *kernel* runs, which a file
+   * path cannot express — the same `.ipynb` may be driven by Python or by R. The
+   * grammar is resolved once at mount, so a caller changing this value must remount
+   * the editor (a new `ariaLabel` or React `key`), not expect a live switch.
+   */
+  languageOverride?: Extension | undefined
+  /**
+   * True when this editor is one cell inside a larger document rather than a whole
+   * file. Drops the whole-file editor's scroll padding, which reads as a blank band
+   * between a notebook cell and its output.
+   */
+  cell?: boolean
   gitOriginal?: string
   inlineDiff?: boolean
   wrap?: boolean
@@ -103,12 +118,31 @@ function gitChangeView(
   return gitLineDecorations(gitOriginal ?? null, labels, callbacks)
 }
 
+/**
+ * Chrome for an editor that is one cell of a larger document rather than a whole file.
+ *
+ * The workbench theme gives `.cm-content` 18px above and 80px below — the whole-file
+ * editor's habit of leaving room to scroll the last line up into the viewport. A
+ * notebook cell has no viewport to scroll, so that bottom padding became a blank band
+ * between the code and its output, taller than the code itself in a short cell.
+ *
+ * The selector is written `&.cm-editor .cm-content` rather than `.cm-content` on
+ * purpose: both themes compile to `<prefix> .cm-content`, and equal specificity would
+ * leave the winner to whichever style module the browser happened to see last. The
+ * extra class makes this rule strictly more specific, so it wins by construction.
+ */
+const cellChromeTheme = EditorView.theme({
+  '&.cm-editor .cm-content': { padding: '6px 8px' },
+})
+
 /** CodeMirror surface themed entirely through DSH design tokens. */
 export function CodeEditor({
   value,
   onChange,
   ariaLabel,
   path,
+  languageOverride,
+  cell,
   gitOriginal,
   inlineDiff,
   wrap,
@@ -191,7 +225,8 @@ export function CodeEditor({
           ]),
           fontThemeCompartment.current.of(fontTheme(fontPx.current)),
           editorThemeExtensions,
-          language.current.of(languageForPath(path) ?? []),
+          ...(cell === true ? [cellChromeTheme] : []),
+          language.current.of(languageOverride ?? languageForPath(path) ?? []),
           ...(isMarkdownPath(path) ? [markdownEditingExtensions] : []),
           gitChanges.current.of(gitChangeView(
             inlineDiff,
@@ -247,5 +282,9 @@ export function CodeEditor({
     })
   }, [wrap])
 
-  return <div ref={parent} className={css.codeEditorHost} />
+  // `data-cell` exists so the wiring is observable: the compact chrome it enables is a
+  // CodeMirror theme rule, which leaves no DOM trace a test can assert. Without it, a
+  // dropped `cell` prop would silently restore the 80px band between a cell and its
+  // output and nothing in the suite would notice.
+  return <div ref={parent} className={css.codeEditorHost} data-cell={cell === true || undefined} />
 }

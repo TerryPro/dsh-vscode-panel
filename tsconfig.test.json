@@ -20,6 +20,19 @@
     "tests/yaml-parse.spec.ts",
     "tests/structured-parse.spec.ts",
     "tests/locales.spec.ts",
-    "tests/panel-rule-layout.spec.ts"
+    "tests/panel-rule-layout.spec.ts",
+    "tests/notebook-document.spec.ts",
+    "tests/notebook-model.spec.ts",
+    "tests/notebook-output.spec.ts",
+    "tests/notebook-ansi.spec.ts",
+    "tests/notebook-sanitize.spec.ts",
+    "tests/notebook-connection.spec.ts",
+    "tests/notebook-runtime.spec.ts",
+    "tests/notebook-surface.spec.tsx",
+    "tests/kernel-backend.spec.ts",
+    "tests/notebook-kernel-protocol.spec.ts",
+    "tests/notebook-kernel-launch.spec.ts",
+    "tests/notebook-output-theme.spec.ts",
+    "tests/api.spec.ts"
   ]
 }

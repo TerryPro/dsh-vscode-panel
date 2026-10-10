@@ -15,6 +15,7 @@ import type {
   GitView,
   CsvViewMode,
   HtmlViewMode,
+  NotebookViewMode,
   StructuredViewMode,
   MarkdownViewMode,
   MermaidViewMode,
@@ -42,6 +43,8 @@ import { INITIAL_STATE } from './workbench-snapshot.ts'
 import { WorkbenchData } from './workbench-data.ts'
 import { WorkbenchEdits } from './workbench-edits.ts'
 import { WorkbenchTerminals } from './workbench-terminals.ts'
+import { NotebookRuntime } from '../notebook/notebook-runtime.ts'
+import { isNotebookPath } from '../notebook/notebook-path.ts'
 
 export * from './workbench-types.ts'
 
@@ -60,6 +63,13 @@ export class WorkbenchController {
   private readonly data: WorkbenchData
   private readonly edits: WorkbenchEdits
   private readonly terminalRuntime: WorkbenchTerminals
+  /**
+   * Notebook kernels, scoped per tab.
+   *
+   * Kept on the controller rather than in the store because a live kernel is not
+   * serializable state and its output frames must not churn the shared tab snapshot.
+   */
+  readonly notebookRuntime: NotebookRuntime
 
   constructor(
     api: WorkbenchApi = new WorkbenchApi(),
@@ -71,6 +81,33 @@ export class WorkbenchController {
     this.data = new WorkbenchData(this.store, api, logger, this)
     this.edits = new WorkbenchEdits(this.store, logger)
     this.terminalRuntime = new WorkbenchTerminals(this.store, logger, this, terminals)
+    this.notebookRuntime = new NotebookRuntime(api, logger, {
+      getDraft: tabId => this.notebookDraft(tabId),
+      setDraft: (tabId, text) => { this.edits.setDraft(text, 'input', tabId) },
+    })
+  }
+
+  /** The current draft text of one notebook tab, or `''` when it is not open. */
+  private notebookDraft(tabId: string): string {
+    const tab = this.store.getSnapshot().tabs.find(candidate => candidate.id === tabId)
+    return tab?.kind === 'file' ? tab.draft : ''
+  }
+
+  /** Whether one path is opened as a notebook, so the runtime can be scoped to it. */
+  isNotebookPath(path: string): boolean {
+    return isNotebookPath(path)
+  }
+
+  /**
+   * Release the notebook runtime of a tab that is closing by any route.
+   *
+   * Tabs leave the pool through the close button, a Git operation that resets the
+   * view, and a rename or delete that takes a directory with it. Every one of them
+   * has to drop the tab's event stream, or a stream would stay attached to a kernel
+   * for a notebook that is no longer on screen.
+   */
+  closeNotebookTab(tabId: string): void {
+    this.notebookRuntime.forget(tabId)
   }
 
   attachSidebarShadow(setActive: (active: boolean) => void): () => void {
@@ -379,6 +416,10 @@ export class WorkbenchController {
     const tab = state.tabs[index]
     if (tab === undefined || (tab.kind === 'file' && tab.dirty && !discardDirty)) return false
     if (tab.kind === 'terminal') this.terminalRuntime.closeTerminalProcess(tab)
+    // A closed notebook releases its event stream. The kernel itself is left running
+    // on purpose: reopening the file a moment later should find the user's variables
+    // still there, and the Host's unattended timer is what eventually reclaims it.
+    if (tab.kind === 'file' && isNotebookPath(tab.path)) this.notebookRuntime.forget(tab.id)
     this.data.forgetRequests(state.workspaceId, tabId)
     this.store.update((draft) => {
       draft.tabs.splice(index, 1)
@@ -472,8 +513,14 @@ export class WorkbenchController {
   }
 
   /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
+  /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
   setStructuredMode(mode: StructuredViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.edits.setStructuredMode(mode, tabId)
+  }
+
+  /** Switch one `.ipynb` file tab between the cell surface and its raw JSON source. */
+  setNotebookMode(mode: NotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.edits.setNotebookMode(mode, tabId)
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {

@@ -1,0 +1,606 @@
+/*
+ * Notebook surface: toolbar, cell stack, and kernel output.
+ *
+ * Everything is drawn from DSH's own design tokens so a notebook reads as part of the
+ * workbench rather than an embedded web page.
+ *
+ * The ANSI palette below is deliberately *derived from* DSH's tokens rather than
+ * hard-coded, with each literal kept only as the fallback for a token DSH does not
+ * define. DSH themes by injecting `--dsw-*` variables, so this is what makes a kernel's
+ * coloured output agree with the workbench's own terminals — a palette of fixed hex
+ * values would follow the operating system instead of the shell, and the same
+ * traceback would read one colour in the notebook and another in a terminal tab.
+ */
+
+.root {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
+  /*
+   * ANSI SGR palette, used by the kernel-output renderer.
+   *
+   * Derived from the same DSH tokens `TerminalSurface` resolves its theme from, so the
+   * same traceback colour reads identically in a notebook and in a terminal tab. The
+   * literals survive only as fallbacks for tokens DSH does not define.
+   *
+   * `black` and `white` map to *theme-aware* text tokens rather than to the static
+   * neutral ramp the terminal uses, because ANSI's idea of black and white is written
+   * for a dark terminal: a fixed grey is invisible in one of the two themes, which is
+   * exactly the failure a `prefers-color-scheme` block cannot cover when DSH themes
+   * itself instead of following the operating system.
+   */
+  --dsh-ansi-black: var(--dsw-alias-label-tertiary, #4e4e4e);
+  --dsh-ansi-red: var(--dsw-alias-state-error-primary, #c9403a);
+  --dsh-ansi-green: var(--dsw-static-green-500, #2f8f2f);
+  --dsh-ansi-yellow: var(--dsw-static-amber-500, #a07b12);
+  --dsh-ansi-blue: var(--dsw-alias-state-business-primary, #2f6fb0);
+  --dsh-ansi-magenta: #9a4fa0;
+  --dsh-ansi-cyan: #2b8080;
+  --dsh-ansi-white: var(--dsw-alias-label-secondary, #5a5a5a);
+  --dsh-ansi-bright-black: var(--dsw-alias-label-tertiary, #7a7a7a);
+  --dsh-ansi-bright-red: var(--dsw-alias-state-error-secondary, #e05b4f);
+  --dsh-ansi-bright-green: var(--dsw-static-green-400, #48b048);
+  --dsh-ansi-bright-yellow: var(--dsw-static-amber-400, #d2ab2a);
+  --dsh-ansi-bright-blue: var(--dsw-alias-brand-primary, #5a97d6);
+  --dsh-ansi-bright-magenta: #c072c8;
+  --dsh-ansi-bright-cyan: #45b0b0;
+  --dsh-ansi-bright-white: var(--dsw-alias-label-primary, #3a3a3a);
+  /*
+   * ANSI *background* colours are tints of the matching foreground over the shell's own
+   * base, so they stay subtle in either theme. ipykernel never sets one (it colours
+   * text only), and these are reached for by a kernel that does, plus the inverse-video
+   * pair in `ansi-text.ts`.
+   */
+  --dsh-ansi-bg-black: color-mix(in srgb, var(--dsh-ansi-black) 55%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-red: color-mix(in srgb, var(--dsh-ansi-red) 22%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-green: color-mix(in srgb, var(--dsh-ansi-green) 22%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-yellow: color-mix(in srgb, var(--dsh-ansi-yellow) 22%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-blue: color-mix(in srgb, var(--dsh-ansi-blue) 22%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-magenta: color-mix(in srgb, var(--dsh-ansi-magenta) 22%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-cyan: color-mix(in srgb, var(--dsh-ansi-cyan) 22%, var(--dsw-alias-bg-base, #ffffff));
+  --dsh-ansi-bg-white: color-mix(in srgb, var(--dsh-ansi-white) 22%, var(--dsw-alias-bg-base, #ffffff));
+}
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.toolbarAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.toolbarAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.toolbarAction:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.toolbarDivider {
+  width: 1px;
+  height: 14px;
+  margin-inline: 2px;
+  background: var(--dsw-alias-border-l1);
+}
+
+.toolbarSpacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kernelStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
+}
+
+.kernelDot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.kernelStatus[data-phase='ready'] .kernelDot,
+.kernelStatus[data-phase='idle'] .kernelDot {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.kernelStatus[data-phase='busy'] .kernelDot,
+.kernelStatus[data-phase='starting'] .kernelDot {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.kernelStatus[data-phase='failed'] .kernelDot,
+.kernelStatus[data-phase='terminated'] .kernelDot {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.kernelSelect {
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.kernelSelect:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+/* ---------- cells ---------- */
+
+.cells {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 24px;
+}
+
+.cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-block-end: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  /*
+   * The header paints a full-width background, and a child's square corner is drawn
+   * over the parent's rounded one — which left every cell's top two corners visibly
+   * unclosed. Clipping the cell states the rule once for everything inside it, so a
+   * future full-bleed row cannot reopen the same hole.
+   *
+   * This does not clip CodeMirror's completion popup or hover tooltip: `@codemirror/
+   * view` positions those `fixed` by default, and a fixed box is not clipped by an
+   * ancestor's overflow. Keep it that way — a `transform`, `filter`, or `will-change`
+   * added to `.cell` would make the cell the tooltip's containing block and start
+   * cutting the popup off at the cell edge.
+   */
+  overflow: hidden;
+}
+
+.cell[data-focused='true'] {
+  border-color: var(--dsw-alias-border-l2);
+  box-shadow: 0 0 0 1px var(--dsw-alias-interactive-bg-active);
+}
+
+.cellHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 3px 8px 3px 10px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.cellPrompt {
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  font-size: 11px;
+  min-width: 30px;
+}
+
+.cellKind {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cellRunning,
+.cellInterrupted {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  background: var(--dsw-alias-state-warn-secondary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.cellInterrupted {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.cellActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.cell:hover .cellActions,
+.cell[data-focused='true'] .cellActions {
+  opacity: 1;
+}
+
+.cellAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.cellAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.cellAction:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cellActionSelect {
+  position: relative;
+  display: inline-flex;
+}
+
+.cellKindSelect {
+  height: 20px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cellKindSelect:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cellBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 30px;
+}
+
+/* A rendered markdown cell keeps its own body height without an editor chrome. */
+.cellRendered {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.cellOutputs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 10px 8px;
+  /*
+   * The same rule the header draws below itself, so a cell reads as header / body /
+   * output rather than as code that fades into whatever the kernel printed. Without
+   * it a result sat on the cell's own background, indistinguishable from the last
+   * line of code above it.
+   */
+  border-block-start: 1px solid var(--dsw-alias-border-l1);
+}
+
+.outputsToggle {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.outputsToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* ---------- outputs ---------- */
+
+.outputList {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outputStdout,
+.outputStderr,
+.outputError,
+.outputText,
+.outputJson,
+.outputLatex {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  /* A transparent accent edge on every block, so a stderr/error block that colours it
+     is never 2px wider than the stdout above it in the same output list. */
+  border-inline-start: 2px solid transparent;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family-code, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+}
+
+/*
+ * stderr and a failed cell are marked, not flooded. The kernel paints its own
+ * text — an ipykernel traceback arrives already coloured with ANSI reds, greens,
+ * and yellows — and that palette is designed to sit on the ordinary output
+ * background. Filling the block with a solid warning/error colour (the old
+ * `state-*-secondary`) put red-on-pink text that was unreadable at the bottom of
+ * every traceback. So the signal is a faint tint plus an accent edge, the same
+ * idiom the Mermaid error card and the Git decorations use, and the ANSI colours
+ * stay legible on top of it.
+ */
+.outputStderr {
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 9%, var(--dsw-alias-bg-layer-1));
+  border-inline-start-color: var(--dsw-alias-state-warn-primary);
+}
+
+.outputError {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 9%, var(--dsw-alias-bg-layer-1));
+  border-inline-start-color: var(--dsw-alias-state-error-primary);
+}
+
+.outputRich {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.outputHtml {
+  /* Kernel HTML is confined to this box: a wide table scrolls, it never reflows the
+     workbench, and a crafted page cannot stretch the column. */
+  max-width: 100%;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  font-size: 12.5px;
+}
+
+.outputHtml table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.outputHtml th,
+.outputHtml td {
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+
+.outputImage {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/*
+ * The prompt number of an `execute_result`. It sits in the flow, above or before the
+ * value, rather than floating over it: absolutely positioning it here made it collide
+ * with the first line of the output it labels, which is unreadable for a one-line
+ * result and worse for an image that starts at the top edge.
+ */
+.outputResultLabel {
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/*
+ * Above a block result the label is a row of its own in a column flex, so it must not
+ * stretch. Inside `.outputResultLine` it must *not* set this, or it overrides the
+ * parent's `align-items: baseline` and the prompt no longer sits on the value's first
+ * text line — the same misalignment, one pixel level down.
+ */
+.outputRich > .outputResultLabel {
+  align-self: flex-start;
+}
+
+/* A text result reads as `Out[2]: value` on one line, the way Jupyter writes it. */
+.outputResultLine {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.outputResultLine .outputText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A cell that ran and printed nothing. Stated because the absence *is* the result. */
+.noOutputs {
+  padding: 2px 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.outputNotice,
+.outputTruncated {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-mask-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
+}
+
+.outputProgress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.outputProgressBar {
+  flex: 1 1 120px;
+  height: 6px;
+  accent-color: var(--dsw-alias-brand-primary);
+}
+
+.outputPrompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.outputPromptText {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.outputPromptInput {
+  flex: 1 1 120px;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.outputPromptInput:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.outputPromptSubmit {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 5px;
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.outputCopy {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.outputList:hover .outputCopy {
+  opacity: 1;
+}
+
+.outputCopy:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 20px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.emptyText {
+  margin: 0;
+}
+
+/* The invitation in an empty notebook: the first cell is the only thing a reader
+   can usefully do here, so it is offered rather than left to the toolbar. */
+.emptyAction {
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.emptyAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}

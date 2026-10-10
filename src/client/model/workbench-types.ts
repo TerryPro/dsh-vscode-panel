@@ -12,6 +12,14 @@ export type HtmlViewMode = 'preview' | 'interactive' | 'source'
 export type MermaidViewMode = 'preview' | 'source' | 'split'
 export type CsvViewMode = 'table' | 'source' | 'split'
 export type StructuredViewMode = 'graph' | 'source' | 'split'
+/**
+ * How an `.ipynb` file is shown.
+ *
+ * `notebook` is the cell surface; `source` is the raw JSON in the text editor. There
+ * is no split view: the two representations of a notebook are the same content, and a
+ * reader who wants to see the JSON edits the JSON.
+ */
+export type NotebookViewMode = 'notebook' | 'source'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
 /**
@@ -67,6 +75,8 @@ export interface WorkbenchFileTab {
   csvMode?: CsvViewMode
   /** Structured graph view state; only meaningful for JSON and YAML files. */
   structuredMode?: StructuredViewMode
+  /** Cell surface versus raw JSON; only meaningful for `.ipynb` files. */
+  notebookMode?: NotebookViewMode
   /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
   wrap: boolean
   inlineDiff: boolean

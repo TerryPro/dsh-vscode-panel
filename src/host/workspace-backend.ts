@@ -348,6 +348,17 @@ export class WorkspaceBackend {
     return workspace.path
   }
 
+  /**
+   * Validate a Workspace id plus one workspace-relative path, returning the
+   * canonical path. The entry need not exist yet: a notebook can be run before its
+   * first save, and callers that require existence use their own read.
+   */
+  async assertRelativePath(workspaceIdValue: unknown, pathValue: unknown): Promise<string> {
+    const workspace = await this.resolve(workspaceIdValue, pathValue, false)
+    if (workspace.path === '') throw new WorkbenchHttpError(400, 'FILE_REQUIRED', '请选择文件。')
+    return workspace.path
+  }
+
   /** 安全读取工作区中的 Git 文本；二进制文件只返回类型，不传输原始字节。 */
   async readGitText(workspaceIdValue: unknown, pathValue: unknown): Promise<WorkspaceGitText> {
     const workspace = await this.resolve(workspaceIdValue, pathValue)

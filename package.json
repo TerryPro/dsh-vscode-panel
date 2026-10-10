@@ -34,6 +34,7 @@
     "lib/client.js",
     "lib/client.js.map",
     "lib/mermaid-runtime.js",
+    "lib/kernel-bridge.py",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
     "README.md",
@@ -59,10 +60,12 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
-    "build": "npm run clean && tsc && tsdown",
+    "build": "npm run clean && tsc && tsdown && node scripts/copy-kernel-bridge.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:bundle": "node scripts/smoke-client-bundle.mjs",
+    "test:kernel": "npm run build && node scripts/probe-kernel.mjs",
+    "test:example": "npm run build && node scripts/probe-example.mjs",
     "test:watch": "vitest",
     "prepare": "npm run build"
   },
