@@ -7,11 +7,19 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-workspace'
-import { MERMAID_RUNTIME_PATH, WORKBENCH_API_PREFIX } from './shared/contracts.ts'
+import { GIT_GRAPH_PAGE_SIZE, MERMAID_RUNTIME_PATH, WORKBENCH_API_PREFIX } from './shared/contracts.ts'
+import {
+  CONFIG_FIELDS,
+  CONFIG_READ_PATH,
+  CONFIG_WRITE_PATH,
+  type ConfigFieldMeta,
+  type ConfigKey,
+} from './shared/config-protocol.ts'
 import { KERNEL_POST_PREFIX, KERNEL_STREAM_PATH } from './shared/notebook-protocol.ts'
+import { ConfigBackend } from './host/config-backend.ts'
 import { GitBackend } from './host/git-backend.ts'
 import { errorResponse, readJsonObject, sendJson, WorkbenchHttpError } from './host/http.ts'
-import { KernelBackend } from './host/kernel-backend.ts'
+import { DEFAULT_KERNEL_LIMITS, KernelBackend } from './host/kernel-backend.ts'
 import { serveMermaidRuntime } from './host/mermaid-runtime.ts'
 import { isTrustedWorkbenchRequest } from './host/request-trust.ts'
 import { WorkspaceBackend } from './host/workspace-backend.ts'
@@ -29,41 +37,120 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/**
+ * The plugin's configuration as the host hands it to `apply`.
+ *
+ * Every field is present because this is the *validated output*: the host fills
+ * whatever the user did not change from the declared defaults below. The schema's
+ * input type is `Partial<Config>` instead, because a user who adjusted one setting
+ * must not have to spell out the other eighteen — and because cordis saves exactly
+ * the fields that differ from their defaults.
+ */
 export interface Config {
   maxFileBytes: number
   maxDirectoryEntries: number
   gitTimeoutMs: number
   gitMaxOutputBytes: number
+  gitGraphPageSize: number
   kernelStartTimeoutMs: number
   kernelRequestTimeoutMs: number
   kernelMaxPerWorkspace: number
   kernelMaxTotal: number
   kernelUnattendedTimeoutMs: number
+  kernelReclaimGraceMs: number
+  kernelReaperIntervalMs: number
+  kernelHeartbeatMs: number
+  kernelFrameBuffer: number
+  kernelMaxOutputChunkChars: number
+  kernelMaxOutputRunChars: number
+  kernelMaxOutputRunFrames: number
+  kernelDiscoveryCacheMs: number
+  kernelProbeTimeoutMs: number
 }
 
-export const Config: z<Config> = z.object({
-  maxFileBytes: z.natural().min(1024).max(16 * 1024 * 1024).default(2 * 1024 * 1024),
-  maxDirectoryEntries: z.natural().min(10).max(5000).default(1000),
-  gitTimeoutMs: z.natural().min(1000).max(120_000).default(30_000),
-  gitMaxOutputBytes: z.natural().min(64 * 1024).max(32 * 1024 * 1024).default(4 * 1024 * 1024),
+/**
+ * Every tunable the plugin exposes, with the reason it is worth a setting.
+ *
+ * Defaults are read from the constants the host modules already declare rather than
+ * restated here. That is the point: the shipped numbers were duplicated once (the
+ * kernel ceilings read 3/8 here and 4/16 there), and a settings UI that shows one
+ * while the code honours the other is worse than no settings UI. A test locks this
+ * coupling down.
+ *
+ * A field earns its place by being a number someone has a reason to change: a big
+ * notebook that prints a lot, a slow interpreter that needs a longer start, a Git
+ * history worth paging deeper. Anything else stays a constant in the module that
+ * owns it, because a setting nobody understands is worse than a sensible default.
+ */
+const defaults = DEFAULT_KERNEL_LIMITS
+
+/**
+ * One bounded setting, described from the shared table.
+ *
+ * The description comes from `CONFIG_DESCRIPTIONS` rather than being written here, so
+ * the schema and the settings page cannot tell two different stories about the same
+ * field — and so a field cannot be added without one, because the key is required.
+ */
+function setting(key: ConfigKey, min: number, max: number, def: number) {
+  return z.natural().min(min).max(max).default(def).description(CONFIG_FIELDS[key].description.zh)
+}
+
+export const Config: z<Partial<Config>, Config> = z.object({
+  maxFileBytes: setting('maxFileBytes', 1024, 16 * 1024 * 1024, 2 * 1024 * 1024),
+  maxDirectoryEntries: setting('maxDirectoryEntries', 10, 5000, 1000),
+  gitTimeoutMs: setting('gitTimeoutMs', 1000, 120_000, 30_000),
+  gitMaxOutputBytes: setting('gitMaxOutputBytes', 64 * 1024, 32 * 1024 * 1024, 4 * 1024 * 1024),
+  gitGraphPageSize: setting('gitGraphPageSize', 10, 500, GIT_GRAPH_PAGE_SIZE),
+
   // A cold Python kernel with a fat import graph takes seconds, not milliseconds.
-  kernelStartTimeoutMs: z.natural().min(5_000).max(180_000).default(60_000),
-  kernelRequestTimeoutMs: z.natural().min(1_000).max(60_000).default(15_000),
+  kernelStartTimeoutMs: setting('kernelStartTimeoutMs', 5_000, 180_000, defaults.startTimeoutMs),
+  kernelRequestTimeoutMs: setting('kernelRequestTimeoutMs', 1_000, 60_000, defaults.requestTimeoutMs),
   // Kernel count is the one resource this feature cannot grow without limit, so
   // both a per-Workspace and a whole-process ceiling are enforced.
-  kernelMaxPerWorkspace: z.natural().min(1).max(8).default(3),
-  kernelMaxTotal: z.natural().min(1).max(16).default(8),
+  kernelMaxPerWorkspace: setting('kernelMaxPerWorkspace', 1, 8, defaults.maxKernelsPerWorkspace),
+  kernelMaxTotal: setting('kernelMaxTotal', 1, 16, defaults.maxKernelsTotal),
   // A kernel nobody is watching for this long is stopped, the same policy the
   // host's own terminals use for an unattended process.
-  kernelUnattendedTimeoutMs: z.natural().min(60_000).max(24 * 3_600_000).default(15 * 60_000),
+  kernelUnattendedTimeoutMs: setting('kernelUnattendedTimeoutMs', 60_000, 24 * 3_600_000, defaults.unattendedTimeoutMs),
+  kernelReclaimGraceMs: setting('kernelReclaimGraceMs', 0, 60_000, defaults.reclaimGraceMs),
+  kernelReaperIntervalMs: setting('kernelReaperIntervalMs', 1_000, 600_000, defaults.reaperIntervalMs),
+  kernelHeartbeatMs: setting('kernelHeartbeatMs', 1_000, 300_000, defaults.heartbeatMs),
+  kernelFrameBuffer: setting('kernelFrameBuffer', 64, 65_536, defaults.frameBuffer),
+  // Output is bounded twice over: a runaway `print` loop should cost one truncated
+  // cell, not the browser tab that asked for it.
+  kernelMaxOutputChunkChars: setting('kernelMaxOutputChunkChars', 1_024, 4 * 1024 * 1024, defaults.maxOutputChunkChars),
+  kernelMaxOutputRunChars: setting('kernelMaxOutputRunChars', 64 * 1024, 256 * 1024 * 1024, defaults.maxOutputRunChars),
+  kernelMaxOutputRunFrames: setting('kernelMaxOutputRunFrames', 100, 1_000_000, defaults.maxOutputRunFrames),
+  kernelDiscoveryCacheMs: setting('kernelDiscoveryCacheMs', 0, 3_600_000, defaults.discoveryCacheMs),
+  kernelProbeTimeoutMs: setting('kernelProbeTimeoutMs', 1_000, 60_000, defaults.probeTimeoutMs),
 })
 
 /** Register the workbench's isolated JSON endpoint. */
 export function apply(ctx: Context, config: Config): void {
   const workspace = new WorkspaceBackend(ctx, config)
+  /*
+   * The settings page reads its fields off the live schema rather than a second table
+   * of numbers, and reports the values in force — which are `config`, the object the
+   * host already validated, not the schema's defaults.
+   *
+   * Handed over as three reads instead of the schema object itself: the backend needs
+   * a field's declared bounds and a validator, and nothing more. That keeps it free of
+   * schemastery's generic shape and testable without the real schema.
+   */
+  const settings = new ConfigBackend({
+    metaOf: key => (Config.dict?.[key] as { meta?: ConfigFieldMeta } | undefined)?.meta,
+    valueOf: key => {
+      // Every configuration field is a number, so indexing the validated object by a
+      // key the page asked for is total — no cast through `unknown` needed.
+      const value: unknown = config[key as keyof Config]
+      return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    },
+    validate: proposed => Config(proposed) as unknown as Record<string, unknown>,
+  })
   const git = new GitBackend(ctx, workspace, {
     timeoutMs: config.gitTimeoutMs,
     maxOutputBytes: config.gitMaxOutputBytes,
+    graphPageSize: config.gitGraphPageSize,
   })
   const kernel = new KernelBackend(ctx, workspace, {
     startTimeoutMs: config.kernelStartTimeoutMs,
@@ -71,8 +158,17 @@ export function apply(ctx: Context, config: Config): void {
     maxKernelsPerWorkspace: config.kernelMaxPerWorkspace,
     maxKernelsTotal: config.kernelMaxTotal,
     unattendedTimeoutMs: config.kernelUnattendedTimeoutMs,
-    reaperIntervalMs: 30_000,
-    heartbeatMs: 15_000,
+    // The manager panel's reclaim button is refused until a kernel has been
+    // unattended this long, so a page that is merely reloading cannot lose its run.
+    reclaimGraceMs: config.kernelReclaimGraceMs,
+    reaperIntervalMs: config.kernelReaperIntervalMs,
+    heartbeatMs: config.kernelHeartbeatMs,
+    frameBuffer: config.kernelFrameBuffer,
+    maxOutputChunkChars: config.kernelMaxOutputChunkChars,
+    maxOutputRunChars: config.kernelMaxOutputRunChars,
+    maxOutputRunFrames: config.kernelMaxOutputRunFrames,
+    discoveryCacheMs: config.kernelDiscoveryCacheMs,
+    probeTimeoutMs: config.kernelProbeTimeoutMs,
   })
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
@@ -82,7 +178,41 @@ export function apply(ctx: Context, config: Config): void {
       }
       const body = await readJsonObject(req, config.maxFileBytes + 64 * 1024)
       const path = new URL(req.url ?? '/', 'http://dsh.invalid').pathname
-      const value = await dispatch(path, body, workspace, git)
+      if (path === CONFIG_WRITE_PATH) {
+        // Applying the new configuration restarts this plugin, which disposes the very
+        // effect serving this request. Answering first is not politeness: restarting
+        // mid-handler leaves the browser a connection that closes without a status,
+        // and the user cannot tell a saved setting from a failed one.
+        const snapshot = settings.stage(body)
+        sendJson(res, 200, snapshot)
+        const applied = settings.takePending()
+        if (applied !== undefined) {
+          ctx.logger.info('workbench-layout: configuration accepted, restarting the plugin with it')
+          setImmediate(() => {
+            // `update` can fail two ways: it throws when validation rejects the values,
+            // and it returns a promise for the restart that rejects when the restarted
+            // plugin fails. Either left unhandled becomes an uncaught exception, which in
+            // Node takes down the process — so a bad setting could kill DSH rather than
+            // just fail to apply. The reply has already gone out claiming acceptance, so
+            // the log says plainly that the values are not in force.
+            try {
+              // `Promise.resolve` rather than a `.catch` on the result: `update` is typed
+              // `void | Promise<void>`, and resolving an already-settled value is free
+              // while also adopting a thenable the waterfall might return.
+              const restarting: void | Promise<void> = ctx.fiber.update(applied)
+              if (restarting !== undefined) Promise.resolve(restarting).catch(reportRestartFailure)
+            } catch (error: unknown) {
+              reportRestartFailure(error)
+            }
+            function reportRestartFailure(error: unknown): void {
+              ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+              ctx.logger.warn('workbench-layout: the plugin did not restart, so the new configuration is not in force')
+            }
+          })
+        }
+        return
+      }
+      const value = await dispatch(path, body, workspace, git, settings)
       sendJson(res, 200, value)
     } catch (error: unknown) {
       const response = errorResponse(error)
@@ -175,8 +305,11 @@ async function dispatch(
   body: Record<string, unknown>,
   workspace: WorkspaceBackend,
   git: GitBackend,
+  settings: ConfigBackend,
 ): Promise<unknown> {
   switch (path) {
+    case CONFIG_READ_PATH:
+      return settings.read()
     case `${WORKBENCH_API_PREFIX}/tree`:
       return workspace.list(body.workspaceId, body.path)
     case `${WORKBENCH_API_PREFIX}/file/read`:
@@ -273,6 +406,10 @@ async function dispatchKernel(
   switch (path) {
     case `${KERNEL_POST_PREFIX}/discover`:
       return kernel.discover(body.workspaceId)
+    case `${KERNEL_POST_PREFIX}/list`:
+      return kernel.list(body.workspaceId)
+    case `${KERNEL_POST_PREFIX}/reclaim`:
+      return kernel.reclaim(body)
     case `${KERNEL_POST_PREFIX}/start`:
       return kernel.start(body.workspaceId, body.path, body.specName)
     case `${KERNEL_POST_PREFIX}/status`:

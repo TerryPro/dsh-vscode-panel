@@ -50,16 +50,39 @@ export interface KernelLaunchPlan {
   notebookPath: string
 }
 
+/**
+ * Frames per run beyond which the cell is cut off, so a loop cannot fill memory.
+ *
+ * Declared above the defaults that name it: a `const` is in its temporal dead zone
+ * until its statement runs, so referencing it from a lower declaration would throw
+ * at module load — a failure `tsc` cannot see, since it checks types, not order.
+ */
+const MAX_RUN_FRAMES = 20_000
+
 export interface KernelSessionLimits {
   /** Maximum ms to wait for a kernel to open its ports. */
   startTimeoutMs: number
   /** Maximum ms to wait for a non-execution reply (`complete`, `inspect`). */
   requestTimeoutMs: number
+  /**
+   * Output budget, in characters.
+   *
+   * A single frame larger than `maxOutputChunkChars` is cut with a notice; a run
+   * whose output passes `maxOutputRunChars` (or `maxOutputRunFrames` frames) is
+   * dropped with one stderr line, because a `print` loop otherwise trades the
+   * browser's memory for a log nobody reads.
+   */
+  maxOutputChunkChars: number
+  maxOutputRunChars: number
+  maxOutputRunFrames: number
 }
 
 export const DEFAULT_KERNEL_SESSION_LIMITS: KernelSessionLimits = {
   startTimeoutMs: 60_000,
   requestTimeoutMs: 15_000,
+  maxOutputChunkChars: KERNEL_MAX_CHUNK_CHARS,
+  maxOutputRunChars: KERNEL_MAX_RUN_CHARS,
+  maxOutputRunFrames: MAX_RUN_FRAMES,
 }
 
 /**
@@ -82,6 +105,8 @@ export interface KernelSessionHandle {
   readonly busy: boolean
   /** Wall clock of the last activity, for the unattended timer. */
   readonly lastActivityAt: number
+  /** The kernel's OS process id, `null` before spawn or once it has exited. */
+  readonly pid: number | null
   start(signal: AbortSignal): Promise<KernelDescription>
   execute(code: string, cellId: string | undefined, silent: boolean): { msgId: string }
   interrupt(): void
@@ -118,10 +143,7 @@ interface RunningCell {
 }
 
 /** Why a session is being stopped, reflected in the phase message. */
-export type KernelStopReason = 'user' | 'restart' | 'idle' | 'limit' | 'workspace'
-
-/** Frames per run beyond which the cell is cut off, so a loop cannot fill memory. */
-const MAX_RUN_FRAMES = 20_000
+export type KernelStopReason = 'user' | 'restart' | 'idle' | 'limit' | 'workspace' | 'reclaim'
 
 /** Lines of kernel launch noise retained to explain a failed start. */
 const MAX_NOISE_LINES = 8
@@ -194,6 +216,22 @@ export class KernelSession implements KernelSessionHandle {
   /** Whether anything is still being executed, for idle reclamation. */
   get busy(): boolean {
     return this.running.size > 0 || this.inputRequest !== null
+  }
+
+  /**
+   * The kernel's operating-system process id, or `null` before it has spawned.
+   *
+   * The manager panel shows this because it is the one fact a user can act on
+   * outside the app: a stuck kernel they cannot reach can be verified, and if
+   * necessary killed, by pid. It also lets two notebooks prove they are two
+   * processes rather than one shared namespace.
+   */
+  get pid(): number | null {
+    const bridge = this.bridge
+    // A bridge that has already exited still reports a pid; showing a dead one would
+    // invite the user to go kill a process that no longer exists.
+    if (bridge === null || bridge.exitCode !== null || bridge.signalCode !== null) return null
+    return bridge.pid ?? null
   }
 
   /**
@@ -749,14 +787,15 @@ export class KernelSession implements KernelSessionHandle {
 
   private publishOutput(msgId: string, cell: RunningCell | undefined, item: NotebookOutputItem): void {
     const length = outputLength(item)
-    const truncated = length > KERNEL_MAX_CHUNK_CHARS
-    const bounded = truncated ? truncateOutput(item, KERNEL_MAX_CHUNK_CHARS) : item
+    const chunkBudget = this.limits.maxOutputChunkChars
+    const truncated = length > chunkBudget
+    const bounded = truncated ? truncateOutput(item, chunkBudget) : item
     let emit = bounded
     if (cell !== undefined) {
       cell.outputs += 1
       if (!cell.capped) {
-        cell.chars += Math.min(length, KERNEL_MAX_CHUNK_CHARS)
-        if (cell.chars > KERNEL_MAX_RUN_CHARS || cell.outputs > MAX_RUN_FRAMES) {
+        cell.chars += Math.min(length, chunkBudget)
+        if (cell.chars > this.limits.maxOutputRunChars || cell.outputs > this.limits.maxOutputRunFrames) {
           cell.capped = true
           emit = {
             kind: 'stream',

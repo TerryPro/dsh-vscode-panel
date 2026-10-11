@@ -5,6 +5,7 @@ import type { WorkbenchKey } from '../core/locales.ts'
 import { FileTree } from '../files/FileTree.tsx'
 import { GitPanel } from '../git/GitPanel.tsx'
 import { TerminalPanel } from '../terminal/TerminalPanel.tsx'
+import { KernelPanel } from '../notebook/KernelPanel.tsx'
 import { useWorkbench } from '../model/use-workbench.ts'
 import { WorkbenchRail } from './WorkbenchRail.tsx'
 import { resolveCurrentSessionId, resolveWorkbenchWorkspace } from '../model/workspace-binding.ts'
@@ -58,7 +59,9 @@ export function WorkbenchSidebar({ wide, expandSidebar, useSessions, useWorkspac
         ? <GitPanel controller={controller} workspaceId={workspaceId} t={t} />
         : state.sidebarMode === 'terminal'
           ? <TerminalPanel controller={controller} workspaceId={workspaceId} t={t} />
-          : <FileTree controller={controller} workspaceId={workspaceId} workspacePath={workspace?.path} t={t} />}
+          : state.sidebarMode === 'kernels'
+            ? <KernelPanel controller={controller} workspaceId={workspaceId} t={t} />
+            : <FileTree controller={controller} workspaceId={workspaceId} workspacePath={workspace?.path} t={t} />}
     </div>
   )
 }

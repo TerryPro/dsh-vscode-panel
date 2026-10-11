@@ -44,6 +44,7 @@ import { WorkbenchData } from './workbench-data.ts'
 import { WorkbenchEdits } from './workbench-edits.ts'
 import { WorkbenchTerminals } from './workbench-terminals.ts'
 import { NotebookRuntime } from '../notebook/notebook-runtime.ts'
+import { KernelRegistry } from '../notebook/kernel-registry.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
 
 export * from './workbench-types.ts'
@@ -70,6 +71,14 @@ export class WorkbenchController {
    * serializable state and its output frames must not churn the shared tab snapshot.
    */
   readonly notebookRuntime: NotebookRuntime
+  /**
+   * The workspace-wide kernel list behind the manager panel.
+   *
+   * Separate from `notebookRuntime` because that one is per-tab and holds live
+   * connections, while this is a polled read of every kernel the Host is running —
+   * including kernels no tab has any more, which is the whole point of the panel.
+   */
+  readonly kernelRegistry: KernelRegistry
 
   constructor(
     api: WorkbenchApi = new WorkbenchApi(),
@@ -81,6 +90,7 @@ export class WorkbenchController {
     this.data = new WorkbenchData(this.store, api, logger, this)
     this.edits = new WorkbenchEdits(this.store, logger)
     this.terminalRuntime = new WorkbenchTerminals(this.store, logger, this, terminals)
+    this.kernelRegistry = new KernelRegistry(api, logger)
     this.notebookRuntime = new NotebookRuntime(api, logger, {
       getDraft: tabId => this.notebookDraft(tabId),
       setDraft: (tabId, text) => { this.edits.setDraft(text, 'input', tabId) },

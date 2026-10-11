@@ -57,7 +57,7 @@ export function IconClearOutputs16({ size = 14 }: IconProps) {
   )
 }
 
-/** Add a code cell: a plus bracketed by the pair of marks a code cell shows. */
+/** Add a code cell: a plus, the notebook's own "new cell" mark. */
 export function IconAddCode16({ size = 14 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
@@ -66,12 +66,36 @@ export function IconAddCode16({ size = 14 }: IconProps) {
   )
 }
 
-/** Add a text cell: a plus with a paragraph line, so it differs from code at a glance. */
-export function IconAddText16({ size = 14 }: IconProps) {
+/**
+ * Add a Markdown cell: a plus beside the Markdown mark itself (an M and a down arrow).
+ *
+ * The paragraph lines it replaces read as "plain text", which is what the cell is not —
+ * Markdown is a markup language the cell renders, and the M↓ glyph is the one readers
+ * already recognise from every other Markdown surface.
+ */
+export function IconAddMarkdown16({ size = 14 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
-      <path d="M8 2.5v11M2.5 8h11" />
-      <path d="M4.5 5.2h7M4.5 10.8h7" strokeWidth={0.9} />
+      <path d="M1 8h5M3.5 5.5v5" />
+      <path d="M7.3 11.5v-5l1.8 2.2 1.8-2.2v5" />
+      <path d="M13.7 6.5v5m0 0-1-1.3m1 1.3 1-1.3" />
+    </svg>
+  )
+}
+
+/**
+ * Save the notebook: the floppy outline the workbench already uses for the verb.
+ *
+ * A notebook's toolbar otherwise holds only run and cell actions, so the one thing a
+ * reader reaches for after a run — writing the outputs they can see back to the file —
+ * had no visible control at all.
+ */
+export function IconSave16({ size = 14 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M3 2.5h8l2.5 2.5v8.5H3z" />
+      <path d="M5.5 2.5v4h5v-4" />
+      <path d="M5 9.5h6v4.5H5z" />
     </svg>
   )
 }

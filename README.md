@@ -25,7 +25,7 @@ This release is built and tested against DSH Web 0.2.0-rc.2; the peer ranges sti
 
 | Area | What it provides |
 | --- | --- |
-| Left sidebar | Sessions, file explorer, Git changes and Commit Graph, terminal list |
+| Left sidebar | Sessions, file explorer, Git changes and Commit Graph, terminal list, kernel manager |
 | Middle editor | Multi-tab and multi-pane editing, Markdown/Mermaid/HTML/CSV/JSON/image viewers, `.ipynb` notebook editing and execution, per-file Diff, interactive terminals |
 | Right column | The original DSH conversation, task status, tools, and composer |
 
@@ -81,18 +81,29 @@ Files, Git state, editor tabs, and terminals follow the selected **Workspace**; 
 
 Modelled on the VS Code Jupyter extension, and built to fit this workbench's rules rather than to embed a Jupyter frontend.
 
-- **Cell editing.** Add, delete, move, split, merge, and convert cells between Code, Markdown, and Raw. Each code cell carries its Jupyter prompt number (`[ ]`, `[*]` while running, `[12]` once run) — and only a code cell does, since a prompt number on a Markdown cell would claim it has work left to do; a Markdown cell renders in place and switches between source and rendering through its own edit/render button (double-click and `Esc` work too). Edits are structural changes to the notebook JSON, applied through the same version-checked draft/save pipeline as every other file, so saving, dirty tracking, external-change prompts, and revert all behave as they do for text — and an output written by a run is persisted in the file exactly as Jupyter would store it.
+- **Cell editing.** Add, delete, and move cells, edit any cell in place, and switch a cell between Code and Markdown from its own kind picker. Raw is not offered as a kind to create, but a raw cell that arrives in a file still names itself as Raw rather than silently reading as "Code", and can be converted out of it. Each code cell carries its Jupyter prompt number (`[ ]`, `[*]` while running, `[12]` once run) — and only a code cell does, since a prompt number on a Markdown cell would claim it has work left to do; a Markdown cell renders in place and switches between source and rendering through its own edit/render button (double-click and `Esc` work too). Edits are structural changes to the notebook JSON, applied through the same version-checked draft/save pipeline as every other file, so saving, dirty tracking, external-change prompts, and revert all behave as they do for text — and an output written by a run is persisted in the file exactly as Jupyter would store it.
 - **A real kernel, no native dependency.** The Host speaks the Jupyter messaging protocol itself: ZMTP 3.0 over TCP with the NULL handshake, HMAC-SHA256 signing, and the DEALER/SUB channels, implemented in plain Node. Nothing needs `libzmq`, `node-pty`, or a build step, and no browser code is added to the client bundle beyond the notebook view.
 - **Windows interrupts that actually work.** ipykernel's own `interrupt_request` is a no-op on Windows, so the kernel is launched through a small stdlib Python bridge that creates the Win32 event ipykernel waits on and signals it on demand. The same bridge owns the parent-process handle the kernel polls, which is what guarantees no kernel process outlives the DSH host — verified by killing the host and watching the port close.
 - **Kernel discovery.** The workspace's own `.venv`/`venv`/`env`/`.conda` (plus one level of sub-directories for monorepos) is preferred, then the `py` launcher, `PATH`, and `uv`-managed interpreters, then installed kernelspecs. Each candidate is *probed* — its version and whether `ipykernel` imports — rather than assumed, and a kernelspec is probed at the interpreter its own `argv` names, so a kernel installed into a prefix outside `PATH` is still startable. The picker lists what is unavailable and why; the plugin never installs anything on its own.
 - **Connects on open.** Opening a notebook scans the workspace and starts the best kernel by itself — the file's own `metadata.kernelspec` when it can be started here, otherwise the workspace's environment — so the status dot is green before you run anything, exactly as in VS Code. Nothing is started when the workspace has no usable kernel (the picker says why instead), and a background tab is never probed, because only the shown notebook is mounted.
+- **The kernel is reported in the status bar.** The toolbar names the kernel, but it exists only in notebook view — switch the tab to source and the file becomes plain JSON while its kernel keeps running with nothing on screen saying so. The status bar carries the readout in both views: name and state dot (in notebook view it leaves the name to the toolbar and adds only what the toolbar never showed), the prompt count `In[12]`, how many cells a Run All still owes, and — a fact that had no surface anywhere before — the moment the event stream falls back to polling, named in a warning colour because it is slower than the reader expects.
 - **One kernel per notebook.** A second tab on the same file shares its namespace, a cold start that races produces one process, and closing a tab releases the browser's stream while leaving the kernel running for a moment's reconsideration — the Host's unattended timer reclaims it, the same policy the workbench's terminals follow. Restart replaces the session with a new id, so no stream can ever be asked to replay output from a kernel that no longer exists. Picking a *different* kernel from the auto-connected one swaps it cleanly, so the picker is never inert.
 - **Output that reads like a terminal.** Stream frames merge into blocks rather than one row per `print`; ipykernel's ANSI-coloured tracebacks are rendered, not shown as control codes; and a MIME bundle is drawn in its richest form (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml`, then HTML, LaTeX, JSON, Markdown, and plain text last), which is what makes a `pandas` frame a table and a matplotlib figure a picture. `tqdm`/matplotlib `update_display_data` redraws in place instead of stacking a hundred copies. A cell parked on `input()` shows a prompt and resumes on the answer. A cell only grows an output area once it has something to report — a never-run cell shows none, while a cell that ran and printed nothing says so, because that absence is itself the result.
 - **Live output that cannot be lost.** Events are numbered per kernel, so an `EventSource` stream that drops resumes from its cursor and replays the gap; where a stream cannot be held, the identical frames come from a poll route. A cursor older than the Host's buffer is reported as a resync rather than presented as a quiet run. A page reload does not interrupt a running cell.
 - **Security boundaries.** Kernel HTML is a rendering target, not trusted markup: script, handlers, framework directives, remote resources, and `data:text/html` are stripped before it reaches the DOM. Beyond DSH's loopback/origin fence, every kernel carries a token minted at start, so another page on the same machine can neither read a notebook's output nor interrupt its run. Paths, ports, and keys never leave the Host; output is bounded per chunk and per run, with the ceiling named in the cell.
-- **Shortcuts.** `Ctrl/Cmd+Enter` and `Shift+Enter` run the focused cell, `Ctrl+Alt+Enter` runs it and opens a fresh one below, `Ctrl+Shift+Enter` runs all, and `Esc` leaves a text cell's editor and shows it rendered again — the keyboard half of the cell's edit/render button. Creating a notebook from the file tree gives an empty file; its first cell seeds a valid nbformat document.
+- **Shortcuts.** A save button leads the toolbar, marked while the file holds unsaved changes (it is never disabled for a clean notebook, so "saved" cannot be misread as "broken"); `Ctrl/Cmd+S` saves as it does for any other file. `Ctrl/Cmd+Enter` and `Shift+Enter` run the focused cell, `Ctrl+Alt+Enter` runs it and opens a fresh one below, `Ctrl+Shift+Enter` runs all, and `Esc` leaves a text cell's editor and shows it rendered again — the keyboard half of the cell's edit/render button. Creating a notebook from the file tree gives an empty file; its first cell seeds a valid nbformat document.
 
 `examples/python_data_analysis/sales_notebook.ipynb` is a ready-made tour of the above: it loads the CSV next to it, cleans the missing and negative rows that file deliberately contains, renders a `text/html` table, and finishes with a cell that fails, a cell that streams to stderr, and one meant to be interrupted.
+
+`examples/isolation/notebook-A.ipynb` and `notebook-B.ipynb` are a pair for checking that two notebooks cannot affect each other. They sit in **one directory on purpose** — same working directory, same disk — and use the **same variable names** (`marker`, `shared`, `count`) and the **same in-memory module name** with different values. Open both and run them in any order: each one's assertions fail loudly if it ever reads the other's state, and each has a cell that must raise `NameError` when it tries to read the other's variables. One notebook's interrupt and one notebook's stop are also exercised against the other still running. Note what is *not* isolated: the two files share a directory, so a file one writes on disk is readable by the other, and that is correct — isolation here means kernel state.
+
+### Kernel manager
+
+A fifth sidebar mode lists every kernel this Workspace is running.
+
+- **What it shows.** Each row names its notebook, the kernel behind it, the phase (executing, ready, starting, failed), how many times it has run, how many pages are watching it, how long it has been unattended, and its operating-system process id. A capacity line reports this workspace's and the whole host's usage, and warns at the ceiling — because a refused kernel start is otherwise a bare error with no way to see who holds the slot.
+- **Reclaims unattended kernels.** Closing a notebook tab deliberately leaves its kernel running so reopening finds the variables still there — which also means such a kernel is unreachable from anywhere else until the unattended timer fires. The panel is that anywhere else: it can stop a kernel no page is watching, without a token, because nothing can still be waiting on it.
+- **Cannot touch a live notebook.** The list never carries a kernel token, and a kernel with a page attached cannot be reclaimed from here at all; the row says to stop it from its own notebook instead. Every destructive kernel action still requires the token of the notebook that opened it, so this panel cannot interrupt, execute in, or read the output of a notebook it merely can see. A kernel that only just became unattended is also refused briefly, because a reloading page looks identical to a closed tab for a moment.
 
 ### Git workspace
 
@@ -150,7 +161,7 @@ dsh plugin --profile web remove @lsq64737/dsh-workbench-layout
 ## Basic use
 
 1. Select a DSH Workspace.
-2. Use the sidebar modes to switch among Sessions, Files, Git, and Terminal.
+2. Use the sidebar modes to switch among Sessions, Files, Git, Terminal, and Kernels.
 3. Select a file, Diff, commit file, or terminal to open it in the middle column; use the status-bar switches to change a Markdown/CSV/JSON/Mermaid/HTML file between its structured, split, and source views.
 4. Open a `.ipynb` file to edit it as cells. The best kernel for the workspace connects by itself as soon as the notebook opens; run the focused cell with `Ctrl/Cmd+Enter`, or use Run All. The kernel picker names what is available and why anything is not, and lets you switch kernels.
 5. Drag the middle/right divider to choose the amount of space assigned to editing and conversation.
@@ -159,6 +170,32 @@ dsh plugin --profile web remove @lsq64737/dsh-workbench-layout
 Git features require the selected Workspace root to be a Git repository. Remote operations use credentials already configured for Git on the machine running DSH; the plugin does not request or store remote credentials.
 
 Notebook execution requires a Python environment reachable from the Workspace with `ipykernel` installed. The plugin only launches and talks to such an environment; it never installs one.
+
+## Configuration
+
+Open **Settings → Workbench layout** for a form of every setting, each showing its current value, its default, and the range the host accepts. Applying changes restarts the plugin, which stops every notebook kernel it manages, so the page asks before it does it. The same values can be written under this plugin's `config:` block in the profile's `cordis.patch.yml`, which takes effect on the next DSH start.
+
+The table below is the short version: what is worth changing, and what raising it costs.
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `maxFileBytes` | 2 MiB | Largest file that opens or saves. Bigger files report their size instead of loading. |
+| `maxDirectoryEntries` | 1000 | Entries per folder in the file tree. |
+| `gitTimeoutMs` / `gitMaxOutputBytes` | 30 s / 4 MiB | One Git operation's wall clock and output. |
+| `gitGraphPageSize` | 40 | Commits per page of the history graph; scrolling loads more, so this is only how many arrive at once. |
+| `kernelStartTimeoutMs` | 60 s | How long a kernel may take to open its ports. Raise it for conda environments or a first heavy import. |
+| `kernelRequestTimeoutMs` | 15 s | Completion and hover-intro replies, which should never hold the interface. |
+| `kernelMaxPerWorkspace` / `kernelMaxTotal` | 3 / 8 | Kernel ceilings. Each kernel is a Python process, so these are memory, not tidiness. |
+| `kernelUnattendedTimeoutMs` | 15 min | How long a kernel survives its notebook being closed. Raise it to keep variables available longer. |
+| `kernelReclaimGraceMs` | 5 s | How long the kernel manager waits before it may reclaim an unattended kernel — the window that separates a closed tab from a reloading page. |
+| `kernelReaperIntervalMs` / `kernelHeartbeatMs` | 30 s / 15 s | Reclamation sweep and event-stream keepalive. Lower the heartbeat if a proxy drops quiet connections. |
+| `kernelFrameBuffer` | 2048 | Events kept per kernel for replay, i.e. how much output a dropped stream can recover. |
+| `kernelMaxOutputChunkChars` | 128 KiB | One output block, truncated with a notice beyond this. |
+| `kernelMaxOutputRunChars` / `kernelMaxOutputRunFrames` | 4 MiB / 20 000 | One cell's total output, dropped with one stderr line beyond this. |
+| `kernelDiscoveryCacheMs` | 60 s | How long a kernel scan is reused. Set 0 to re-probe every time, or restart a kernel, after installing `ipykernel`. |
+| `kernelProbeTimeoutMs` | 8 s | How long one interpreter may take to answer whether it can be a kernel. |
+
+Nothing is restated: the settings page reads its numbers off the live schema, its wording comes from the same table the schema builds its own descriptions from, a test locks every default to the constant the host module uses, and the field list is typed so a new setting cannot be added without a place on the page. A settings UI that shows one number while the code honours another is worse than no settings UI.
 
 ## Safety and privacy
 
@@ -198,12 +235,16 @@ npm run typecheck
 npm test
 npm run build
 npm run test:bundle
-npm run test:kernel   # optional: end-to-end notebook kernel check
+npm run test:kernel     # optional: end-to-end notebook kernel check
+npm run test:example    # optional: runs every cell of the example notebook
+npm run test:isolation  # optional: proves two notebooks cannot affect each other
 ```
 
 `npm run typecheck` covers the plugin sources plus the test harnesses that stub DSH snapshots (`workspace-binding`, `workbench-sidebar`, `workbench-editor`) and the notebook suite, so a host shape change fails the build instead of silently switching those checks off. Some remaining specs are not type-checked yet.
 
 `npm run test:kernel` mounts the **built** host bundle in a minimal stand-in context and drives its real routes over HTTP against a real `ipykernel` — discovery, the origin and token fences, SSE replay after a dropped stream, the poll fallback, output translation, interrupting a long cell on Windows, two notebooks keeping separate namespaces, and no kernel process surviving teardown. It needs a Python with `ipykernel` reachable from the workspace, which is why it is not part of `npm test`.
+
+`npm run test:example` runs every cell of `examples/python_data_analysis/sales_notebook.ipynb` through a real kernel and reports each cell's terminal status, so a shipped example is verified rather than assumed. `npm run test:isolation` does the same for the `examples/isolation` pair, and asserts the separation on evidence that cannot be faked by the harness: the two notebooks report **different operating-system process ids**, each fails to read the other's variables, and one notebook's interrupt and stop leave the other's running cell untouched.
 
 Source changes only take effect in DSH after `npm run build` regenerates `lib/client.js`; the client loads the bundle, not `src`. The same build copies `src/host/kernel/kernel-bridge.py` beside `lib/index.js`, which is where the Host looks for it at start time.
 

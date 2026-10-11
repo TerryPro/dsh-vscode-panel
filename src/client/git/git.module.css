@@ -786,6 +786,48 @@
   font: var(--dsw-font-xs-13);
 }
 
+/*
+ * The diff's own bottom strip, sized to be indistinguishable from the file editor's
+ * status bar: same height, rule, background, colour, and type. It replaces a header
+ * that cost the first rows of the comparison and made the tab read as two stacked
+ * headers.
+ */
+.diffStatusBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background-color: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  line-height: 1;
+  user-select: none;
+}
+
+.diffStatusPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The kind used to be an official `Pill`, which is 24px tall — it would have pushed
+ * past a 24px strip. The strip's job is to report, not to decorate, so the same word
+ * is plain text like every other item in it.
+ */
+.diffStatusKind,
+.diffStatusCommit {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .diffFileStatus {
   flex: none;
   color: var(--dsw-alias-state-warn-label);
@@ -793,30 +835,42 @@
   font-size: 11px;
 }
 
+/*
+ * Flat like the editor status bar's own view switches. The wrapper used to carry a
+ * border and 2px of padding, which made the group 30px tall — past the 23px content
+ * box of a 24px strip.
+ */
 .diffViewSwitch {
   display: inline-flex;
+  align-items: center;
+  gap: 1px;
   flex: none;
-  padding: 2px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 9px;
-  background: var(--dsw-alias-bg-base);
 }
 
 .diffViewSwitch button {
-  height: 24px;
-  padding: 0 8px;
+  height: 22px;
+  padding: 0 6px;
   border: none;
-  border-radius: 7px;
+  border-radius: 5px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  font: inherit;
   cursor: pointer;
 }
 
-.diffViewSwitch button[data-active] {
-  background: var(--dsw-alias-button-elevated-fill);
+.diffViewSwitch button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
-  box-shadow: 0 1px 3px var(--dsw-alias-bg-mask-1);
+}
+
+.diffViewSwitch button[data-active] {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.diffViewSwitch button:focus-visible {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
 }
 
 .diffDocument {
@@ -825,25 +879,6 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-}
-
-.diffMetadata {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 12px;
-  overflow: hidden;
-  padding: 8px 15px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
-  color: var(--dsw-alias-label-tertiary);
-  font: var(--dsw-font-xxs-12);
-}
-
-.diffMetadata > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .diffStats {
@@ -873,7 +908,18 @@
   display: grid;
   flex: none;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  height: 31px;
+  /*
+   * The shared middle-column row height, so this row's bottom rule continues the
+   * conversation column's divider — see `--dsh-workbench-view-toolbar-height`.
+   *
+   * `border-box` is stated because the variable is an outer height that includes this
+   * row's own 1px rule. Under `content-box` the row would sit one pixel high, which at
+   * a fractional display scale is the whole visible defect. The labels keep their 7px
+   * vertical padding: 37px of border box leaves 36px of content, which is what they
+   * needed before.
+   */
+  box-sizing: border-box;
+  height: var(--dsh-workbench-view-toolbar-height);
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-tertiary);

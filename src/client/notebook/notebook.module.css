@@ -22,6 +22,16 @@
   box-sizing: border-box;
   background: var(--dsw-alias-bg-base);
   /*
+   * The cell stack scrolls, not this element. The root used to be the scroller so that
+   * the toolbar and the cells shared one right edge, and that concern is real — but a
+   * scroller here runs the scrollbar the full height of the panel, past the toolbar, and
+   * the toolbar's bottom rule only spans the content width: the gutter it sits in leaves
+   * a notch in the seam. Scrolling the cells instead keeps the rule unbroken and lets the
+   * scrollbar start below the toolbar, and the shared right edge is preserved by giving
+   * both rows the same reserved gutter (see `.toolbar` and `.cells`).
+   */
+  overflow: hidden;
+  /*
    * ANSI SGR palette, used by the kernel-output renderer.
    *
    * Derived from the same DSH tokens `TerminalSurface` resolves its theme from, so the
@@ -66,14 +76,33 @@
   --dsh-ansi-bg-white: color-mix(in srgb, var(--dsh-ansi-white) 22%, var(--dsw-alias-bg-base, #ffffff));
 }
 
-/* ---------- toolbar ---------- */
-
+/*
+ * ---------- toolbar ----------
+ *
+ * Fixed at the shared middle-column row height so its bottom rule continues the
+ * conversation column's divider, the same line the JSON, CSV and diff toolbars close on
+ * — see `--dsh-workbench-view-toolbar-height`. The vertical padding is gone because the
+ * height is now the row's, not something added to its controls'; `align-items: center`
+ * places the 22px buttons and the kernel picker inside it.
+ *
+ * The reserved gutter is what keeps the toolbar's right edge where the cells' right edge
+ * is: `.cells` is the scroller and gives its content up that width, so a toolbar that
+ * spanned the full panel would put its kernel picker a scrollbar's width past the cell
+ * borders. `overflow: hidden` is not a scroll container in practice here, but it is what
+ * makes the box a scrolling box for `scrollbar-gutter`, and the value holds the space
+ * whether or not a bar is ever drawn — which is also why the two rows stay aligned while
+ * a notebook is too short to scroll.
+ */
 .toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
+  box-sizing: border-box;
   flex: 0 0 auto;
-  padding: 6px 10px;
+  height: var(--dsh-workbench-view-toolbar-height);
+  padding: 0 10px;
+  overflow: hidden;
+  scrollbar-gutter: stable;
   border-block-end: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-layer-1);
 }
@@ -100,6 +129,20 @@
 .toolbarAction:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/*
+ * The save button while the file has unsaved changes. It is a colour, not a dot or a
+ * ring, because the toolbar is a single row of equal icons and anything larger would
+ * shift its neighbours; the same business token the shell marks its own active state
+ * with keeps "this wants you" consistent across the workbench.
+ *
+ * Declared after `.toolbarAction` so it wins on source order at equal specificity, and
+ * before nothing that must override it: hover still reads, and `:disabled` (a higher
+ * specificity) still dims the button while a save is in flight.
+ */
+.toolbarActionActive {
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .toolbarDivider {
@@ -149,6 +192,16 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
+/*
+ * A degraded transport is the one status-bar readout that reports a fault rather than
+ * a fact, so it carries the warn colour instead of the strip's usual tertiary grey.
+ * Polling is correct but slower, and a reader should know it is happening.
+ */
+.kernelStatusWarning {
+  color: var(--dsw-alias-state-warn-label);
+  white-space: nowrap;
+}
+
 .kernelSelect {
   max-width: 180px;
   padding: 3px 6px;
@@ -168,10 +221,28 @@
 /* ---------- cells ---------- */
 
 .cells {
+  /*
+   * The panel's scroll container: everything below the toolbar scrolls inside this box,
+   * so the scrollbar starts under the toolbar rather than running past it, and the
+   * toolbar's bottom rule reaches the panel's edge unbroken.
+   *
+   * `1 1 auto` with `min-height: 0` rather than the `1 0 auto` this needed while the root
+   * scrolled: the box now has a height to fill and content to overflow. It stays a block
+   * container on purpose — the cells were block children before, and a column flex
+   * container that scrolls lets its items compress toward min-content instead of
+   * overflowing, which would squash a tall cell rather than scroll it.
+   *
+   * The 10px inset matches the toolbar on both edges — which is what lines a cell's
+   * border up with the kernel picker above it — and the reserved gutter matches the
+   * toolbar's, so the two right edges stay one scrollbar apart at any scroll height.
+   */
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: 10px 12px 24px;
+  padding: 10px;
+  padding-block-end: 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 .cell {
@@ -200,6 +271,23 @@
 .cell[data-focused='true'] {
   border-color: var(--dsw-alias-border-l2);
   box-shadow: 0 0 0 1px var(--dsw-alias-interactive-bg-active);
+}
+
+/*
+ * The focused cell's header carries the same fill and text colour the file tree and
+ * Git lists use for a selected row, so "this one is current" reads identically
+ * everywhere in the workbench. A border alone was too quiet to notice while scanning
+ * a long notebook, which is exactly when knowing where you are matters.
+ */
+.cell[data-focused='true'] .cellHeader {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-brand-text);
+}
+
+/* The action buttons set their own dimmed colour, so they must opt into the header's. */
+.cell[data-focused='true'] .cellAction,
+.cell[data-focused='true'] .cellKindSelect {
+  color: var(--dsw-alias-brand-text);
 }
 
 .cellHeader {
@@ -571,14 +659,28 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/*
+ * The empty state stands where `.cells` would, so it takes the same contract: it can
+ * overflow a short panel, and the root no longer scrolls to reach it. The reserved gutter
+ * keeps its box the same width as the cell stack's.
+ *
+ * `safe center` rather than `center` because a centered flex box that overflows hides its
+ * own start: the top of the message falls above the scroll origin and no amount of
+ * scrolling reaches it. `safe` keeps the centering when the content fits and drops to
+ * start alignment when it does not, which is the whole point of the two words.
+ */
 .empty {
-  flex: 1 1 auto;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
+  min-height: 0;
   gap: 10px;
   padding: 32px 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12.5px;
   text-align: center;

@@ -1,0 +1,12 @@
+SKU,Name,Category,Price,Stock,Notes
+SKU-1001,"Wireless, Noise-Cancelling Headphones",Audio,299.99,42,"Over-ear, Bluetooth 5.3"
+SKU-1002,"Studio Monitor ""Reference 5""",Audio,549.00,8,"Bi-amped, 5-inch woofer"
+SKU-1003,Mechanical Keyboard,Peripherals,129.50,0,"Hot-swappable switches
+RGB backlight
+USB-C"
+SKU-1004,4K Webcam,Peripherals,89.99,120,"Auto-focus, HDR"
+SKU-1005,"USB-C Hub, 7-in-1",Accessories,59.00,75,"HDMI + 3x USB-A + SD"
+SKU-1006,Standing Desk,Furniture,699.00,3,"Dual motor, memory presets"
+SKU-1007,"Monitor Arm ""Single""",Furniture,79.99,54,"VESA 75/100, up to 32"
+SKU-1008,Noise Machine,Accessories,34.99,200,"12 soundscapes
+USB powered"

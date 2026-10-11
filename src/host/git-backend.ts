@@ -24,7 +24,6 @@ import type {
   GitTargetRemoteOperation,
   GitTargetRemoteResult,
 } from '../shared/contracts.ts'
-import { GIT_GRAPH_PAGE_SIZE } from '../shared/contracts.ts'
 import { WorkbenchHttpError } from './http.ts'
 import type { WorkspaceBackend, WorkspaceGitText } from './workspace-backend.ts'
 import { emptyGitText, GitRunner, type GitText } from './git/git-runner.ts'
@@ -49,6 +48,13 @@ const COMMIT_ACTIONS = new Set<GitCommitAction>(['cherry-pick', 'revert'])
 export interface GitLimits {
   timeoutMs: number
   maxOutputBytes: number
+  /**
+   * Commits per page of the history graph.
+   *
+   * The view loads on demand as it scrolls, so this trades a first paint's size
+   * against how often scrolling asks for more; it is not a cap on history.
+   */
+  graphPageSize: number
 }
 
 /** Git 状态、单文件版本、索引和提交操作。 */
@@ -184,14 +190,16 @@ export class GitBackend {
     const offset = graphOffset(offsetValue)
     const cwd = await this.runner.repositoryRoot(workspaceId)
     if (!await this.runner.hasHead(cwd)) return { commits: [], truncated: false, nextOffset: offset }
+    // One commit past the page, so `truncated` is known without a second query.
+    const pageSize = this.limits.graphPageSize
     const result = await this.runner.run(cwd, [
-      'log', '--all', '--topo-order', `--skip=${offset}`, '-n', String(GIT_GRAPH_PAGE_SIZE + 1), '--date=iso-strict', '--decorate=full',
+      'log', '--all', '--topo-order', `--skip=${offset}`, '-n', String(pageSize + 1), '--date=iso-strict', '--decorate=full',
       '--shortstat', '--diff-merges=first-parent',
       '--format=%x1e%H%x00%h%x00%P%x00%an%x00%aI%x00%s%x00%D%x00',
     ], [0], { LC_ALL: 'C', LANG: 'C' })
     const commits = parseGitGraphWithStats(result.stdout)
-    const visible = commits.slice(0, GIT_GRAPH_PAGE_SIZE)
-    const graph = { commits: visible, truncated: commits.length > GIT_GRAPH_PAGE_SIZE, nextOffset: offset + visible.length }
+    const visible = commits.slice(0, pageSize)
+    const graph = { commits: visible, truncated: commits.length > pageSize, nextOffset: offset + visible.length }
     this.ctx.logger.info(`workbench-layout: loaded Git graph page at offset ${offset} with ${visible.length} commits; older commits ${graph.truncated ? 'remain' : 'exhausted'}`)
     return graph
   }

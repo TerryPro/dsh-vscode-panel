@@ -102,7 +102,13 @@ function apiStub() {
  * The surface reads run state through the real runtime and writes draft text through
  * `onEdit`, so a spec can assert both the cells shown and the notebook file produced.
  */
-function setup(draft: string, options: { editable?: boolean; discover?: unknown } = {}) {
+function setup(draft: string, options: {
+  editable?: boolean
+  discover?: unknown
+  dirty?: boolean
+  saving?: boolean
+  onSave?: () => void
+} = {}) {
   const api = apiStub()
   // The surface asks the host which kernels this workspace can run as soon as it
   // mounts, so a test that cares about the answer has to set it before rendering.
@@ -113,6 +119,7 @@ function setup(draft: string, options: { editable?: boolean; discover?: unknown 
     setDraft: (_tabId, text) => { holder.draft = text },
   })
   const onEdit = vi.fn((text: string) => { holder.draft = text })
+  const onSave = options.onSave ?? vi.fn()
   const view = render(<NotebookSurface
     tabId="tab-1"
     path="nb.ipynb"
@@ -121,10 +128,13 @@ function setup(draft: string, options: { editable?: boolean; discover?: unknown 
     editable={options.editable ?? true}
     runtime={runtime}
     onEdit={onEdit}
+    dirty={options.dirty ?? false}
+    saving={options.saving ?? false}
+    onSave={onSave}
     labels={labels}
     markdownLabels={{ code: { copyLabel: 'copy', copiedLabel: 'copied' }, footnotes: 'notes' } as never}
   />)
-  return { ...view, api, runtime, holder, onEdit }
+  return { ...view, api, runtime, holder, onEdit, onSave }
 }
 /** Push a frame the way the Host's stream would. */
 function frame(runtime: InstanceType<typeof NotebookRuntime>, sequence: number, event: Record<string, unknown>): void {
@@ -256,6 +266,65 @@ describe('notebook surface rendering', () => {
     expect(getByTestId('cell-editor-r1').getAttribute('data-lang-path')).toBe('nb.ipynb.txt')
   })
 
+  it('offers only Code and Markdown as kinds to create', () => {
+    const draft = nb([code('c1', 'x = 1'), { cell_type: 'markdown', id: 'm1', source: '# t', metadata: {} }])
+    const { getAllByLabelText } = setup(draft)
+    // Raw is not a kind a reader picks here, so the picker carries two options.
+    const selects = getAllByLabelText(labels.changeKind) as HTMLSelectElement[]
+    expect(selects).toHaveLength(2)
+    for (const select of selects) {
+      expect([...select.options].map(option => option.value)).toEqual(['code', 'markdown'])
+    }
+  })
+
+  it('still names a raw cell that came from the file', () => {
+    // A `<select>` whose value matches no option shows the *first* one, so dropping the
+    // raw choice entirely would have a raw cell in the file announce itself as "Code".
+    const draft = nb([{ cell_type: 'raw', id: 'r1', source: 'plain', metadata: {} }])
+    const { getByLabelText } = setup(draft)
+    const select = getByLabelText(labels.changeKind) as HTMLSelectElement
+    expect(select.value).toBe('raw')
+    expect([...select.options].map(option => option.value)).toEqual(['code', 'markdown', 'raw'])
+  })
+
+  it('highlights exactly the one cell that was clicked', () => {
+    const draft = nb([code('c1', 'a'), code('c2', 'b'), code('c3', 'c')])
+    const { container, getByTestId } = setup(draft)
+    const focused = () => [...container.querySelectorAll('[data-focused="true"]')]
+      .map(node => node.getAttribute('data-cell-id'))
+    expect(focused()).toEqual([])
+    fireEvent.click(getByTestId('cell-editor-c2'))
+    expect(focused()).toEqual(['c2'])
+    // The regression this guards: focus used to live in each cell's own view state,
+    // set true on click and never cleared, so every cell a reader had visited stayed
+    // lit and the highlight said nothing about where they actually were.
+    fireEvent.click(getByTestId('cell-editor-c1'))
+    expect(focused()).toEqual(['c1'])
+  })
+
+  it('clears focus when the focused cell is deleted', () => {
+    const draft = nb([code('c1', 'a'), code('c2', 'b')])
+    const { getByTestId, getAllByLabelText, onEdit, runtime } = setup(draft)
+    fireEvent.click(getByTestId('cell-editor-c1'))
+    expect(runtime.state('tab-1').focusedCellId).toBe('c1')
+    fireEvent.click(getAllByLabelText(labels.deleteCell)[0] as Element)
+    // A stale id would make the next Ctrl+Enter run nothing at all. Asserted on the
+    // model rather than the DOM: this harness's `onEdit` records the written draft
+    // without re-rendering, so the tree still shows the old cell.
+    expect(runtime.state('tab-1').focusedCellId).toBeNull()
+    const written = JSON.parse(onEdit.mock.calls.at(-1)![0] as string) as { cells: { id: string }[] }
+    expect(written.cells.map(cell => cell.id)).toEqual(['c2'])
+  })
+
+  it('keeps focus when a different cell is deleted', () => {
+    const draft = nb([code('c1', 'a'), code('c2', 'b')])
+    const { getByTestId, getAllByLabelText, runtime } = setup(draft)
+    fireEvent.click(getByTestId('cell-editor-c1'))
+    // The second delete button belongs to c2, which is not focused.
+    fireEvent.click(getAllByLabelText(labels.deleteCell)[1] as Element)
+    expect(runtime.state('tab-1').focusedCellId).toBe('c1')
+  })
+
   it('shows the stored output of a cell without running anything', () => {
     const draft = nb([code('c1', 'x', {
       outputs: [{ output_type: 'stream', name: 'stdout', text: 'stored\n' }],
@@ -329,6 +398,35 @@ describe('notebook surface rendering', () => {
     const parsed = JSON.parse(written) as { nbformat: number; cells: { cell_type: string }[] }
     expect(parsed.nbformat).toBe(4)
     expect(parsed.cells[0]?.cell_type).toBe('code')
+  })
+
+  it('saves the notebook from the toolbar', () => {
+    const { getByLabelText, onSave } = setup(nb([code('c1', 'a')]), { dirty: true })
+    fireEvent.click(getByLabelText(labels.save))
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks the save control rather than disabling it when there is nothing to save', () => {
+    // A clean notebook still offers the action; going inert would read as a broken
+    // button, and the reader cannot tell "saved" from "not working" by an icon.
+    const { getByLabelText } = setup(nb([code('c1', 'a')]), { dirty: false })
+    const button = getByLabelText(labels.save) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    expect(button.getAttribute('title')).toBe(labels.saveClean)
+    expect(button.className).not.toContain('Active')
+  })
+
+  it('marks the save control while the file has unsaved changes', () => {
+    const { getByLabelText } = setup(nb([code('c1', 'a')]), { dirty: true })
+    const button = getByLabelText(labels.save) as HTMLButtonElement
+    expect(button.getAttribute('title')).toBe(labels.saveDirty)
+    expect(button.className).toContain('Active')
+  })
+
+  it('disables the save control while a save is in flight', () => {
+    // A second save mid-flight would race the version token the first one is replacing.
+    const { getByLabelText } = setup(nb([code('c1', 'a')]), { dirty: true, saving: true })
+    expect((getByLabelText(labels.save) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('offers no first-cell button while the file is externally modified', () => {

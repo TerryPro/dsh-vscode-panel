@@ -14,13 +14,22 @@
   border-inline-start: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* Toolbar row above the grid: a filter box on the left, a live count on the right. */
+/*
+ * Toolbar row above the grid: a filter box on the left, a live count on the right.
+ *
+ * Fixed at the shared middle-column row height so its bottom rule lands on the
+ * conversation column's divider, and so switching between JSON, CSV and a notebook does
+ * not move that line — see `--dsh-workbench-view-toolbar-height`. No vertical padding:
+ * `align-items: center` places the controls in the height the row already has.
+ */
 .csvToolbar {
   display: flex;
   align-items: center;
   gap: 12px;
+  box-sizing: border-box;
   flex: 0 0 auto;
-  padding: 8px 12px;
+  height: var(--dsh-workbench-view-toolbar-height);
+  padding: 0 12px;
   border-block-end: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-layer-1);
 }

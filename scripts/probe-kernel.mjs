@@ -21,6 +21,7 @@ import { openEventStream } from './probe-sse.mjs'
 import {
   scenarioFailure, scenarioInterrupt, scenarioIntrospection, scenarioRich, scenarioState,
 } from './probe-scenarios.mjs'
+import { scenarioManager } from './probe-manager.mjs'
 import {
   scenarioPoll, scenarioRestart, scenarioStream, scenarioTeardown, scenarioTwoNotebooks,
 } from './probe-transport.mjs'
@@ -193,6 +194,9 @@ if (typeof secondStart.value?.kernelId === 'string') {
 }
 
 await scenarioRestart(client, check)
+// Last of the kernel-using scenarios: it detaches this client's stream and reclaims
+// its kernel, so nothing afterwards can use them.
+await scenarioManager(client, check)
 await scenarioTeardown(client, check, host.close, pythonPids, pidsBefore)
 
 // The file the notebook tab would save: outputs must have been written by the view,

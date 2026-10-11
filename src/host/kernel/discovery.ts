@@ -236,7 +236,10 @@ async function exists(path: string): Promise<boolean> {
  * interpreter is missing or fails to answer — never a throw, so one broken
  * environment cannot hide the working one behind it.
  */
-export async function probeInterpreter(interpreterPath: string): Promise<InterpreterProbe> {
+export async function probeInterpreter(
+  interpreterPath: string,
+  probeTimeoutMs: number = KERNEL_DISCOVERY_LIMITS.probeTimeoutMs,
+): Promise<InterpreterProbe> {
   const failure = (reason: string): InterpreterProbe => ({
     interpreterPath,
     pythonVersion: '',
@@ -255,7 +258,7 @@ export async function probeInterpreter(interpreterPath: string): Promise<Interpr
     const { stdout } = await execFileAsync(interpreterPath, ['-E', '-B', '-c', INTERPRETER_PROBE], {
       cwd: dirname(interpreterPath),
       encoding: 'utf8',
-      timeout: KERNEL_DISCOVERY_LIMITS.probeTimeoutMs,
+      timeout: probeTimeoutMs,
       windowsHide: true,
       maxBuffer: KERNEL_DISCOVERY_LIMITS.probeMaxOutputBytes,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
@@ -420,17 +423,39 @@ export function isAbsoluteInterpreter(value: string): boolean {
 }
 
 /**
+ * Bounds a caller may widen without a rebuild.
+ *
+ * Only the two a user has a reason to change are threaded through: how long one
+ * interpreter may take to answer, and how long a result is reused. The counts that
+ * stop discovery becoming a fork bomb on a big monorepo stay constants — raising
+ * them makes a slow scan slower, which is the opposite of what someone editing a
+ * setting is after.
+ */
+export interface KernelDiscoveryLimits {
+  probeTimeoutMs: number
+  cacheTtlMs: number
+}
+
+export const DEFAULT_DISCOVERY_LIMITS: KernelDiscoveryLimits = {
+  probeTimeoutMs: KERNEL_DISCOVERY_LIMITS.probeTimeoutMs,
+  cacheTtlMs: KERNEL_DISCOVERY_LIMITS.cacheTtlMs,
+}
+
+/**
  * Discover every usable kernel for one Workspace root.
  *
  * @param workspaceRoot canonical absolute path from `WorkspaceBackend.rootProcessPath`.
  * @returns environments plus a picker list, best-first, with reasons for the rest.
  */
-export async function discoverKernels(workspaceRoot: string): Promise<{
+export async function discoverKernels(
+  workspaceRoot: string,
+  limits: KernelDiscoveryLimits = DEFAULT_DISCOVERY_LIMITS,
+): Promise<{
   environments: KernelEnvironment[]
   kernels: KernelChoice[]
 }> {
   const cached = discoveryCache.get(workspaceRoot.toLowerCase())
-  if (cached !== undefined && Date.now() - cached.at < KERNEL_DISCOVERY_LIMITS.cacheTtlMs) {
+  if (cached !== undefined && Date.now() - cached.at < limits.cacheTtlMs) {
     return { environments: cached.environments, kernels: cached.kernels }
   }
 
@@ -441,7 +466,7 @@ export async function discoverKernels(workspaceRoot: string): Promise<{
   // slow broken environment must not displace the workspace `.venv`.
   const probes = await Promise.all(candidates.map(async candidate => ({
     candidate,
-    probe: await probeInterpreter(candidate.path),
+    probe: await probeInterpreter(candidate.path, limits.probeTimeoutMs),
   })))
   for (const { candidate, probe } of probes) {
     environments.push({
@@ -502,7 +527,7 @@ export async function discoverKernels(workspaceRoot: string): Promise<{
       if (named !== undefined) {
         probe = probeCache.get(named)
         if (probe === undefined) {
-          probe = await probeInterpreter(named)
+          probe = await probeInterpreter(named, limits.probeTimeoutMs)
           probeCache.set(named, probe)
         }
       }

@@ -13,6 +13,9 @@ vi.mock('../src/client/files/FileTree.tsx', () => ({
 }))
 vi.mock('../src/client/git/GitPanel.tsx', () => ({ GitPanel: () => <div data-probe="git" /> }))
 vi.mock('../src/client/terminal/TerminalPanel.tsx', () => ({ TerminalPanel: () => <div data-probe="terminal" /> }))
+// Every panel is stubbed here because the spec is about Workspace binding, and the
+// real ones pull in the store package (which needs zustand, not installed for tests).
+vi.mock('../src/client/notebook/KernelPanel.tsx', () => ({ KernelPanel: () => <div data-probe="kernels" /> }))
 vi.mock('../src/client/shell/WorkbenchRail.tsx', () => ({ WorkbenchRail: () => <div data-probe="rail" /> }))
 
 afterEach(() => { cleanup() })

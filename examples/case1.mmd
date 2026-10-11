@@ -1,0 +1,109 @@
+classDiagram
+    %% 基础联合体类
+    class Value {
+        <<union>>
+        +GCObject* gc
+        +void* p
+        +lua_CFunction f
+        +lua_Integer i
+        +lua_Number n
+        +lu_byte ub
+    }
+
+    %% 标记值结构
+    class TValue {
+        +Value value_
+        +lu_byte tt_
+        +getValue() Value
+        +getType() lu_byte
+        +setType(lu_byte)
+    }
+
+    %% 垃圾回收对象基类
+    class GCObject {
+        <<abstract>>
+        +GCObject* next
+        +lu_byte tt
+        +lu_byte marked
+        +isMarked() bool
+        +mark()
+        +unmark()
+    }
+
+    %% 哈希节点结构
+    class NodeKey {
+        +Value value_
+        +lu_byte tt_
+        +lu_byte key_tt
+        +int next
+        +Value key_val
+        +getKey() Value
+        +getValue() Value
+        +setKey(Value, lu_byte)
+        +setValue(Value, lu_byte)
+        +getNext() int
+        +setNext(int)
+    }
+
+    %% 节点联合体
+    class Node {
+        <<union>>
+        +NodeKey u
+        +TValue i_val
+        +getKeyStruct() NodeKey
+        +getValueDirect() TValue*
+        +isNil() bool
+        +isDead() bool
+    }
+
+    %% Table主结构
+    class Table {
+        +GCObject* next
+        +lu_byte tt
+        +lu_byte marked
+        +lu_byte flags
+        +lu_byte lsizenode
+        +unsigned int alimit
+        +TValue* array
+        +Node* node
+        +Node* lastfree
+        +Table* metatable
+        +GCObject* gclist
+        --
+        +get(TValue* key) TValue*
+        +set(TValue* key, TValue* val)
+        +getInt(lua_Integer key) TValue*
+        +setInt(lua_Integer key, TValue* val)
+        +resize(int nasize, int nhsize)
+        +next(TValue* key) int
+        +getn() lua_Unsigned
+        +free()
+    }
+
+    %% 关系定义
+    TValue *-- Value : 组合
+    Node *-- NodeKey : 联合体成员
+    Node *-- TValue : 联合体成员 (i_val)
+    NodeKey *-- Value : 组合 (value_)
+    NodeKey *-- Value : 组合 (key_val)
+    
+    Table --|> GCObject : 继承
+    Table *-- TValue : 聚合 (array)
+    Table *-- Node : 聚合 (node)
+    Table *-- Node : 关联 (lastfree)
+    Table *-- Table : 关联 (metatable)
+    Table *-- GCObject : 关联 (gclist)
+    
+    Value ..> GCObject : 依赖 (gc指针)
+
+    %% 样式定义
+     classDef unionClass fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+     classDef structClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+     classDef abstractClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+
+     class Value unionClass
+     class Node unionClass
+     class TValue structClass
+     class NodeKey structClass
+     class Table structClass
+     class GCObject abstractClass

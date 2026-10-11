@@ -20,6 +20,8 @@ import { installOpenFileRefresh } from './editor/open-file-refresh.ts'
 import { createWorkbenchWorkspaceActivator } from './model/workspace-layout.ts'
 import { WorkbenchEditor } from './editor/WorkbenchEditor.tsx'
 import { WorkbenchSidebar } from './shell/WorkbenchSidebar.tsx'
+import type { ConfigText } from '../shared/config-protocol.ts'
+import { ConfigPanel } from './settings/ConfigPanel.tsx'
 import './styles/global.module.css'
 
 export const inject = ['slots', 'locale', 'layout', 'webTerminals']
@@ -75,6 +77,35 @@ export function apply(ctx: ClientContext): void {
     locale: 'workbench',
     inject: () => ({ controller, activateWorkspace }),
   }, WorkbenchEditor))
+
+  /*
+   * The plugin's page on DSH's Settings dialog.
+   *
+   * The navigation row's title comes from the workbench dictionary like every other
+   * user-facing string, through a bound translator rather than a hand-rolled lookup, so
+   * an unfamiliar deployment locale still rides the shell's fallback chain.
+   *
+   * `pick` serves the field labels and descriptions, which arrive from the Host as
+   * `{ zh, en }` pairs because the schema is their only home and the host cannot read
+   * the browser's dictionary. Preferring the active locale and falling back to English
+   * is the same rule the locale service itself applies.
+   */
+  const settingsT = ctx.locale.bind('workbench')
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'workbench-layout',
+    order: 30,
+    locale: 'workbench',
+    label: () => settingsT('config.nav'),
+    inject: () => ({
+      api: controller.api,
+      logger: ctx.logger,
+      pick: (text: ConfigText) => {
+        const active = ctx.locale.getSnapshot().active.toLowerCase()
+        return active.startsWith('zh') ? text.zh : text.en
+      },
+    }),
+  }, ConfigPanel))
 
   installWorkbenchLayout(ctx, controller.store, controller, ctx.layout.panelInfo)
   ctx.logger.info('workbench-layout: stable native session action and official Workspace path header registered')

@@ -25,6 +25,7 @@ import { clampMermaidSplitRatio, readMermaidSplitRatio, saveMermaidSplitRatio } 
 import { isMermaidPath } from '../mermaid/mermaid-path.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
 import { NotebookSurface, type NotebookLabels } from '../notebook/NotebookSurface.tsx'
+import { NotebookKernelStatus } from '../notebook/NotebookKernelStatus.tsx'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
@@ -186,10 +187,14 @@ export function EditorTabBody({
     interrupt: t('notebook.interrupt'),
     runAll: t('notebook.runAll'),
     clearAllOutputs: t('notebook.clearAllOutputs'),
+    save: t('notebook.save'),
+    saveDirty: t('notebook.saveDirty'),
+    saveClean: t('notebook.saveClean'),
+    saving: t('notebook.saving'),
     addCodeCell: t('notebook.addCodeCell'),
-    addTextCell: t('notebook.addTextCell'),
+    addMarkdownCell: t('notebook.addMarkdownCell'),
     insertCodeBelow: t('notebook.insertCodeBelow'),
-    insertTextBelow: t('notebook.insertTextBelow'),
+    insertMarkdownBelow: t('notebook.insertMarkdownBelow'),
     deleteCell: t('notebook.deleteCell'),
     moveUp: t('notebook.moveUp'),
     moveDown: t('notebook.moveDown'),
@@ -303,6 +308,9 @@ export function EditorTabBody({
         editable={tab.externalChange === null && !tab.saving}
         runtime={controller.notebookRuntime}
         onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
+        dirty={tab.dirty}
+        saving={tab.saving}
+        onSave={() => { void controller.save(tab.id) }}
         labels={notebookLabels}
         markdownLabels={markdownLabels}
       />
@@ -425,6 +433,16 @@ export function EditorTabBody({
         content={tab.draft}
         t={t}
         showPosition={showEditor}
+        kernel={isNotebookTab
+          ? (
+            <NotebookKernelStatus
+              runtime={controller.notebookRuntime}
+              tabId={tab.id}
+              t={t}
+              hideChip={notebookMode === 'notebook'}
+            />
+          )
+          : undefined}
         actions={(
           <>
             {tab.file.markdown && (

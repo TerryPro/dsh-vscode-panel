@@ -13,6 +13,7 @@ import type { WorkbenchKey } from '../core/locales.ts'
 import type { WorkbenchPanelNavigation } from '../model/workbench-types.ts'
 import { IconSourceControlOutline16 } from '../git/SourceControlIcon.tsx'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
+import { IconKernelOutline16 } from '../notebook/KernelIcon.tsx'
 import { IconConversationPanelOutline16 } from './ConversationPanelIcon.tsx'
 import { IconEditorPanelOutline16 } from '../editor/EditorPanelIcon.tsx'
 import { IconBackToSessionOutline16 } from './BackToSessionIcon.tsx'
@@ -61,6 +62,7 @@ export function ModeSwitch({ wide, controller, logger, panels, t }: ModeSwitchPr
     { mode: 'files' as const, label: t('mode.files'), icon: <IconFolderOpenOutlineMedium size={18} /> },
     { mode: 'git' as const, label: t('mode.git'), icon: <IconSourceControlOutline16 size={18} /> },
     { mode: 'terminal' as const, label: t('mode.terminal'), icon: <IconTerminalOutline16 size={18} /> },
+    { mode: 'kernels' as const, label: t('mode.kernels'), icon: <IconKernelOutline16 size={18} /> },
   ]
   useLayoutEffect(() => {
     const mount = createActivityDockMount(css.activityDock!, setTarget, logger)

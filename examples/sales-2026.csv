@@ -1,0 +1,16 @@
+OrderID,Customer,Region,Product,Quantity,UnitPrice,Total,Status,OrderDate
+1001,Acme Corporation,"North, East",Widget A,120,9.99,1198.80,Fulfilled,2026-01-04
+1002,Globex,South,Gadget Pro,30,49.50,1485.00,Pending,2026-01-07
+1003,Initech,West,Widget A,75,9.99,749.25,Fulfilled,2026-01-11
+1004,Umbrella LLC,"North, East",Sensor Kit,15,129.00,1935.00,Shipped,2026-01-15
+1005,Stark Industries,West,Gadget Pro,60,49.50,2970.00,Fulfilled,2026-01-18
+1006,Wayne Enterprises,South,Widget A,200,8.49,1698.00,Cancelled,2026-01-22
+1007,Hooliedream,North,Sensor Kit,8,129.00,1032.00,Pending,2026-01-25
+1008,Pied Piper,East,Gadget Pro,45,47.00,2115.00,Shipped,2026-02-01
+1009,Vandelay Industries,South,Widget A,500,7.99,3995.00,Fulfilled,2026-02-06
+1010,Soylent Corp,West,Sensor Kit,22,129.00,2838.00,Fulfilled,2026-02-09
+1011,Acme Corporation,"North, East",Gadget Pro,18,49.50,891.00,Pending,2026-02-14
+1012,Globex,North,Widget A,340,9.99,3396.60,Shipped,2026-02-17
+1013,Initech,"North, East",Sensor Kit,4,129.00,516.00,Fulfilled,2026-02-21
+1014,Umbrella LLC,West,Gadget Pro,90,45.00,4050.00,Cancelled,2026-02-25
+1015,Stark Industries,South,Widget A,150,9.99,1498.50,Fulfilled,2026-03-02

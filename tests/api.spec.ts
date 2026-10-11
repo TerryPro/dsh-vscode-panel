@@ -71,6 +71,8 @@ describe('Workbench browser API', () => {
     const api = new WorkbenchApi()
 
     await api.kernelDiscover('ws-1')
+    await api.kernelList('ws-1')
+    await api.kernelReclaim('k1', 'ws-1')
     await api.kernelStart('ws-1', 'nb.ipynb', 'python3')
     await api.kernelStatus('k1', 't1', 'ws-1')
     await api.kernelExecute({ kernelId: 'k1', token: 't1', workspaceId: 'ws-1', code: 'x', cellId: 'c1' })
@@ -84,6 +86,8 @@ describe('Workbench browser API', () => {
 
     expect(fetch.mock.calls.map(call => call[0])).toEqual([
       '/dsh-workbench-layout/kernel/discover',
+      '/dsh-workbench-layout/kernel/list',
+      '/dsh-workbench-layout/kernel/reclaim',
       '/dsh-workbench-layout/kernel/start',
       '/dsh-workbench-layout/kernel/status',
       '/dsh-workbench-layout/kernel/execute',
@@ -95,6 +99,13 @@ describe('Workbench browser API', () => {
       '/dsh-workbench-layout/kernel/restart',
       '/dsh-workbench-layout/kernel/shutdown',
     ])
+    // The panel's two calls are the only kernel requests without a token: `list`
+    // because a page cannot present a token for a kernel it never opened, and
+    // `reclaim` because the Host re-checks unattendedness itself. Asserting the shape
+    // here keeps a future edit from quietly starting to ship tokens to the panel.
+    expect(JSON.parse(String((fetch.mock.calls[1]![1] as RequestInit).body))).toEqual({ workspaceId: 'ws-1' })
+    expect(JSON.parse(String((fetch.mock.calls[2]![1] as RequestInit).body)))
+      .toEqual({ workspaceId: 'ws-1', kernelId: 'k1' })
     // None may collapse onto the bare prefix that the Host refuses.
     for (const call of fetch.mock.calls) {
       expect(call[0]).not.toBe('/dsh-workbench-layout/kernel')

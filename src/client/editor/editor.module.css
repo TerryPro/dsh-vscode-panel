@@ -13,6 +13,42 @@
 
 .editorRoot,
 .editorEmpty {
+  /*
+   * The outer height of the middle column's second row — the toolbar a view draws
+   * under the tab bar — so that row's bottom rule continues the conversation column's
+   * header divider instead of overshooting past it:
+   *
+   *   conversation header  76px  (DSH's `.wSkVaW_header` min-height, border-box)
+   *   − middle tab bar     39px  (`.editorHeader`'s 38px + its 1px border-bottom)
+   *   =                    37px, this row's border-box height, its own rule included
+   *
+   * Fixed, not a minimum: the rows are sized by their controls plus their padding, and
+   * those disagree — the JSON toolbar's search box makes it about 48px, the notebook's
+   * 22px buttons about 34px — so no natural size aligns both. Consumers therefore set
+   * this as their border-box height and drop their vertical padding, letting
+   * `align-items: center` place controls that are shorter than the row. Nothing clips:
+   * the tallest control in any of these rows is a 27px search box inside a 36px content
+   * box.
+   *
+   * Declared once on the ancestor of every middle-column view and consumed by each
+   * (JSON, CSV, notebook, diff): the seam is the same line in all four, so a value
+   * restated per file is a value that drifts, and switching views would visibly move
+   * the divider. No fallback at the use sites — this element is an ancestor of all of
+   * them, and a fallback would be the second copy of the number this exists to prevent.
+   *
+   * Two states where a constant cannot hold, both accepted rather than worked around:
+   *
+   * - a view that shows a second row under its toolbar (CSV's structural-edit bar when
+   *   the grid is editable, JSON's parse or truncation notice) has more than one row to
+   *   place, so only the first closes on the seam and the rest push below it. Making the
+   *   total fit would mean clipping a notice the view is showing on purpose.
+   * - DSH collapses its header to `min-height: 0` when the conversation column has no
+   *   tabs, so with no session open the divider sits higher and this row overshoots. That
+   *   is the cost of a fixed value; the alternative was measuring the other column every
+   *   frame, which is what this replaces.
+   */
+  --dsh-workbench-view-toolbar-height: 37px;
+
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -686,6 +722,17 @@
  * hit area; it turns accent-coloured on hover, focus, or while dragging.
  */
 :global([data-diff-surface='split'] .cm-mergeView) {
+  /*
+   * A flex column so the editors' row can be stretched to the pane's full height.
+   * The merge view's own theme pins `.cm-editor` and `.cm-scroller` to
+   * `height: auto !important`, which no later `height` declaration can beat;
+   * flex-grow is a different lever and does work. Without it the two panes are only
+   * as tall as their content, so on a short diff the gutter rules and the split
+   * divider all stopped at the last line — three rules ending in mid-air above a
+   * band of bare background.
+   */
+  display: flex;
+  flex-direction: column;
   /* Always reserve the vertical scrollbar's column so the panes keep one width
      whether or not the diff is tall enough to scroll. */
   scrollbar-gutter: stable;
@@ -693,6 +740,23 @@
 
 :global([data-diff-surface='split'] .cm-mergeViewEditors) {
   position: relative;
+  /*
+   * `flex: 1` with the default automatic minimum size: a diff taller than the pane
+   * still sizes the row by its content and scrolls, rather than being squeezed.
+   * The divider is positioned against this box, so filling it is also what draws
+   * the divider all the way down.
+   */
+  flex: 1;
+}
+
+:global([data-diff-surface='split'] .cm-mergeViewEditor) {
+  display: flex;
+  flex-direction: column;
+}
+
+:global([data-diff-surface='split'] .cm-mergeViewEditor .cm-editor),
+:global([data-diff-surface='split'] .cm-mergeViewEditor .cm-scroller) {
+  flex: 1;
 }
 
 :global([data-diff-surface='split'] .cm-mergeViewEditor:first-child) {

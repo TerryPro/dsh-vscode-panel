@@ -195,6 +195,53 @@ export interface KernelInputResult {
   accepted: boolean
 }
 
+/**
+ * One kernel the Host is currently running, as the manager panel sees it.
+ *
+ * Note what is *absent*: the per-kernel token. The panel is a workspace-wide view,
+ * and handing out every token would turn a read-only list into a skeleton key that
+ * can execute in, or interrupt, any notebook on this machine — precisely what the
+ * token exists to prevent. So the panel can see everything and touch only what no
+ * notebook can reach any more.
+ */
+export interface KernelListing {
+  kernelId: string
+  /** Workspace-relative notebook path this kernel belongs to. */
+  path: string
+  displayName: string
+  specName: string
+  /** Language from `kernel_info_reply`, `''` before the kernel has answered. */
+  language: string
+  phase: KernelPhase
+  /** Whether a cell is still running or parked on `input()`. */
+  busy: boolean
+  executionCount: number
+  /** Open event streams attached right now; zero means no page is watching. */
+  attached: number
+  /** Wall clock of the last moment a page watched it or it produced output. */
+  lastEngagedAt: number
+  /** Operating-system process id, or `null` if the process never came up. */
+  pid: number | null
+  /**
+   * True when no notebook can reach this kernel any more, so the panel may reclaim
+   * it. The Host owns this judgement; the panel only renders it.
+   */
+  orphan: boolean
+  /** Whether the Host would currently accept a reclaim for this kernel. */
+  reclaimable: boolean
+}
+
+/** The whole kernel picture: every live kernel plus the ceilings that bound them. */
+export interface KernelListResult {
+  kernels: KernelListing[]
+  /** Kernels this Workspace may run at once. */
+  maxKernelsPerWorkspace: number
+  /** Kernels this DSH process may run at once, across every Workspace. */
+  maxKernelsTotal: number
+  /** Live kernels in the whole process, which is what the total ceiling counts. */
+  totalKernels: number
+}
+
 /** Completion, introspection, and code-completeness helpers for cell editing. */
 export interface KernelCompletionResult {
   matches: string[]

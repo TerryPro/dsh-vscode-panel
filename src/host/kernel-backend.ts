@@ -23,6 +23,8 @@ import type {
   KernelInputResult,
   KernelInspectResult,
   KernelIsCompleteResult,
+  KernelListing,
+  KernelListResult,
   KernelPhase,
   KernelStartResult,
   KernelStatusResult,
@@ -47,6 +49,8 @@ import {
   defaultKernelChoice,
   discoverKernels,
   forgetKernelDiscovery,
+  KERNEL_DISCOVERY_LIMITS,
+  type KernelDiscoveryLimits,
 } from './kernel/discovery.ts'
 import type { KernelChoice, KernelEnvironment } from '../shared/notebook-protocol.ts'
 
@@ -58,19 +62,46 @@ export interface KernelLimits extends KernelSessionLimits {
   maxKernelsTotal: number
   /** A kernel with no attached browser and no run for this long is stopped. */
   unattendedTimeoutMs: number
+  /**
+   * How long a kernel must have been unattended before the panel may reclaim it.
+   *
+   * Distinct from the unattended timeout and much shorter: a page that is reloading
+   * or mid-reconnect has zero attached streams for a moment too, and stopping the
+   * kernel under it would throw away a run the reader can still see on screen.
+   */
+  reclaimGraceMs: number
   /** How often the reaper scans sessions. */
   reaperIntervalMs: number
   /** SSE comment keepalive interval, so a proxy does not close an idle stream. */
   heartbeatMs: number
+  /**
+   * Event frames kept per kernel for replay.
+   *
+   * This is what a dropped stream resumes from: a smaller buffer means a longer
+   * outage reports a resync rather than quietly replaying, which is the honest
+   * answer but loses output, so the ceiling is a setting rather than a constant.
+   */
+  frameBuffer: number
+  /** How long one Workspace's discovery result is reused before it is re-probed. */
+  discoveryCacheMs: number
+  /** How long a single interpreter probe may take before it is called unusable. */
+  probeTimeoutMs: number
 }
 
 export const DEFAULT_KERNEL_LIMITS: KernelLimits = {
   ...DEFAULT_KERNEL_SESSION_LIMITS,
-  maxKernelsPerWorkspace: 4,
-  maxKernelsTotal: 16,
+  // The numbers the plugin actually ships: `Config` reads these rather than
+  // repeating them, so the two cannot drift. They used to (4/16 here against 3/8
+  // there), and the copy that lost was the one no user ever saw.
+  maxKernelsPerWorkspace: 3,
+  maxKernelsTotal: 8,
   unattendedTimeoutMs: 15 * 60_000,
+  reclaimGraceMs: 5_000,
   reaperIntervalMs: 30_000,
   heartbeatMs: 15_000,
+  frameBuffer: KERNEL_FRAME_BUFFER,
+  discoveryCacheMs: KERNEL_DISCOVERY_LIMITS.cacheTtlMs,
+  probeTimeoutMs: KERNEL_DISCOVERY_LIMITS.probeTimeoutMs,
 }
 
 /** One managed kernel plus the state its listeners need. */
@@ -108,9 +139,14 @@ export interface KernelBackendOptions {
   /**
    * Machine scan for interpreters and kernelspecs, overridable so the manager's rules
    * can be tested without a Python install.
+   *
+   * Takes the discovery limits rather than closing over a constant: a configured
+   * probe timeout that never reached the probe would silently do nothing, and the
+   * signature is what makes that impossible to write by accident.
    */
   discoverKernels?: (
     workspaceRoot: string,
+    limits: KernelDiscoveryLimits,
   ) => Promise<{ environments: KernelEnvironment[]; kernels: KernelChoice[] }>
 }
 
@@ -128,6 +164,7 @@ export class KernelBackend {
   ) => KernelSessionHandle
   private readonly scanKernels: (
     workspaceRoot: string,
+    limits: KernelDiscoveryLimits,
   ) => Promise<{ environments: KernelEnvironment[]; kernels: KernelChoice[] }>
   /** Start requests in flight per notebook, so a racing second tab joins rather than doubles. */
   private readonly startRaces = new Map<string, Promise<KernelStartResult>>()
@@ -145,8 +182,22 @@ export class KernelBackend {
       ?? fileURLToPath(new URL('./kernel-bridge.py', import.meta.url))
     this.createSession = options.createSession
       ?? ((workspaceId, launch, sink, sessionLimits) => new KernelSession(workspaceId, launch, sink, sessionLimits))
-    this.scanKernels = options.discoverKernels ?? ((root: string) => discoverKernels(root))
+    this.scanKernels = options.discoverKernels ?? ((root, discoveryLimits) => discoverKernels(root, discoveryLimits))
     this.startReaper()
+  }
+
+  /**
+   * The discovery bounds derived from configuration.
+   *
+   * Read per call rather than captured once: the values come from the same `limits`
+   * the rest of the manager uses, so a test that overrides one field changes exactly
+   * that field and nothing else.
+   */
+  private get discoveryLimits(): KernelDiscoveryLimits {
+    return {
+      probeTimeoutMs: this.limits.probeTimeoutMs,
+      cacheTtlMs: this.limits.discoveryCacheMs,
+    }
   }
 
   /** Stop every kernel: called when the plugin's effect is disposed. */
@@ -170,7 +221,7 @@ export class KernelBackend {
    */
   async discover(workspaceIdValue: unknown): Promise<KernelDiscoverResult> {
     const root = await this.workspace.rootProcessPath(requireWorkspaceId(workspaceIdValue))
-    const { environments, kernels } = await this.scanKernels(root.cwd)
+    const { environments, kernels } = await this.scanKernels(root.cwd, this.discoveryLimits)
     const usable = kernels.some(kernel => kernel.available)
     return {
       usable,
@@ -219,6 +270,91 @@ export class KernelBackend {
     })
     this.startRaces.set(existingKey, start)
     return await start
+  }
+
+  /**
+   * Every kernel this Workspace is running, for the manager panel.
+   *
+   * Deliberately **not** token-scoped like every other read: the panel's whole point
+   * is to show kernels no notebook tab can reach any more, and a page cannot present
+   * a token for something it never opened. What it *does* require is a workspace id,
+   * so one workspace's page cannot enumerate another's notebooks.
+   *
+   * The token is never returned. Handing out every token would turn a read-only list
+   * into a skeleton key that can execute in and interrupt any kernel on this machine,
+   * which is exactly the hole the token exists to close.
+   */
+  async list(workspaceIdValue: unknown): Promise<KernelListResult> {
+    const workspaceId = requireWorkspaceId(workspaceIdValue)
+    const now = Date.now()
+    const kernels: KernelListing[] = []
+    for (const kernel of this.kernels.values()) {
+      if (kernel.workspaceId !== workspaceId) continue
+      const attached = kernel.listeners.size
+      // An orphan is a kernel no page is watching. Closing a notebook tab does not
+      // stop its kernel on purpose — reopening should find the variables still there —
+      // so without this view such a kernel is unreachable by anything except the
+      // unattended timer, and the user has no way to free it.
+      const orphan = attached === 0
+      // Reclaiming needs the grace period as well as the orphan state. A page that is
+      // mid-reconnect, or reloading, has zero listeners for a moment too, and stopping
+      // the kernel under it would throw away a run the reader can still see.
+      const graceMs = this.limits.reclaimGraceMs
+      kernels.push({
+        kernelId: kernel.session.kernelId,
+        path: kernel.path,
+        displayName: kernel.session.displayName,
+        specName: kernel.session.specName,
+        language: kernel.info?.language.name ?? '',
+        phase: kernel.session.phase,
+        busy: kernel.session.busy,
+        executionCount: kernel.session.executionCount,
+        attached,
+        lastEngagedAt: kernel.lastEngagedAt,
+        pid: kernel.session.pid,
+        orphan,
+        reclaimable: orphan && now - kernel.lastEngagedAt >= graceMs,
+      })
+    }
+    kernels.sort((left, right) => right.lastEngagedAt - left.lastEngagedAt)
+    return {
+      kernels,
+      maxKernelsPerWorkspace: this.limits.maxKernelsPerWorkspace,
+      maxKernelsTotal: this.limits.maxKernelsTotal,
+      totalKernels: this.kernels.size,
+    }
+  }
+
+  /**
+   * Stop a kernel no notebook can reach any more.
+   *
+   * This is the one destructive kernel action that does not take a token, and the
+   * reason it may is the same check the panel was built on: with no stream attached
+   * and the grace period elapsed, nothing in the browser can still be waiting on it.
+   * Everything else — interrupt, restart, shutdown — still requires the token, so the
+   * panel cannot reach into a notebook that is open and running somewhere.
+   */
+  async reclaim(body: Record<string, unknown>): Promise<KernelStatusResult> {
+    const workspaceId = requireWorkspaceId(body['workspaceId'])
+    const kernelId = requireString(body['kernelId'], 'KERNEL_ID_REQUIRED', 'a kernel id is required.')
+    const kernel = this.kernels.get(kernelId)
+    if (kernel === undefined) throw new WorkbenchHttpError(404, 'KERNEL_NOT_FOUND', 'this kernel is no longer running.')
+    if (kernel.workspaceId !== workspaceId) {
+      throw new WorkbenchHttpError(403, 'KERNEL_WORKSPACE_MISMATCH', 'this kernel belongs to another workspace.')
+    }
+    if (kernel.listeners.size > 0) {
+      throw new WorkbenchHttpError(409, 'KERNEL_IN_USE', 'this kernel is open in a notebook; stop it from there.')
+    }
+    if (Date.now() - kernel.lastEngagedAt < this.limits.reclaimGraceMs) {
+      throw new WorkbenchHttpError(409, 'KERNEL_SETTLING', 'this kernel only just became unattended; wait a moment.')
+    }
+    // A reclaim is allowed to interrupt a running cell, because a runaway loop left
+    // behind by a closed tab is the main thing a user needs this for. The panel says
+    // so before offering the action; the Host refuses to do it silently.
+    await this.stopKernel(kernel, 'reclaim')
+    const result = this.statusOf(kernel)
+    this.forget(kernel)
+    return result
   }
 
   /** Live facts for one kernel, plus the stream position to resume from. */
@@ -472,7 +608,7 @@ export class KernelBackend {
     }
     this.enforceCapacity(workspaceId)
     const root = await this.workspace.rootProcessPath(workspaceId)
-    const { kernels } = await this.scanKernels(root.cwd)
+    const { kernels } = await this.scanKernels(root.cwd, this.discoveryLimits)
     const choice = specName === undefined
       ? defaultKernelChoice(kernels)
       : kernels.find(kernel => kernel.name === specName && kernel.available)
@@ -575,8 +711,9 @@ export class KernelBackend {
     const frame: NotebookKernelFrame = { ...event, sequence: kernel.nextSequence }
     kernel.nextSequence += 1
     kernel.frames.push(frame)
-    if (kernel.frames.length > KERNEL_FRAME_BUFFER) {
-      const dropped = kernel.frames.length - KERNEL_FRAME_BUFFER
+    const buffer = this.limits.frameBuffer
+    if (kernel.frames.length > buffer) {
+      const dropped = kernel.frames.length - buffer
       kernel.frames.splice(0, dropped)
       kernel.oldestSequence += dropped
     }

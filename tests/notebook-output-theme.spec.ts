@@ -95,6 +95,40 @@ describe('notebook output colours', () => {
     expect(ruleBody('.cellOutputs')).toMatch(/border-block-start:\s*1px solid/u)
   })
 
+  it('insets the toolbar and the cell stack by the same amount', () => {
+    // The cell border and the kernel picker above it are the two edges a reader lines
+    // up by eye. The toolbar used 10px and the cells 12px, which read as the whole
+    // stack being shy on both sides.
+    const horizontalInset = (selector: string): number | null => {
+      const match = /padding:\s*([^;]+);/u.exec(ruleBody(selector))
+      if (match === null) return null
+      // CSS shorthand: one value is all edges, two is vertical/horizontal, three and
+      // four place the right edge second.
+      const values = match[1]!.trim().split(/\s+/u).map(value => Number.parseInt(value, 10))
+      if (values.some(value => Number.isNaN(value))) return null
+      return values.length === 1 ? values[0]! : values[1]!
+    }
+    expect(horizontalInset('.toolbar')).toBe(10)
+    expect(horizontalInset('.cells')).toBe(10)
+  })
+
+  it('scrolls the cell stack below a full-width toolbar rule', () => {
+    // The root used to be the scroller so the toolbar and the cells shared a right edge.
+    // That put the scrollbar over the toolbar's full height, and since the toolbar's
+    // bottom rule spans only its content box, the gutter left a notch in the seam the
+    // rule exists to close. The cells scroll now, and the shared right edge is kept by
+    // reserving the same gutter on both rows instead of by sharing one scroller.
+    expect(ruleBody('.root')).toMatch(/overflow:\s*hidden/u)
+    const cells = ruleBody('.cells')
+    expect(cells).toMatch(/overflow-y:\s*auto/u)
+    expect(cells).toMatch(/scrollbar-gutter:\s*stable/u)
+    const toolbar = ruleBody('.toolbar')
+    expect(toolbar).toMatch(/scrollbar-gutter:\s*stable/u)
+    // No longer scrolled out of view, and no longer sticky: it is a row of its own above
+    // the scroller, which is what keeps its rule unbroken to the panel's edge.
+    expect(toolbar).not.toMatch(/position:\s*sticky/u)
+  })
+
   it('keeps the palette variables the renderer actually emits', () => {
     // `ansiToHtml` writes `var(--dsh-ansi-*)` into inline styles; a renamed token would
     // silently fall through to the literal fallback and drift from the theme.

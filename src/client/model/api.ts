@@ -29,6 +29,7 @@ import type {
   WorkspaceAbsolutePath,
   WorkspaceRelativePath,
 } from '../../shared/contracts.ts'
+import type { ConfigSnapshot } from '../../shared/config-protocol.ts'
 import type {
   KernelCompletionResult,
   KernelDiscoverResult,
@@ -36,6 +37,7 @@ import type {
   KernelInputResult,
   KernelInspectResult,
   KernelIsCompleteResult,
+  KernelListResult,
   KernelStartResult,
   KernelStatusResult,
   NotebookKernelPollResult,
@@ -219,6 +221,22 @@ export class WorkbenchApi {
     return this.postKernel('/discover', { workspaceId })
   }
 
+  /**
+   * Every kernel this Workspace is running right now, for the manager panel.
+   *
+   * Read-only and token-free by design: the panel exists to show kernels no notebook
+   * tab can reach, so it cannot be required to present a token it does not have. The
+   * Host never returns a token here.
+   */
+  async kernelList(workspaceId: string): Promise<KernelListResult> {
+    return this.postKernel('/list', { workspaceId })
+  }
+
+  /** Reclaim a kernel the Host has judged unreachable by any notebook. */
+  async kernelReclaim(kernelId: string, workspaceId: string): Promise<KernelStatusResult> {
+    return this.postKernel('/reclaim', { kernelId, workspaceId })
+  }
+
   async kernelStart(workspaceId: string, path: string, specName?: string): Promise<KernelStartResult> {
     return this.postKernel('/start', { workspaceId, path, ...(specName === undefined ? {} : { specName }) })
   }
@@ -306,6 +324,27 @@ export class WorkbenchApi {
       credentials: 'same-origin',
     })
     return readResponse<NotebookKernelPollResult>(response)
+  }
+
+  /**
+   * The plugin's own configuration, as the settings page needs it.
+   *
+   * The fields arrive with their bounds and defaults because the page must not
+   * restate a number the host no longer uses; it renders whatever the schema declares.
+   */
+  async readPluginConfig(): Promise<ConfigSnapshot> {
+    return this.post('/config', {})
+  }
+
+  /**
+   * Apply a new configuration.
+   *
+   * The host answers before it restarts itself, so a resolved promise means the values
+   * were accepted — not that they are live yet. The restart drops the notebook kernels
+   * this plugin owns, which is why the page says so before it offers the button.
+   */
+  async updatePluginConfig(config: Record<string, number>): Promise<ConfigSnapshot> {
+    return this.post('/config/update', { config })
   }
 
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {

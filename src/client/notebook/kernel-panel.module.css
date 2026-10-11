@@ -1,0 +1,229 @@
+/*
+ * Kernel manager panel.
+ *
+ * Geometry follows the terminal panel deliberately — same header rule, same 30px row,
+ * same rounded hover fill — because the two panels are the same kind of thing (a list
+ * of live host processes for this workspace) and must not look like two different
+ * products when the reader switches between them.
+ */
+
+.panelBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  color: var(--dsw-alias-label-primary);
+}
+
+.panelHeader {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px 0 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+}
+
+.panelTitle {
+  overflow: hidden;
+  font: var(--dsw-font-xs-13);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refreshButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-inline-start: auto;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.refreshButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.refreshGlyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/*
+ * The capacity line is the reason this panel earns its place next to the run
+ * controls: a refused kernel start is otherwise a bare 429 with no way to see who is
+ * holding the slot.
+ */
+.capacity {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+  line-height: 1.45;
+}
+
+.capacityFull {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.capacityWarning {
+  margin-top: 2px;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.errorState {
+  flex: 0 0 auto;
+  margin: 6px 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+  font: var(--dsw-font-xxs-12);
+  overflow-wrap: anywhere;
+}
+
+.kernelList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px 12px 0;
+}
+
+.emptyState {
+  padding: 16px 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+  text-align: center;
+}
+
+.kernelEntry {
+  border-radius: 8px;
+  padding-block: 2px;
+}
+
+.kernelEntry + .kernelEntry {
+  margin-top: 4px;
+}
+
+.kernelEntry:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/*
+ * An unattended kernel is the actionable row on this panel, so it is ringed rather
+ * than merely coloured: the reader scanning for something to reclaim should find it by
+ * shape, not by reading every line.
+ */
+.kernelEntry[data-orphan] {
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l2);
+}
+
+.kernelRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding-inline: 9px 3px;
+}
+
+.statusDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.statusDot[data-status='kernels.running'] {
+  background: var(--dsw-alias-brand-text);
+}
+
+.statusDot[data-status='kernels.failed'],
+.statusDot[data-status='kernels.terminated'] {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+/* Starting is genuinely unknown rather than a state, so the ring says so. */
+.statusDot[data-status='kernels.starting'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-label-tertiary);
+}
+
+.kernelName {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: var(--dsw-font-xs-13);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.kernelName:hover {
+  text-decoration: underline;
+}
+
+.kernelPhase {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.kernelMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 0 9px 6px 23px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.kernelMetaItem {
+  white-space: nowrap;
+}
+
+.reclaimButton {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 5px;
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reclaimButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.reclaimButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.orphanHint {
+  padding: 0 9px 6px 23px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+  line-height: 1.45;
+}

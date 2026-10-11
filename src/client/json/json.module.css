@@ -28,14 +28,25 @@
   border-inline-start: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* Toolbar row above the canvas: search, zoom controls and copy actions. */
+/*
+ * Toolbar row above the canvas: search, zoom controls and copy actions.
+ *
+ * Its height comes from the shared middle-column rule so its bottom border lands on the
+ * conversation column's divider — see `--dsh-workbench-view-toolbar-height`. The vertical
+ * padding is gone because the row is now a fixed height and `align-items: center` places
+ * the controls; `nowrap` for the same reason, since a wrapped second row cannot fit in a
+ * row that has exactly one row of height. The search box shrinks instead (see
+ * `.jsonSearch`), which is the control with text to spare.
+ */
 .jsonToolbar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  box-sizing: border-box;
   flex: 0 0 auto;
-  padding: 8px 12px;
+  height: var(--dsh-workbench-view-toolbar-height);
+  padding: 0 12px;
   border-block-end: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-layer-1);
 }
@@ -59,6 +70,9 @@
 }
 
 .jsonAction {
+  /* Cannot shrink: the row no longer wraps, so the search box alone absorbs the width
+     and a control is never squeezed into an unreadable fragment of itself. */
+  flex: none;
   padding: 4px 10px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
@@ -85,9 +99,15 @@
   cursor: default;
 }
 
-/* Square icon button for the canvas toolbar, on the same palette as .jsonAction. */
+/*
+ * Square icon button for the canvas toolbar, on the same palette as .jsonAction.
+ *
+ * `flex: none` keeps it square: the row cannot wrap now, and a shrinking flex item
+ * with a fixed width is one that silently becomes a rectangle.
+ */
 .jsonIconButton {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -115,13 +135,22 @@
   cursor: default;
 }
 
-/* Right-hand readout: the zoom percentage, or the match count while searching. */
+/*
+ * Right-hand readout: the zoom percentage, or the match count while searching.
+ *
+ * Shrinks with an ellipsis because the row is now a fixed height and cannot wrap: the
+ * one thing that could overflow it horizontally is this text, and the controls are what
+ * the row exists to hold.
+ */
 .jsonCount {
+  min-width: 0;
+  overflow: hidden;
   margin-inline-start: auto;
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* One-line notice: parse trouble, node cap, size cap, copy outcome. */

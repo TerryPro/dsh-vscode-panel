@@ -15,10 +15,19 @@ export interface EditorStatusBarProps {
   actions?: ReactNode
   /** Hide the caret position/selection readout when no editable surface is shown (e.g. preview). */
   showPosition?: boolean
+  /**
+   * Kernel readout for a notebook tab, at the head of the right-hand cluster.
+   *
+   * It sits with encoding and language rather than beside the caret because it
+   * describes what the tab is attached to, not where the caret is — and unlike the
+   * notebook toolbar's own chip, it is shown in source view too, which is exactly
+   * when the kernel is invisible everywhere else.
+   */
+  kernel?: ReactNode
 }
 
 /** Bottom information strip: caret position, selection, indent, encoding, EOL, language. */
-export function EditorStatusBar({ cursor, path, content, t, actions, showPosition = true }: EditorStatusBarProps) {
+export function EditorStatusBar({ cursor, path, content, t, actions, showPosition = true, kernel }: EditorStatusBarProps) {
   const language = useMemo(() => languageLabelForPath(path), [path])
   const eol = useMemo(() => lineEndingLabel(detectEditorLineEnding(content)), [content])
   const indent = useMemo(() => detectIndent(content), [content])
@@ -38,6 +47,12 @@ export function EditorStatusBar({ cursor, path, content, t, actions, showPositio
         </span>
       )}
       <span className={css.editorStatusBarSpacer} />
+      {/*
+        Leads the right-hand cluster rather than joining the caret side: it describes
+        what the tab is attached to, and it is the first thing a reader of a notebook
+        wants to know.
+      */}
+      {kernel}
       <span className={css.editorStatusBarItem}>
         {indent.type === 'tab'
           ? t('editor.statusIndentTabs', { size: String(indent.size) })

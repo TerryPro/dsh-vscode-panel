@@ -5,7 +5,7 @@ import type { GitEditorBaseline, GitFileDiff, WorkspaceFile, WorkspaceImageFile 
 import type { GitDecorationMap } from '../git/git-decorations.ts'
 import type { GitFileLayout } from '../git/git-tree.ts'
 
-export type SidebarMode = 'sessions' | 'files' | 'git' | 'terminal'
+export type SidebarMode = 'sessions' | 'files' | 'git' | 'terminal' | 'kernels'
 export type DiffViewMode = 'split' | 'unified' | 'inline'
 export type MarkdownViewMode = 'preview' | 'source' | 'split'
 export type HtmlViewMode = 'preview' | 'interactive' | 'source'

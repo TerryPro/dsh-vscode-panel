@@ -23,7 +23,7 @@ import { languageForPath } from '../editor/editor-languages.ts'
 import css from './notebook.module.css'
 import {
   IconAddCode16,
-  IconAddText16,
+  IconAddMarkdown16,
   IconClearOutputs16,
   IconDeleteCell16,
   IconEditCell16,
@@ -34,6 +34,7 @@ import {
   IconRestartKernel16,
   IconRunAll16,
   IconRunCell16,
+  IconSave16,
   IconStopKernel16,
 } from './NotebookIcons.tsx'
 import { ansiToHtml, escapeHtmlText } from './ansi-text.ts'
@@ -63,10 +64,14 @@ export interface NotebookLabels {
   interrupt: string
   runAll: string
   clearAllOutputs: string
+  save: string
+  saveDirty: string
+  saveClean: string
+  saving: string
   addCodeCell: string
-  addTextCell: string
+  addMarkdownCell: string
   insertCodeBelow: string
-  insertTextBelow: string
+  insertMarkdownBelow: string
   deleteCell: string
   moveUp: string
   moveDown: string
@@ -118,18 +123,32 @@ interface NotebookSurfaceProps {
   editable: boolean
   runtime: NotebookRuntime
   onEdit: (text: string) => void
+  /**
+   * Whether the file has unsaved changes, and whether a save is in flight. The toolbar
+   * shows one save control, so it has to report what it would actually do: a notebook
+   * whose outputs are all committed to disk reads as saved, not as a button waiting to
+   * be pressed.
+   */
+  dirty: boolean
+  saving: boolean
+  onSave: () => void
   labels: NotebookLabels
   markdownLabels: MarkdownLabels
 }
 
-/** One cell's local view state, which is deliberately not the notebook's business. */
+/**
+ * One cell's local view state, which is deliberately not the notebook's business.
+ *
+ * Focus is *not* in here. Exactly one cell is focused at a time, so it is notebook
+ * state and lives in `NotebookState.focusedCellId`; a per-cell copy could only be set
+ * true and never cleared, which made every cell a reader had clicked stay highlighted.
+ */
 interface CellView {
-  focused: boolean
   editingMarkdown: boolean
   outputsVisible: boolean
 }
 
-const DEFAULT_VIEW: CellView = { focused: false, editingMarkdown: false, outputsVisible: true }
+const DEFAULT_VIEW: CellView = { editingMarkdown: false, outputsVisible: true }
 
 export function NotebookSurface({
   tabId,
@@ -139,6 +158,9 @@ export function NotebookSurface({
   editable,
   runtime,
   onEdit,
+  dirty,
+  saving,
+  onSave,
   labels,
   markdownLabels,
 }: NotebookSurfaceProps) {
@@ -213,7 +235,13 @@ export function NotebookSurface({
       return
     }
     onEdit(applyNotebookMutation(draft, mutation))
-  }, [draft, editable, onEdit, state.kernel.language])
+    // Deleting the cell that held focus leaves the model pointing at an id that is no
+    // longer in the document, so the next Ctrl+Enter would run nothing. Clearing it
+    // here rather than in the cell keeps the cell ignorant of the runtime.
+    if (mutation.op === 'delete' && state.focusedCellId === mutation.cellId) {
+      runtime.dispatch(tabId, { type: 'focus', cellId: null })
+    }
+  }, [draft, editable, onEdit, runtime, state.focusedCellId, state.kernel.language, tabId])
 
   const runCellById = useCallback(async (cellId: string): Promise<void> => {
     const cell = document.cells.find(candidate => candidate.id === cellId)
@@ -314,13 +342,16 @@ export function NotebookSurface({
       state={state}
       labels={labels}
       editable={editable}
+      dirty={dirty}
+      saving={saving}
+      onSave={onSave}
       onRunAll={runAll}
       onInterrupt={() => { void runtime.interrupt(tabId, workspaceId) }}
       onClearAll={clearAll}
       onRestart={() => { void runtime.restart(tabId, workspaceId, path) }}
       onStop={() => { void runtime.shutdown(tabId, workspaceId) }}
       onAddCode={cellId => { mutate({ op: 'insert', cellId, before: false, kind: 'code' }) }}
-      onAddText={cellId => { mutate({ op: 'insert', cellId, before: false, kind: 'markdown' }) }}
+      onAddMarkdown={cellId => { mutate({ op: 'insert', cellId, before: false, kind: 'markdown' }) }}
       onPickKernel={specName => { void runtime.ensureKernel(tabId, workspaceId, path, specName) }}
     />
   )
@@ -353,8 +384,8 @@ export function NotebookSurface({
               markdownLabels={markdownLabels}
               copied={copiedCell === cell.id}
               inputValue={inputValues[cell.id] ?? ''}
+              focused={state.focusedCellId === cell.id}
               onFocus={() => {
-                patchView(cell.id, { focused: true })
                 runtime.dispatch(tabId, { type: 'focus', cellId: cell.id })
               }}
               onPatchView={patch => { patchView(cell.id, patch) }}
@@ -388,6 +419,7 @@ function NotebookCell({
   markdownLabels,
   copied,
   inputValue,
+  focused,
   onFocus,
   onPatchView,
   onEdit,
@@ -408,6 +440,7 @@ function NotebookCell({
   markdownLabels: MarkdownLabels
   copied: boolean
   inputValue: string
+  focused: boolean
   onFocus: () => void
   onPatchView: (patch: Partial<CellView>) => void
   onEdit: (source: string) => void
@@ -448,7 +481,7 @@ function NotebookCell({
       className={css.cell}
       data-cell-id={cell.id}
       data-cell-kind={cell.kind}
-      data-focused={view.focused || undefined}
+      data-focused={focused || undefined}
       onFocus={onFocus}
       onClick={onFocus}
     >
@@ -493,8 +526,8 @@ function NotebookCell({
           <button type="button" className={css.cellAction} aria-label={labels.insertCodeBelow} title={labels.insertCodeBelow} disabled={!editable} onClick={() => { onMutation({ op: 'insert', cellId: cell.id, before: false, kind: 'code' }) }}>
             <IconAddCode16 />
           </button>
-          <button type="button" className={css.cellAction} aria-label={labels.insertTextBelow} title={labels.insertTextBelow} disabled={!editable} onClick={() => { onMutation({ op: 'insert', cellId: cell.id, before: false, kind: 'markdown' }) }}>
-            <IconAddText16 />
+          <button type="button" className={css.cellAction} aria-label={labels.insertMarkdownBelow} title={labels.insertMarkdownBelow} disabled={!editable} onClick={() => { onMutation({ op: 'insert', cellId: cell.id, before: false, kind: 'markdown' }) }}>
+            <IconAddMarkdown16 />
           </button>
           <button type="button" className={css.cellAction} aria-label={labels.moveUp} title={labels.moveUp} disabled={!editable || index === 0} onClick={() => { onMutation({ op: 'move', cellId: cell.id, direction: -1 }) }}>
             <IconMoveUp16 />
@@ -513,12 +546,25 @@ function NotebookCell({
             >
               <option value="code">{labels.codeCell}</option>
               <option value="markdown">{labels.markdownCell}</option>
-              <option value="raw">{labels.rawCell}</option>
+              {/*
+                Raw is not offered as a kind to create, but a cell that already *is*
+                raw in the file must still name itself here: a `<select>` whose value
+                matches no option silently shows the first one, which would have a raw
+                cell read as "Code". Unknown cell types arrive as raw too, so this is
+                the path any hand-edited or third-party notebook takes.
+              */}
+              {cell.kind === 'raw' && <option value="raw">{labels.rawCell}</option>}
             </select>
           </label>
-          <button type="button" className={css.cellAction} aria-label={labels.deleteCell} title={labels.deleteCell} disabled={!editable} onClick={() => {
+          {/*
+            The click must not reach the cell's own handler: React runs the button's
+            handler first and then bubbles to the cell, which would hand focus to the
+            cell being removed — leaving `focusedCellId` pointing at an id that no
+            longer exists, so the next Ctrl+Enter silently runs nothing.
+          */}
+          <button type="button" className={css.cellAction} aria-label={labels.deleteCell} title={labels.deleteCell} disabled={!editable} onClick={event => {
+            event.stopPropagation()
             onMutation({ op: 'delete', cellId: cell.id })
-            onPatchView({ focused: false })
           }}>
             <IconDeleteCell16 />
           </button>
@@ -740,25 +786,31 @@ function NotebookToolbar({
   state,
   labels,
   editable,
+  dirty,
+  saving,
+  onSave,
   onRunAll,
   onInterrupt,
   onClearAll,
   onRestart,
   onStop,
   onAddCode,
-  onAddText,
+  onAddMarkdown,
   onPickKernel,
 }: {
   state: NotebookState
   labels: NotebookLabels
   editable: boolean
+  dirty: boolean
+  saving: boolean
+  onSave: () => void
   onRunAll: () => void
   onInterrupt: () => void
   onClearAll: () => void
   onRestart: () => void
   onStop: () => void
   onAddCode: (cellId: string | null) => void
-  onAddText: (cellId: string | null) => void
+  onAddMarkdown: (cellId: string | null) => void
   onPickKernel: (specName: string) => void
 }) {
   const running = Object.values(state.cells).some(run => run.status === 'running' || run.status === 'queued')
@@ -766,6 +818,23 @@ function NotebookToolbar({
   const queued = state.kernel.busy
   return (
     <div className={css.toolbar} role="toolbar" aria-label={labels.kernelLabel}>
+      {/*
+        Saving leads the toolbar because a notebook is not saved by the run that made
+        the output: running a cell writes into the draft, and the file only changes when
+        the reader says so. The control is never disabled for a clean notebook — it is
+        marked, so it reports "there is nothing to save" instead of going inert.
+      */}
+      <button
+        type="button"
+        className={dirty ? `${css.toolbarAction} ${css.toolbarActionActive}` : css.toolbarAction}
+        aria-label={labels.save}
+        title={saving ? labels.saving : dirty ? labels.saveDirty : labels.saveClean}
+        disabled={saving}
+        onClick={onSave}
+      >
+        <IconSave16 />
+      </button>
+      <span className={css.toolbarDivider} aria-hidden="true" />
       <button type="button" className={css.toolbarAction} aria-label={labels.runAll} title={labels.runAll} onClick={onRunAll}>
         <IconRunAll16 />
       </button>
@@ -786,8 +855,8 @@ function NotebookToolbar({
       <button type="button" className={css.toolbarAction} aria-label={labels.addCodeCell} title={labels.addCodeCell} disabled={!editable} onClick={() => { onAddCode(state.focusedCellId) }}>
         <IconAddCode16 />
       </button>
-      <button type="button" className={css.toolbarAction} aria-label={labels.addTextCell} title={labels.addTextCell} disabled={!editable} onClick={() => { onAddText(state.focusedCellId) }}>
-        <IconAddText16 />
+      <button type="button" className={css.toolbarAction} aria-label={labels.addMarkdownCell} title={labels.addMarkdownCell} disabled={!editable} onClick={() => { onAddMarkdown(state.focusedCellId) }}>
+        <IconAddMarkdown16 />
       </button>
       <span className={css.toolbarSpacer} />
       <span className={css.kernelStatus} data-phase={queued ? 'starting' : state.kernel.phase} title={kernelTitle(state, labels)}>

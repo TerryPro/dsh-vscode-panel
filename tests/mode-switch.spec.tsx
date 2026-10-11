@@ -92,7 +92,11 @@ describe('工作台活动栏', () => {
     const dock = appRoot.firstElementChild
     expect(dock).not.toBeNull()
     expect(dock?.querySelector('[role="toolbar"]')).not.toBeNull()
-    expect(dock?.querySelectorAll('button')).toHaveLength(7) // 4 views + editor + conversation + settings    expect(dock?.querySelector('[aria-label="Git"] svg')?.getAttribute('width')).toBe('18')
+    // 5 views + editor + conversation + settings. The view count was 4 until the
+    // kernel manager panel joined the dock.
+    expect(dock?.querySelectorAll('button')).toHaveLength(8)
+    // Was previously dead inside the trailing comment above; icons are 18px in the dock.
+    expect(dock?.querySelector('[aria-label="Git"] svg')?.getAttribute('width')).toBe('18')
 
     // The AppFrame grid reserves the dock width as inline padding so nothing is covered.
     const frame = document.querySelector('[data-shell-overlay]')?.parentElement

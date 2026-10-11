@@ -120,6 +120,59 @@ describe('Git Diff editor', () => {
     expect(view.container.querySelector('[data-diff-pane-labels]')).toBeNull()
     expect(view.queryByText('bbbbbbb')).toBeNull()
   })
+
+  it('reports the file and the mode controls in a bottom strip, not a header', () => {
+    // The strip used to sit above the diff, where it cost the first rows of the
+    // comparison and made the tab read as two stacked headers. Its position is the
+    // whole point of the change, so it is asserted rather than left to a screenshot.
+    const view = render(
+      <GitDiffEditor
+        diff={sampleDiff()}
+        viewMode="split"
+        onViewModeChange={vi.fn()}
+        t={(key: keyof typeof zh) => zh[key]}
+      />,
+    )
+    const document = view.container.querySelector('[class*="diffDocument"]')
+    const strip = document?.querySelector('[class*="diffStatusBar"]')
+    expect(strip).not.toBeNull()
+    // Last child of the document: below the diff body, not above it.
+    expect(document?.lastElementChild).toBe(strip)
+    // It carries the file, the kind, and the mode switch that used to be the header.
+    expect(strip?.textContent).toContain('src/a.ts')
+    expect(strip?.textContent).toContain(zh['editor.diffWorktree'])
+    expect(strip?.querySelector('[class*="diffViewSwitch"]')).not.toBeNull()
+    expect(strip?.querySelector('[class*="diffStats"]')).not.toBeNull()
+  })
+
+  it('keeps the strip when there is no diff body to sit under', () => {
+    // A binary file has no panes, but the file and its stats still have to be
+    // reported, and in the same place.
+    const view = render(
+      <GitDiffEditor
+        diff={{ ...sampleDiff(), binary: true, original: '', modified: '' }}
+        viewMode="split"
+        onViewModeChange={vi.fn()}
+        t={(key: keyof typeof zh) => zh[key]}
+      />,
+    )
+    const strip = view.container.querySelector('[class*="diffStatusBar"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.textContent).toContain('src/a.ts')
+  })
+
+  it('announces the strip as the diff document contentinfo region', () => {
+    const view = render(
+      <GitDiffEditor
+        diff={sampleDiff()}
+        viewMode="split"
+        onViewModeChange={vi.fn()}
+        t={(key: keyof typeof zh) => zh[key]}
+      />,
+    )
+    expect(view.container.querySelector('[class*="diffStatusBar"]')?.getAttribute('role'))
+      .toBe('contentinfo')
+  })
 })
 
 function sampleDiff(): GitFileDiff {

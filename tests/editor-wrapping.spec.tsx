@@ -34,6 +34,29 @@ describe('中栏长行自动换行', () => {
     expect(stylesheet).toMatch(/\.markdownPreview\s*\{[^}]*flex: 1[^}]*width: 100%[^}]*min-width: 0[^}]*overflow: auto/u)
   })
 
+  it('stretches the split diff panes to the full pane height', () => {
+    // The merge view's own theme pins `.cm-editor` and `.cm-scroller` to
+    // `height: auto !important`, so the two panes were only as tall as their content.
+    // On a short diff the left gutter rule, the split divider, and the right gutter
+    // rule therefore all stopped at the last line — three rules ending in mid-air
+    // above a band of bare background. Flex-grow is the lever that survives
+    // `!important` on height, so the chain must be flex all the way down.
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/editor/editor.module.css'), 'utf8')
+    const rule = (selector: string) => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+      const body = new RegExp(`:global\\(${escaped}\\)\\s*\\{(?<body>[^}]*)\\}`, 'u').exec(stylesheet)?.groups?.body
+      expect(body, selector).toBeDefined()
+      return body!
+    }
+    expect(rule('[data-diff-surface=\'split\'] .cm-mergeView')).toMatch(/display: flex/u)
+    expect(rule('[data-diff-surface=\'split\'] .cm-mergeView')).toMatch(/flex-direction: column/u)
+    expect(rule('[data-diff-surface=\'split\'] .cm-mergeViewEditors')).toMatch(/flex: 1/u)
+    expect(rule('[data-diff-surface=\'split\'] .cm-mergeViewEditor')).toMatch(/flex-direction: column/u)
+    // The panes must not be forced to a fixed height, which would break a diff
+    // taller than the viewport: it has to keep growing and scrolling.
+    expect(stylesheet).not.toMatch(/\.cm-mergeViewEditor[^}]*height:\s*\d/u)
+  })
+
   it('为左右和行内 Diff 的每个 CodeMirror 面板启用换行扩展', () => {
     const split = render(
       <DiffSurface

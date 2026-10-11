@@ -1,7 +1,4 @@
-import {
-  FishLogo,
-  Pill,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { FishLogo } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useCallback, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -36,12 +33,48 @@ export function GitDiffEditor(props: GitDiffEditorProps) {
   }, [])
   return (
     <section className={css.diffDocument} data-diff-effective-mode={effectiveMode}>
-      <div className={css.diffMetadata}>
-        <span title={props.diff.path}>{renamed ? `${props.diff.originalPath} → ${props.diff.path}` : props.diff.path}</span>
+      {props.diff.binary
+        ? <DiffNotice text={props.t('editor.diffBinary')} />
+        : noChanges
+          ? <DiffNotice text={props.t('editor.diffEmpty')} />
+          : (
+            <div className={css.diffEditorBody} style={{ '--diff-split-ratio': String(splitRatio) } as CSSProperties}>
+              {showPaneLabels && (
+                <div className={css.diffPaneLabels} data-diff-pane-labels="" data-mode={effectiveMode}>
+                  {effectiveMode === 'split'
+                    ? <><span>{labels.original}</span><span>{labels.modified}</span></>
+                    : <span>{labels.original} ↔ {labels.modified}</span>}
+                </div>
+              )}
+              <div className={css.diffSurfaceHost}>
+                <DiffSurface
+                  key={`${props.diff.kind}:${props.diff.revision ?? ''}:${props.diff.path}:${effectiveMode}`}
+                  original={props.diff.original}
+                  modified={props.diff.modified}
+                  originalLabel={labels.original}
+                  modifiedLabel={labels.modified}
+                  mode={effectiveMode}
+                  path={props.diff.path}
+                  onSplitRatioChange={handleSplitRatio}
+                  splitResizeLabel={props.t('editor.resizeSplit')}
+                />
+              </div>
+            </div>
+          )}
+      {/*
+        The file's identity and the render-mode control live along the bottom, in the
+        same strip a file tab uses for cursor and language. It sat above the diff,
+        where it cost the first rows of the comparison and made the tab read as two
+        stacked headers.
+      */}
+      <div className={css.diffStatusBar} role="contentinfo">
+        <span className={css.diffStatusPath} title={props.diff.path}>
+          {renamed ? `${props.diff.originalPath} → ${props.diff.path}` : props.diff.path}
+        </span>
         <span className={css.diffFileStatus} data-status={props.diff.status}>{props.diff.status}</span>
-        <Pill>{diffKindText(props.diff.kind, props.t)}</Pill>
+        <span className={css.diffStatusKind}>{diffKindText(props.diff.kind, props.t)}</span>
         {props.diff.commit !== undefined && (
-          <span>{props.diff.commit.shortHash} · {props.diff.commit.author} · {formatCommitTime(props.diff.commit.authoredAt)}</span>
+          <span className={css.diffStatusCommit}>{props.diff.commit.shortHash} · {props.diff.commit.author} · {formatCommitTime(props.diff.commit.authoredAt)}</span>
         )}
         <span className={css.diffStats}>
           {props.diff.additions !== undefined && <span data-kind="added">+{props.diff.additions}</span>}
@@ -71,34 +104,6 @@ export function GitDiffEditor(props: GitDiffEditorProps) {
           </button>
         </div>
       </div>
-      {props.diff.binary
-        ? <DiffNotice text={props.t('editor.diffBinary')} />
-        : noChanges
-          ? <DiffNotice text={props.t('editor.diffEmpty')} />
-          : (
-            <div className={css.diffEditorBody} style={{ '--diff-split-ratio': String(splitRatio) } as CSSProperties}>
-              {showPaneLabels && (
-                <div className={css.diffPaneLabels} data-diff-pane-labels="" data-mode={effectiveMode}>
-                  {effectiveMode === 'split'
-                    ? <><span>{labels.original}</span><span>{labels.modified}</span></>
-                    : <span>{labels.original} ↔ {labels.modified}</span>}
-                </div>
-              )}
-              <div className={css.diffSurfaceHost}>
-                <DiffSurface
-                  key={`${props.diff.kind}:${props.diff.revision ?? ''}:${props.diff.path}:${effectiveMode}`}
-                  original={props.diff.original}
-                  modified={props.diff.modified}
-                  originalLabel={labels.original}
-                  modifiedLabel={labels.modified}
-                  mode={effectiveMode}
-                  path={props.diff.path}
-                  onSplitRatioChange={handleSplitRatio}
-                  splitResizeLabel={props.t('editor.resizeSplit')}
-                />
-              </div>
-            </div>
-          )}
     </section>
   )
 }

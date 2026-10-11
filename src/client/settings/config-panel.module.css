@@ -1,0 +1,113 @@
+/*
+ * The plugin's page inside DSH's Settings dialog.
+ *
+ * Geometry follows the official settings pages: a capped measure, one heading, an
+ * intro line, and stacked fields. The page sits in a dialog the shell owns, so
+ * nothing here sizes itself against the viewport or scrolls on its own.
+ */
+
+.page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 760px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.intro {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.groupTitle {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.save {
+  margin-left: auto;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-button-primary-foreground);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.save:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-fill-hover);
+}
+
+.save:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.failed,
+.saved {
+  font-size: 12.5px;
+}
+
+.failed {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.saved {
+  color: var(--dsw-alias-state-success-label);
+}
+
+.errorState {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12.5px;
+}
+
+.retry {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.retry:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}

@@ -61,6 +61,8 @@ interface NotebookTabRuntime {
 
 export class NotebookRuntime {
   private readonly tabs = new Map<string, NotebookTabRuntime>()
+  /** Listeners waiting for a tab that has no runtime yet; see `peekSubscribe`. */
+  private readonly pendingTabListeners = new Map<string, Set<() => void>>()
 
   constructor(
     private readonly api: WorkbenchApi,
@@ -81,6 +83,54 @@ export class NotebookRuntime {
   /** Kernel lifecycle this tab should show, without creating a runtime for it. */
   peekPhase(tabId: string): KernelPhase | undefined {
     return this.tabs.get(tabId)?.store.getSnapshot().kernel.phase
+  }
+
+  /**
+   * One tab's state, or `null` when it never started a notebook session.
+   *
+   * The status bar reads through this rather than `state()`, which creates a runtime
+   * on first access: a component must not mutate the runtime map while it renders.
+   * A tab with no runtime has no kernel either, so `null` is an honest answer rather
+   * than a missing one.
+   */
+  peekState(tabId: string): NotebookState | null {
+    return this.tabs.get(tabId)?.store.getSnapshot() ?? null
+  }
+
+  /**
+   * Subscribe to one tab's state, if it has any.
+   *
+   * A reader that mounts before the tab has a runtime — a notebook opened straight
+   * into source view, say — would otherwise never hear about it appearing, because
+   * `runtime` and `tabId` are both stable and React would not resubscribe. So the
+   * empty case parks the listener until the runtime is created, and then **migrates**
+   * it onto the real store: a one-shot wake would refresh the reader once and leave
+   * it frozen while the kernel kept moving.
+   */
+  peekSubscribe(tabId: string, listener: () => void): () => void {
+    const existing = this.tabs.get(tabId)
+    if (existing !== undefined) return existing.store.subscribe(listener)
+    const waiting = this.pendingTabListeners.get(tabId) ?? new Set<() => void>()
+    this.pendingTabListeners.set(tabId, waiting)
+    let attached: (() => void) | null = null
+    const wake = (): void => {
+      const created = this.tabs.get(tabId)
+      if (created === undefined) return
+      waiting.delete(wake)
+      attached = created.store.subscribe(listener)
+      listener()
+    }
+    waiting.add(wake)
+    return () => {
+      waiting.delete(wake)
+      attached?.()
+      attached = null
+    }
+  }
+
+  /** Cell ids a Run All still owes, without creating a runtime for the tab. */
+  peekPendingQueueLength(tabId: string): number {
+    return this.tabs.get(tabId)?.queue.length ?? 0
   }
 
   /** Apply a run-state action to one tab. */
@@ -499,6 +549,13 @@ export class NotebookRuntime {
       queue: [],
     }
     this.tabs.set(tabId, created)
+    // Anyone who mounted before this tab had a runtime is reading a snapshot of
+    // `null`; wake them so they re-read through the store that now exists.
+    const waiting = this.pendingTabListeners.get(tabId)
+    if (waiting !== undefined) {
+      this.pendingTabListeners.delete(tabId)
+      for (const listener of [...waiting]) listener()
+    }
     return created
   }
 }

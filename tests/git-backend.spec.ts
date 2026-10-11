@@ -512,6 +512,9 @@ async function createRepository(): Promise<{
   const backend = new GitBackend({ logger } as unknown as Context, workspace, {
     timeoutMs: 10_000,
     maxOutputBytes: 1024 * 1024,
+    // The page size is now a limit rather than a module constant, so a fixture that
+    // left it out would hand git `-n NaN` and the paging test would fail confusingly.
+    graphPageSize: GIT_GRAPH_PAGE_SIZE,
   })
   return { root, backend, logger }
 }

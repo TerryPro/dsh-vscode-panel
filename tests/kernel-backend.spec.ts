@@ -30,6 +30,8 @@ class FakeSession extends EventEmitter implements KernelSessionHandle {
   stopped: string | null = null
   busy = false
   lastActivityAt = Date.now()
+  /** Settable so a test can assert the manager surfaces the real process id. */
+  pid: number | null = 4242
 
   constructor(
     readonly displayName: string,
@@ -189,6 +191,37 @@ function makeBackend(overrides: Partial<typeof DEFAULT_KERNEL_LIMITS> = {}) {
 const body = (kernel: { kernelId: string; token: string }) => ({
   workspaceId: 'ws-1', kernelId: kernel.kernelId, token: kernel.token,
 })
+
+/** A minimal `ServerResponse` stand-in: enough for the SSE handler's own calls. */
+function fakeResponse() {
+  const written: string[] = []
+  let status = 0
+  const emitter = new EventEmitter() as EventEmitter & {
+    writeHead(next: number, headers: Record<string, string>): void
+    flushHeaders(): void
+    write(chunk: string): boolean
+    end(): void
+    headersSent: boolean
+    writableEnded: boolean
+  }
+  emitter.writeHead = (next) => {
+    status = next
+    emitter.headersSent = true
+  }
+  emitter.flushHeaders = () => undefined
+  emitter.write = (chunk: string) => { written.push(chunk); return true }
+  emitter.end = () => { emitter.writableEnded = true }
+  emitter.headersSent = false
+  emitter.writableEnded = false
+  return { res: emitter, written, status: () => status }
+}
+
+function fakeRequest(url: string) {
+  const emitter = new EventEmitter() as EventEmitter & { socket: { setNoDelay(): void }; url: string }
+  emitter.url = url
+  emitter.socket = { setNoDelay: () => undefined }
+  return emitter
+}
 
 describe('kernel manager', () => {
   it('starts one kernel per notebook and reuses it for the same path', async () => {
@@ -393,37 +426,6 @@ describe('kernel manager', () => {
 })
 
 describe('kernel event stream', () => {
-  /** A minimal `ServerResponse` stand-in: enough for the SSE handler's own calls. */
-  function fakeResponse() {
-    const written: string[] = []
-    let status = 0
-    const emitter = new EventEmitter() as EventEmitter & {
-      writeHead(next: number, headers: Record<string, string>): void
-      flushHeaders(): void
-      write(chunk: string): boolean
-      end(): void
-      headersSent: boolean
-      writableEnded: boolean
-    }
-    emitter.writeHead = (next) => {
-      status = next
-      emitter.headersSent = true
-    }
-    emitter.flushHeaders = () => undefined
-    emitter.write = (chunk: string) => { written.push(chunk); return true }
-    emitter.end = () => { emitter.writableEnded = true }
-    emitter.headersSent = false
-    emitter.writableEnded = false
-    return { res: emitter, written, status: () => status }
-  }
-
-  function fakeRequest(url: string) {
-    const emitter = new EventEmitter() as EventEmitter & { socket: { setNoDelay(): void }; url: string }
-    emitter.url = url
-    emitter.socket = { setNoDelay: () => undefined }
-    return emitter
-  }
-
   it('sends a snapshot, replays what the cursor missed, then streams live frames', async () => {
     const { backend, sessions } = makeBackend()
     const started = await backend.start('ws-1', 'nb.ipynb', undefined)
@@ -491,6 +493,106 @@ describe('kernel event stream', () => {
     const text = written.join('')
     expect(text).toContain('event: snapshot')
     expect(text).not.toContain('event: frame')
+    await backend.dispose()
+  })
+})
+
+/**
+ * The manager panel's boundary.
+ *
+ * `list` is the only kernel read that is not token-scoped and `reclaim` the only write
+ * that is not token-checked. Both exist for one reason — a kernel no notebook can reach
+ * any more — so these tests are about that boundary rather than presentation.
+ */
+describe('kernel listing and reclaim', () => {
+  it('reports a running kernel without revealing its token', async () => {
+    const { backend } = makeBackend()
+    const started = await backend.start('ws-1', 'a.ipynb', undefined)
+    const listed = await backend.list('ws-1')
+    expect(listed.kernels).toHaveLength(1)
+    const row = listed.kernels[0]!
+    expect(row).toMatchObject({ path: 'a.ipynb', specName: 'python3', pid: 4242, orphan: true })
+    // The token gates every other kernel call. A list carrying it would turn a
+    // read-only panel into a skeleton key for any page on this machine.
+    expect(JSON.stringify(listed)).not.toContain(started.token)
+    expect(row).not.toHaveProperty('token')
+    await backend.dispose()
+  })
+
+  it('carries the ceilings that explain a refused start', async () => {
+    const { backend } = makeBackend({ maxKernelsPerWorkspace: 3, maxKernelsTotal: 8 })
+    await backend.start('ws-1', 'a.ipynb', undefined)
+    const listed = await backend.list('ws-1')
+    expect(listed).toMatchObject({ maxKernelsPerWorkspace: 3, maxKernelsTotal: 8, totalKernels: 1 })
+    await backend.dispose()
+  })
+
+  it('does not show another workspace\'s kernels', async () => {
+    const { backend } = makeBackend({ maxKernelsPerWorkspace: 2, maxKernelsTotal: 4 })
+    await backend.start('ws-1', 'a.ipynb', undefined)
+    expect((await backend.list('ws-2')).kernels).toHaveLength(0)
+    // A page must name a workspace to see anything in it.
+    await expect(backend.list(undefined)).rejects.toThrow(/workspace is selected/u)
+    await backend.dispose()
+  })
+
+  it('marks an orphan reclaimable only once the grace period has passed', async () => {
+    // A page that is reloading, or mid-reconnect, has no attached stream for a moment
+    // too; reclaiming that early would throw away a run the reader can still see.
+    const { backend } = makeBackend({ reclaimGraceMs: 60_000 })
+    await backend.start('ws-1', 'a.ipynb', undefined)
+    const fresh = (await backend.list('ws-1')).kernels[0]!
+    expect(fresh.orphan).toBe(true)
+    expect(fresh.reclaimable).toBe(false)
+    await backend.dispose()
+  })
+
+  it('stops an unattended kernel without a token', async () => {
+    const { backend, sessions } = makeBackend({ reclaimGraceMs: 0 })
+    const started = await backend.start('ws-1', 'a.ipynb', undefined)
+    const result = await backend.reclaim({ workspaceId: 'ws-1', kernelId: started.kernelId })
+    expect(result.phase).toBe('terminated')
+    expect(sessions[0]!.stopped).toBe('reclaim')
+    expect(backend.kernelCount).toBe(0)
+    await backend.dispose()
+  })
+
+  it('refuses to reclaim a kernel a page is watching', async () => {
+    const { backend, sessions } = makeBackend({ reclaimGraceMs: 0 })
+    const started = await backend.start('ws-1', 'nb.ipynb', undefined)
+    const { res } = fakeResponse()
+    const req = fakeRequest(`/kernel/stream?kernelId=${started.kernelId}&token=${started.token}&since=1`)
+    await backend.stream(req as never, res as never)
+    // Attached through the real route rather than by poking the map: "watched" means a
+    // live stream, which is exactly what the guard must read.
+    await expect(backend.reclaim({ workspaceId: 'ws-1', kernelId: started.kernelId }))
+      .rejects.toThrow(/open in a notebook/u)
+    expect(sessions[0]!.stopped).toBeNull()
+    await backend.dispose()
+  })
+
+  it('refuses while the grace period has not elapsed', async () => {
+    const { backend, sessions } = makeBackend({ reclaimGraceMs: 60_000 })
+    const started = await backend.start('ws-1', 'a.ipynb', undefined)
+    await expect(backend.reclaim({ workspaceId: 'ws-1', kernelId: started.kernelId }))
+      .rejects.toThrow(/just became unattended/u)
+    expect(sessions[0]!.stopped).toBeNull()
+    await backend.dispose()
+  })
+
+  it('will not cross into another workspace', async () => {
+    const { backend, sessions } = makeBackend({ reclaimGraceMs: 0 })
+    const started = await backend.start('ws-1', 'a.ipynb', undefined)
+    await expect(backend.reclaim({ workspaceId: 'ws-2', kernelId: started.kernelId }))
+      .rejects.toThrow(/another workspace/u)
+    expect(sessions[0]!.stopped).toBeNull()
+    await backend.dispose()
+  })
+
+  it('reports a kernel that has already gone', async () => {
+    const { backend } = makeBackend()
+    await expect(backend.reclaim({ workspaceId: 'ws-1', kernelId: 'gone' }))
+      .rejects.toThrow(/no longer running/u)
     await backend.dispose()
   })
 })

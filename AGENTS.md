@@ -19,11 +19,12 @@ npm run build       # clean && tsc && tsdown && scripts/copy-kernel-bridge.mjs
 npm run test:bundle # scripts/smoke-client-bundle.mjs
 ```
 
-涉及笔记本内核链路时，再加两条端到端验证（需要工作区可访问、且装有 `ipykernel` 的 Python，因此不在 `npm test` 里）：
+涉及笔记本内核链路时，再加三条端到端验证（需要工作区可访问、且装有 `ipykernel` 的 Python，因此不在 `npm test` 里）：
 
 ```sh
-npm run test:kernel   # scripts/probe-kernel.mjs：用真实内核驱动构建后的宿主路由
-npm run test:example  # scripts/probe-example.mjs：逐格执行 examples 里的笔记本
+npm run test:kernel     # scripts/probe-kernel.mjs：用真实内核驱动构建后的宿主路由
+npm run test:example    # scripts/probe-example.mjs：逐格执行 examples 里的笔记本
+npm run test:isolation  # scripts/probe-isolation.mjs：证明同目录两个笔记本互不影响
 ```
 
 失败就修到失败原因消失，不要用 `expect(true).toBe(true)`、跳过用例或放宽断言来让门禁通过。断言必须落在**被测代码真实的输出面**上：只在自己测试里拼一遍参数再断言那个字面量，等于没有覆盖任何东西。
@@ -62,5 +63,5 @@ npm run test:example  # scripts/probe-example.mjs：逐格执行 examples 里的
 - 先用 `read` / `glob` / `grep` 工具看代码，不要用 `cat`、`find`、`grep` shell 命令读文件或搜内容。
 - 覆盖已有文件前先读它；优先用 `edit` 做定点修改而不是整文件重写。
 - 一次改动只做一件事，并让它的测试同时落地：修 bug 要留下能复现该 bug 的回归用例，说明写在注释里（为什么这个形状重要，而不是它做了什么）。
-- 探针脚本分两类，不要混淆：`test:kernel` / `test:example` 是**常驻的端到端门禁**（见上），属于交付物的一部分，改动内核链路时必须重跑；而为定位某一次问题临时写的脚本，用完就删，不要留在 `scripts/` 里，也不要把一次性调试断言混进正式 spec。
-- 临时脚本里不要写死个人绝对路径；需要工作区时用参数或临时目录，正式提交的 `scripts/` 会被 `tests/package-manifest.spec.ts` 的隐私检查覆盖。
+- 探针脚本分两类，不要混淆：`test:kernel` / `test:example` / `test:isolation` 是**常驻的端到端门禁**（见上），属于交付物的一部分，改动内核链路时必须重跑；而为定位某一次问题临时写的脚本，用完就删，不要留在 `scripts/` 里，也不要把一次性调试断言混进正式 spec。
+- 临时脚本里不要写死个人绝对路径；需要工作区时用参数或临时目录。注意隐私检查（`tests/package-manifest.spec.ts`）只覆盖两个 README，`scripts/` 不在其内——探针绑定回环地址是正当用法，不要为了让检查通过而扩展它或改写探针；脚本无个人路径靠的是约定。
