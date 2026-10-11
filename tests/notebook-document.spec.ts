@@ -63,6 +63,21 @@ const SAMPLE = [
   '',
 ].join('\n')
 
+/**
+ * A pre-nbformat-4.5 document: `nbformat_minor` is 4 and no cell carries an `id`,
+ * because ids only became required at minor 5. Jupytext, old papermill runs and many
+ * hand-written notebooks on GitHub have this shape.
+ */
+const PRE_45 = JSON.stringify({
+  nbformat: 4,
+  nbformat_minor: 4,
+  metadata: { language_info: { name: 'python' } },
+  cells: [
+    { cell_type: 'code', source: ['x = 1\n'], outputs: [], execution_count: null, metadata: {} },
+    { cell_type: 'code', source: ['print(x)\n'], outputs: [], execution_count: null, metadata: {} },
+  ],
+}, null, 1) + '\n'
+
 describe('notebook parsing', () => {
   it('reads cells, sources, and outputs from a real nbformat document', () => {
     const document = parseNotebook(SAMPLE)
@@ -357,5 +372,161 @@ describe('notebook mutations preserve the document', () => {
       .toThrow(NotebookEditError)
     expect(() => applyNotebookMutation('[1,2]', { op: 'delete', cellId: 'a' }))
       .toThrow(NotebookEditError)
+  })
+
+  it('edits a pre-4.5 notebook whose cells have no id', () => {
+    // The ids the view holds come from the render model, so an edit that locates a cell
+    // by id has to find it in the file too. A pre-4.5 document stores no `id`, and
+    // without normalizing one into the tree every structural edit either throws
+    // CELL_NOT_FOUND or, worse for delete/move, silently returns the file unchanged.
+    const document = parseNotebook(PRE_45)
+    const first = document.cells[0]?.id ?? ''
+    expect(first).not.toBe('')
+    const next = applyNotebookMutation(PRE_45, { op: 'set-source', cellId: first, source: 'y = 2\n' })
+    const parsed = JSON.parse(next) as {
+      cells: { id?: string; source: string[] | string }[]
+      nbformat_minor: number
+    }
+    expect(parsed.cells[0]?.source).toEqual(['y = 2\n'])
+    // The id the model used is now the id the file carries, so later runs land on it.
+    expect(parsed.cells[0]?.id).toBe(first)
+    expect(parsed.nbformat_minor).toBeGreaterThanOrEqual(5)
+  })
+
+  it('adds ids once, leaving cells that already have one alone', () => {
+    // Two edits in a row must not mint a second id for the same cell: the view keeps the
+    // id it read first, and a drifted id is how output goes missing after a run.
+    const document = parseNotebook(PRE_45)
+    const once = applyNotebookMutation(PRE_45, { op: 'set-source', cellId: document.cells[0]!.id, source: 'a = 1\n' })
+    const reparsed = parseNotebook(once)
+    expect(reparsed.cells.map(cell => cell.id)).toEqual(document.cells.map(cell => cell.id))
+    const twice = applyNotebookMutation(once, { op: 'set-source', cellId: reparsed.cells[0]!.id, source: 'b = 2\n' })
+    expect((JSON.parse(twice) as { cells: { id: string }[] }).cells.map(cell => cell.id))
+      .toEqual(reparsed.cells.map(cell => cell.id))
+
+    // A file where only some cells are missing an id keeps the ids it had.
+    const mixed = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 4,
+      metadata: {},
+      cells: [
+        { cell_type: 'code', id: 'keep-me', source: ['x = 1\n'], outputs: [], execution_count: null, metadata: {} },
+        { cell_type: 'code', source: ['y = 2\n'], outputs: [], execution_count: null, metadata: {} },
+      ],
+    }, null, 1)
+    const mixedNext = JSON.parse(applyNotebookMutation(mixed, {
+      op: 'set-source', cellId: parseNotebook(mixed).cells[1]!.id, source: 'z = 3\n',
+    })) as { cells: { id?: string }[] }
+    expect(mixedNext.cells[0]?.id).toBe('keep-me')
+    expect(mixedNext.cells[1]?.id).toBeTypeOf('string')
+  })
+
+  it('moves and deletes cells in a pre-4.5 notebook', () => {
+    // These two were the nastiest failure of the old shape: they locate a cell by id,
+    // found nothing, and returned the file *unchanged* rather than throwing. A user who
+    // clicked "move up" saw the cell refuse to move with no message at all.
+    const document = parseNotebook(PRE_45)
+    const moved = JSON.parse(applyNotebookMutation(PRE_45, {
+      op: 'move', cellId: document.cells[1]!.id, direction: -1,
+    })) as { cells: { source: string[] }[] }
+    expect(moved.cells.map(cell => joinNotebookText(cell.source))).toEqual(['print(x)\n', 'x = 1\n'])
+    const deleted = JSON.parse(applyNotebookMutation(PRE_45, { op: 'delete', cellId: document.cells[0]!.id })) as {
+      cells: { source: string[] }[]
+    }
+    expect(deleted.cells).toHaveLength(1)
+    expect(joinNotebookText(deleted.cells[0]!.source)).toBe('print(x)\n')
+  })
+
+  it('covers every structural edit on a pre-4.5 notebook', () => {
+    // Eight of the ten operations used to throw CELL_NOT_FOUND on this shape. They share
+    // one lookup, so one fix covers them — and one lookup change could break them all,
+    // which is why the list is asserted rather than sampled.
+    const document = parseNotebook(PRE_45)
+    const first = document.cells[0]!.id
+    const second = document.cells[1]!.id
+    const cases: { label: string; mutation: Parameters<typeof applyNotebookMutation>[1] }[] = [
+      { label: 'set-kind', mutation: { op: 'set-kind', cellId: first, kind: 'markdown' } },
+      { label: 'insert beside', mutation: { op: 'insert', cellId: first, before: true, kind: 'code' } },
+      { label: 'split', mutation: { op: 'split', cellId: first, offset: 2 } },
+      { label: 'merge down', mutation: { op: 'merge-down', cellId: first } },
+      { label: 'append output', mutation: { op: 'append-output', cellId: first, item: { kind: 'stream', name: 'stdout', text: 'hi\n' } } },
+      { label: 'clear outputs', mutation: { op: 'clear-outputs', cellId: first } },
+      { label: 'set execution count', mutation: { op: 'set-execution-count', cellId: first, executionCount: 2 } },
+    ]
+    for (const testCase of cases) {
+      expect(() => applyNotebookMutation(PRE_45, testCase.mutation), testCase.label).not.toThrow()
+    }
+    // The two that locate a cell but do not need its id to survive also work here.
+    expect(JSON.parse(applyNotebookMutation(PRE_45, { op: 'delete', cellId: second })).cells).toHaveLength(1)
+    expect(applyNotebookMutation(PRE_45, { op: 'move', cellId: second, direction: -1 })).not.toBe(PRE_45)
+  })
+
+  it('never hands two cells the same id', () => {
+    // The positional name is only free if the file does not already own it. A cell
+    // literally named `dsh-cell-1` sits exactly where the synthesized id for index 1
+    // would go, and two cells sharing an id is worse than one missing it: a run's output
+    // is matched by id, so it would land on the wrong cell and look like a correct run.
+    const tricky = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 4,
+      metadata: {},
+      cells: [
+        { cell_type: 'code', id: 'dsh-cell-1', source: ['first\n'], outputs: [], execution_count: null, metadata: {} },
+        { cell_type: 'code', source: ['second\n'], outputs: [], execution_count: null, metadata: {} },
+      ],
+    }, null, 1)
+    const ids = parseNotebook(tricky).cells.map(cell => cell.id)
+    expect(new Set(ids).size).toBe(2)
+    const edited = JSON.parse(applyNotebookMutation(tricky, {
+      op: 'set-source', cellId: ids[1]!, source: 'changed\n',
+    })) as { cells: { id: string; source: string[] }[] }
+    expect(edited.cells.map(cell => cell.id)).toEqual([ids[0], ids[1]])
+    // The collision-free id is what actually landed in the file, on the right cell.
+    expect(joinNotebookText(edited.cells[1]!.source)).toBe('changed\n')
+    expect(joinNotebookText(edited.cells[0]!.source)).toBe('first\n')
+  })
+
+  it('leaves the format version of a document too old for cell editing alone', () => {
+    // nbformat 3 predates cell ids entirely, and the view already tells the reader this
+    // file is too old to edit as cells. Raising its *major* version would rewrite it into
+    // a shape the rest of the document does not have, so normalization declines the file
+    // rather than relabelling it.
+    const v3 = JSON.stringify({
+      nbformat: 3,
+      nbformat_minor: 0,
+      metadata: {},
+      cells: [{ cell_type: 'code', language: 'python', prompt_number: null, collapsed: false, inputs: ['x = 1\n'], outputs: [] }],
+    }, null, 1)
+    expect(parseNotebook(v3).warning).toBe('unsupported-format')
+    // The edit is refused the same way it was before this fix: no id can be found,
+    // because none is written into a document whose major version predates cell ids.
+    expect(() => applyNotebookMutation(v3, {
+      op: 'set-execution-count', cellId: parseNotebook(v3).cells[0]!.id, executionCount: 1,
+    })).toThrow(NotebookEditError)
+  })
+
+  it('does not rewrite the version of a document that already has ids', () => {
+    // Adding ids is what justifies claiming minor 5. A file that already has them all is
+    // a different case: bumping its version would be an edit the user never asked for.
+    const minor4WithIds = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 4,
+      metadata: {},
+      cells: [{ cell_type: 'code', id: 'a', source: ['x = 1\n'], outputs: [], execution_count: null, metadata: {} }],
+    }, null, 1)
+    const edited = JSON.parse(applyNotebookMutation(minor4WithIds, { op: 'set-source', cellId: 'a', source: 'y = 2\n' })) as {
+      nbformat_minor: number
+      cells: { source: string[] }[]
+    }
+    expect(edited.nbformat_minor).toBe(4)
+    expect(joinNotebookText(edited.cells[0]!.source)).toBe('y = 2\n')
+  })
+
+  it('serializes a pre-4.5 document without inventing ids', () => {
+    // Reading is not editing. The round trip on the one fixture that has no ids at all is
+    // what says the serializer does not invent them, so opening an old notebook never
+    // produces a diff. (That ids are *added on edit* is the other tests' job.)
+    const document = parseNotebook(PRE_45)
+    expect(serializeNotebook(JSON.parse(PRE_45) as Record<string, unknown>, document.format)).toBe(PRE_45)
   })
 })

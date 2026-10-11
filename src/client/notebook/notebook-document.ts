@@ -18,6 +18,12 @@
 import type { NotebookMimeBundle, NotebookOutputItem } from '../../shared/notebook-protocol.ts'
 
 export const NBFORMAT_MINIMUM = 4
+/**
+ * The minor version at which nbformat made a cell `id` required. A document below this
+ * usually has none, which is why an edit has to write ids into the tree — see
+ * `ensureCellIds`.
+ */
+const NBFORMAT_MINOR_REQUIRING_IDS = 5
 const MAX_STRUCTURED_NOTEBOOK_BYTES = 8 * 1024 * 1024
 
 /** Cell kinds `.ipynb` defines; anything else is read as raw. */
@@ -216,11 +222,14 @@ export function parseNotebook(text: string): NotebookDocument {
   const nbformat = typeof value['nbformat'] === 'number' ? value['nbformat'] : NBFORMAT_MINIMUM
   if (rawCells === null) return { ...blank, nbformat, warning: 'missing-cells' }
   const cells: NotebookCellModel[] = []
+  // One derivation for both the render model and the write path (see `deriveCellIds`),
+  // so the id the view holds is always the id the file will carry.
+  const ids = deriveCellIds(rawCells)
   rawCells.forEach((candidate, index) => {
     if (!isRecord(candidate)) return
     const kind = readCellKind(candidate['cell_type'])
     cells.push({
-      id: typeof candidate['id'] === 'string' && candidate['id'] !== '' ? candidate['id'] : `dsh-cell-${index}`,
+      id: ids[index] ?? syntheticCellId(index),
       index,
       kind,
       source: joinNotebookText(candidate['source']),
@@ -278,6 +287,9 @@ export function editNotebook(text: string, apply: (value: Record<string, unknown
     throw new NotebookEditError('INVALID_NOTEBOOK', 'notebook is not valid JSON')
   }
   if (!isRecord(value)) throw new NotebookEditError('INVALID_NOTEBOOK', 'notebook is not a JSON object')
+  // Every mutation below locates its cell by id, so the id has to exist in the tree, not
+  // only in the render model that handed it to the caller.
+  ensureCellIds(value)
   apply(value, format)
   return serializeNotebook(value, format)
 }
@@ -332,7 +344,100 @@ function requireCell(value: Record<string, unknown>, cellId: string): {
   return { cells, index, cell }
 }
 
-/** Generate the id a new cell gets, and one for notebooks older than nbformat 4.5. */
+/**
+ * The positional id a cell gets when the file does not carry one.
+ *
+ * Only `deriveCellIds` should call this: the point of that function is that the render
+ * model and the write path compute ids the same way, and a second entry point is how
+ * they start to disagree.
+ */
+function syntheticCellId(index: number): string {
+  return `dsh-cell-${index}`
+}
+
+/**
+ * The id a cell carries in the file, or `null` when it carries none.
+ *
+ * One predicate shared by the render model and the write path: they must agree about
+ * which cells are already named, or an edit writes an id the view never asked for.
+ */
+function existingCellId(candidate: Record<string, unknown>): string | null {
+  const id = candidate['id']
+  return typeof id === 'string' && id !== '' ? id : null
+}
+
+/**
+ * The id of each cell, aligned to the raw `cells` array (unreadable entries are `null`).
+ *
+ * This single derivation is what keeps the view and the file naming the same cell. A
+ * run's output is matched by id, so two derivations that disagree — or a synthesized name
+ * that collides with one the file already owns — produce the worst failure available
+ * here: the run finishes, the output is matched to the wrong cell, and the notebook looks
+ * like it ran correctly.
+ *
+ * Alignment matters as much as the names: the array is indexed by the position a cell has
+ * in the file, so compacting it would hand two cells the same positional id.
+ */
+function deriveCellIds(cells: readonly unknown[]): (string | null)[] {
+  const present = cells.map(candidate => (isRecord(candidate) ? existingCellId(candidate) : null))
+  const taken = new Set(present.filter((id): id is string => id !== null))
+  return cells.map((candidate, index) => {
+    if (!isRecord(candidate)) return null
+    const stored = present[index] ?? null
+    if (stored !== null) return stored
+    // A positional id is only free if the file did not already use it, so a cell
+    // literally named `dsh-cell-1` cannot be duplicated by the cell beside it.
+    let position = index
+    let synthetic = syntheticCellId(position)
+    while (taken.has(synthetic)) {
+      position += 1
+      synthetic = syntheticCellId(position)
+    }
+    taken.add(synthetic)
+    return synthetic
+  })
+}
+
+/**
+ * Write an `id` into every cell that lacks one, and raise the minor version to match.
+ *
+ * nbformat only required cell ids from minor 5, so an older document usually has none —
+ * while the view must still name cells by something stable across insert, delete and
+ * move, because that name is how a run's output finds its cell. Adding ids at the first
+ * structural edit is what makes the file and the view agree; bumping the minor version
+ * says so in the file itself, which is also what Jupyter writes.
+ *
+ * A document whose major version predates cell ids is left alone entirely: relabelling
+ * `nbformat: 3` as 4 would produce a file that is neither shape, and the view already
+ * refuses to edit one that old as cells.
+ *
+ * This runs on the edit path only, never while parsing: opening an old notebook to look
+ * at it must not produce a diff.
+ */
+function ensureCellIds(value: Record<string, unknown>): void {
+  const cells = value['cells']
+  if (!Array.isArray(cells)) return
+  // A document whose major version predates cell ids is refused by the view as cells, so
+  // relabelling it here would only produce a file that is neither shape.
+  if (typeof value['nbformat'] === 'number' && value['nbformat'] < NBFORMAT_MINIMUM) return
+  const ids = deriveCellIds(cells)
+  let added = false
+  // Indexed by position, exactly as `deriveCellIds` produced them: skipping an unreadable
+  // entry with a counter of its own is how two cells end up sharing one id.
+  cells.forEach((candidate, index) => {
+    if (!isRecord(candidate)) return
+    if (existingCellId(candidate) !== null) return
+    const id = ids[index]
+    if (id === null || id === undefined) return
+    candidate['id'] = id
+    added = true
+  })
+  if (!added) return
+  const minor = typeof value['nbformat_minor'] === 'number' ? value['nbformat_minor'] : 0
+  value['nbformat_minor'] = Math.max(minor, NBFORMAT_MINOR_REQUIRING_IDS)
+}
+
+/** The id a newly created cell gets. Cells revived from an id-less file use `deriveCellIds`. */
 export function createCellId(): string {
   const random = Math.random().toString(36).slice(2, 8)
   return `dsh-${random}${Date.now().toString(36).slice(-4)}`

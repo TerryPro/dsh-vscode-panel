@@ -34,6 +34,22 @@ const TWO_CELLS = notebookText(`[
   {"cell_type":"code","id":"c2","source":["print(x)"],"outputs":[],"execution_count":null,"metadata":{}}
 ]`)
 
+/**
+ * The same notebook as it exists on disk before nbformat 4.5: no cell carries an `id`.
+ * The view hands a run the id it synthesized, so writing the finished run back into the
+ * draft depends on that id being findable in the file — if it is not, the output is
+ * dropped silently and the user loses a run they just watched happen.
+ */
+const PRE_45 = JSON.stringify({
+  nbformat: 4,
+  nbformat_minor: 4,
+  metadata: { language_info: { name: 'python' } },
+  cells: [
+    { cell_type: 'code', source: ['x = 1\n'], outputs: [], execution_count: null, metadata: {} },
+    { cell_type: 'code', source: ['print(x)\n'], outputs: [], execution_count: null, metadata: {} },
+  ],
+}, null, 1) + '\n'
+
 function apiStub() {
   return {
     kernelDiscover: vi.fn().mockResolvedValue({ usable: true, kernels: [], environments: [] }),
@@ -225,6 +241,35 @@ describe('notebook runtime output to draft', () => {
     expect(holder.draft).toMatch(/"execution_count": 3/u)
     // Only the run cell changed; the other cell is untouched.
     expect(written).toContain('print(x)')
+  })
+
+  it('leaves a pre-4.5 draft untouched when the notebook is only opened', async () => {
+    // Auto-connect starts a kernel on open, so a read-only session must not sneak an edit
+    // into the file: the ids normalization runs on the edit path only, and a user who
+    // opened, connected, and closed an old notebook should get no diff at all.
+    const { runtime, holder, bridge } = await makeRuntime(PRE_45)
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    expect(bridge.setDraft).not.toHaveBeenCalled()
+    expect(holder.draft).toBe(PRE_45)
+  })
+
+  it('writes a finished run into a pre-4.5 draft instead of dropping the output', async () => {
+    // The view names cells by the id its render model produced, and a file from before
+    // nbformat 4.5 has no such id. If the write-back cannot find it, the run's output is
+    // dropped without a trace: the reader watched the cell print, and the file says
+    // nothing ever ran.
+    const { runtime, holder } = await makeRuntime(PRE_45)
+    const cellId = (await import('../src/client/notebook/notebook-document.ts')).parseNotebook(PRE_45).cells[0]!.id
+    await runtime.runCell('tab-1', 'ws-1', 'nb.ipynb', cellId, 'x = 1')
+    runtime.acceptFrame('tab-1', { sequence: 1, type: 'cell_started', msgId: 'm1', cellId, code: 'x = 1', executionCount: 4 })
+    runtime.acceptFrame('tab-1', {
+      sequence: 2, type: 'cell_output', msgId: 'm1', cellId, truncated: false,
+      item: { kind: 'stream', name: 'stdout', text: 'hello\n' },
+    })
+    runtime.acceptFrame('tab-1', { sequence: 3, type: 'cell_completed', msgId: 'm1', cellId, status: 'ok', executionCount: 4 })
+    expect(holder.draft).toContain('hello')
+    expect(holder.draft).toMatch(/"execution_count": 4/u)
+    expect(holder.draft).toContain('"nbformat_minor": 5')
   })
 
   it('writes the outputs and the execution count as one draft update', async () => {
