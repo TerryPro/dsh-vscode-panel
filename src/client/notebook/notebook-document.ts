@@ -616,3 +616,27 @@ export function notebookCellLines(source: string): string[] {
 export function notebookCellIds(document: NotebookDocument, kinds: readonly NotebookCellKind[] = ['code']): string[] {
   return document.cells.filter(cell => kinds.includes(cell.kind)).map(cell => cell.id)
 }
+
+/**
+ * Whether the kernel should be asked to run this cell at all.
+ *
+ * Only a code cell runs on the kernel, and a cell whose source is only whitespace must
+ * not be sent: ipykernel hands out a prompt number for every execute request, so a blank
+ * cell would consume one for nothing and leave every later number in the file disagreeing
+ * with the one Jupyter would have used.
+ *
+ * This lives beside the document model rather than in the surface or the runtime because
+ * both of them need the same answer — the surface for what a row offers and what the
+ * queue is counted to hold, the runtime for the stretch a Restart & Run All submits — and
+ * two definitions drift apart the moment one of them learns about raw cells.
+ */
+export function isRunnableNotebookCell(cell: NotebookCellModel): boolean {
+  return cell.kind === 'code' && cell.source.trim() !== ''
+}
+
+/** The cells a run would actually send, in document order, ready for `runCells`. */
+export function runnableNotebookCells(
+  cells: readonly NotebookCellModel[],
+): { id: string; code: string }[] {
+  return cells.filter(isRunnableNotebookCell).map(cell => ({ id: cell.id, code: cell.source }))
+}

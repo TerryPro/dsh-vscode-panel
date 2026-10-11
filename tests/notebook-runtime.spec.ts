@@ -190,6 +190,157 @@ describe('notebook runtime kernel lifecycle', () => {
     expect(kernel.token).toBe('t2')
   })
 
+  it('joins a cold-start run instead of overwriting its queue', async () => {
+    // Nothing to restart is the other half of this command, and the gate has to cover it:
+    // `runCells` assigns the queue wholesale, so a second press during a kernel's slow
+    // first start would silently drop the stretch the reader is already waiting on.
+    const { api, runtime } = await makeRuntime()
+    // Held in an object: a closure-assigned `let` is narrowed back to `null` here.
+    const gate: { release: ((value: unknown) => void) | null } = { release: null }
+    api.kernelStart.mockImplementationOnce(() => new Promise(resolve => { gate.release = resolve }))
+    const first = runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    const second = runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    gate.release?.({
+      kernelId: 'k1', token: 't1', displayName: 'Python 3', specName: 'python3',
+      language: 'python', phase: 'ready', sequence: 1,
+    })
+    await Promise.all([first, second])
+    expect(api.kernelStart).toHaveBeenCalledTimes(1)
+    // One stretch, both cells of it still owed rather than reset to the same list.
+    expect(api.kernelExecute).toHaveBeenCalledTimes(1)
+    expect(runtime.pendingQueueLength('tab-1')).toBe(1)
+  })
+
+  it('forgets the queued cells a restart invalidates, not just their run state', async () => {
+    // The second acceptance line for Restart & Run All: a cell still waiting behind a
+    // Run All was queued against the old namespace. `reset-runs` clears what the cells
+    // *show*, but the queue of cell ids the tab owes lives on the runtime, and a queued
+    // id left there fires the moment the new kernel reports ready — running a cell the
+    // reader restarted precisely in order not to run again yet.
+    const { api, runtime } = await makeRuntime()
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    await runtime.runCells('tab-1', 'ws-1', 'nb.ipynb', [
+      { id: 'c1', code: 'x = 1' },
+      { id: 'c2', code: 'print(x)' },
+    ])
+    expect(api.kernelExecute).toHaveBeenCalledTimes(1)
+    expect(runtime.pendingQueueLength('tab-1')).toBe(1)
+    await runtime.restart('tab-1', 'ws-1', 'nb.ipynb')
+    // The debt is gone before the new session is even asked to speak.
+    expect(runtime.pendingQueueLength('tab-1')).toBe(0)
+    runtime.acceptFrame('tab-1', { type: 'phase', phase: 'ready', sequence: 3 } as never)
+    await new Promise(resolve => { setTimeout(resolve, 40) })
+    // c2 never reaches the kernel: it was queued against the namespace this restart threw away.
+    expect(api.kernelExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a second Restart & Run All while a restart is still in flight', async () => {
+    // The restart is an `await`, and `restart()` blanks the session before it begins.
+    // A second command landing in that gap would read "no kernel", and instead of sharing
+    // the restart already running it would *start another kernel* — a process leak on the
+    // Host — and send the first cell of the old stretch into the namespace being replaced.
+    const { api, runtime } = await makeRuntime()
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    // Held in an object because a closure-assigned `let` is narrowed to `null` here.
+    const gate: { release: (() => void) | null } = { release: null }
+    api.kernelRestart.mockImplementationOnce(() => new Promise(resolve => {
+      gate.release = () => {
+        resolve({
+          kernelId: 'k2', token: 't2', displayName: 'Python 3', specName: 'python3',
+          language: 'python', phase: 'ready', sequence: 1,
+        })
+      }
+    }))
+    const first = runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    const second = runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    gate.release?.()
+    await Promise.all([first, second])
+    // One restart, no second kernel started for a tab that was mid-restart, and the
+    // stretch was sent exactly once against the new session.
+    expect(api.kernelRestart).toHaveBeenCalledTimes(1)
+    expect(api.kernelStart).toHaveBeenCalledTimes(1)
+    expect(api.kernelExecute).toHaveBeenCalledTimes(1)
+    expect(api.kernelExecute.mock.calls[0]![0]).toMatchObject({ kernelId: 'k2', cellId: 'c1' })
+  })
+
+  it('restarts and runs every code cell in document order without a second wait', async () => {
+    const { api, runtime } = await makeRuntime()
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    await runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    // One restart, and the stretch is on its way: the first cell is already sent.
+    expect(api.kernelRestart).toHaveBeenCalledTimes(1)
+    expect(api.kernelExecute).toHaveBeenCalledTimes(1)
+    expect(api.kernelExecute.mock.calls[0]![0]).toMatchObject({ cellId: 'c1' })
+    // The rest wait in the queue behind it, so the strip can say what is still owed.
+    expect(runtime.pendingQueueLength('tab-1')).toBe(1)
+  })
+
+  it('sends the queued cells to the restarted session, never the retired one', async () => {
+    // A kernel restart is a new namespace at a new address. A cell that was queued *before*
+    // the restart must not be sent with the session that existed when it was queued: the old
+    // id is gone, and the variables the cell expects do not exist there any more.
+    const { api, runtime } = await makeRuntime()
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    await runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    expect(api.kernelExecute.mock.calls[0]![0]).toMatchObject({ kernelId: 'k2', cellId: 'c1' })
+    // The queue continues on the kernel's own idle signal, with no timer of our own.
+    runtime.acceptFrame('tab-1', { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 1, sequence: 1 } as never)
+    runtime.acceptFrame('tab-1', { type: 'phase', phase: 'ready', sequence: 2 } as never)
+    await vi.waitFor(() => { expect(api.kernelExecute).toHaveBeenCalledTimes(2) })
+    expect(api.kernelExecute.mock.calls[1]![0]).toMatchObject({ kernelId: 'k2', token: 't2', cellId: 'c2' })
+    expect(runtime.pendingQueueLength('tab-1')).toBe(0)
+  })
+
+  it('replays nothing from the retired session after a restart', async () => {
+    // The old stream is closed before the new one opens, so no request may carry the old
+    // kernel id: asking a retired kernel to replay its buffer is how a restart ends up
+    // painting last session's output into cells that were just cleared.
+    //
+    // The new stream also resumes from the sequence the *new* session reported, which is
+    // deliberately a different number than the cursor the old one had reached.
+    const { api, runtime } = await makeRuntime()
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    api.kernelRestart.mockResolvedValueOnce({
+      kernelId: 'k2', token: 't2', displayName: 'Python 3', specName: 'python3',
+      language: 'python', phase: 'ready', sequence: 7,
+    })
+    api.kernelPoll.mockClear()
+    await runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    // Nothing may ask the retired session to replay its buffer.
+    type PollRequest = { kernelId?: string, token?: string, since?: number }
+    const requests = api.kernelPoll.mock.calls.map(([request]) => request as PollRequest)
+    expect(requests.length).toBeGreaterThan(0)
+    for (const request of requests) {
+      expect(request).not.toMatchObject({ kernelId: 'k1', token: 't1' })
+    }
+    expect(requests[0]).toMatchObject({ kernelId: 'k2', token: 't2', since: 7 })
+    expect(runtime.state('tab-1').kernel.since).toBe(7)
+  })
+
+  it('restarts and runs again from a file that never had a kernel', async () => {
+    // The command has to work as the first action on a freshly opened notebook: there is
+    // no session to restart, so it starts one and runs, rather than reporting a failure.
+    const { api, runtime } = await makeRuntime()
+    await runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    expect(api.kernelStart).toHaveBeenCalledTimes(1)
+    expect(api.kernelRestart).not.toHaveBeenCalled()
+    expect(api.kernelExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not leave a queued stretch when the restart fails', async () => {
+    // Cells waiting behind a run that never happened would fire at the first idle signal
+    // the tab ever receives, running a notebook the reader did not ask to run.
+    const { api, runtime } = await makeRuntime()
+    await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    api.kernelRestart.mockRejectedValueOnce(new Error('the kernel could not be restarted'))
+    await runtime.restartAndRunAll('tab-1', 'ws-1', 'nb.ipynb')
+    expect(api.kernelExecute).not.toHaveBeenCalled()
+    expect(runtime.pendingQueueLength('tab-1')).toBe(0)
+    runtime.acceptFrame('tab-1', { type: 'phase', phase: 'ready', sequence: 3 } as never)
+    await new Promise(resolve => { setTimeout(resolve, 40) })
+    expect(api.kernelExecute).not.toHaveBeenCalled()
+  })
+
   it('stops the kernel on shutdown and clears the session', async () => {
     const { api, runtime } = await makeRuntime()
     await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')

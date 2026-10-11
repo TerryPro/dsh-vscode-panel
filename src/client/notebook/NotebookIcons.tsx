@@ -184,3 +184,23 @@ export function IconCellMenu16({ size = 14 }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * Restart & Run All: the restart ring the toolbar already draws, with a play triangle
+ * inside it.
+ *
+ * Deliberately neither glyph the toolbar shows on its own, because the command is neither:
+ * pressing it throws away the namespace *and* recomputes every cell, so a reader must not
+ * mistake it for one of the two buttons they already know. The arc is copied from
+ * `IconRestartKernel16` rather than recomputed, so the ring cannot be drawn off-centre or
+ * outside the viewBox.
+ */
+export function IconRestartRunAll16({ size = 14 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M13 8a5 5 0 1 1-1.6-3.7" />
+      <path d="M13 2.5V5h-2.5" />
+      <path d="M6.9 6.1 9.9 8l-3 1.9z" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}

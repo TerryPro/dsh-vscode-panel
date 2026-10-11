@@ -118,7 +118,10 @@ function apiStub() {
     kernelInterrupt: vi.fn(),
     kernelInput: vi.fn().mockResolvedValue({ accepted: true }),
     kernelPoll: vi.fn().mockResolvedValue({ frames: [], nextSequence: 1, phase: 'ready', executionCount: 0, resynced: false }),
-    kernelRestart: vi.fn(),
+    kernelRestart: vi.fn().mockResolvedValue({
+      kernelId: 'k2', token: 't2', displayName: 'Python 3', specName: 'python3',
+      language: 'python', phase: 'ready', sequence: 1,
+    }),
     kernelShutdown: vi.fn(),
     kernelStatus: vi.fn(),
     kernelComplete: vi.fn(),
@@ -806,6 +809,38 @@ describe('notebook surface execution', () => {
     // start failure the reader never asked for.
     await new Promise(resolve => { setTimeout(resolve, 40) })
     expect(api.kernelStart).not.toHaveBeenCalled()
+  })
+
+  it('restarts and runs the whole notebook from one toolbar command', async () => {
+    const draft = nb([code('c1', 'a = 1'), { cell_type: 'markdown', id: 'm', source: '# prose', metadata: {} }, code('c2', 'print(a)')])
+    const { api, getByLabelText, runtime } = setup(draft)
+    await act(async () => {
+      await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    })
+    await act(async () => {
+      fireEvent.click(getByLabelText(labels.restartRunAll))
+    })
+    // One press: the restart happened and the first cell is already on its way, so the
+    // reader does not have to wait for the kernel and press again.
+    expect(api.kernelRestart).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => { expect(api.kernelExecute).toHaveBeenCalledTimes(1) })
+    expect(api.kernelExecute.mock.calls[0]![0]).toMatchObject({ kernelId: 'k2', cellId: 'c1' })
+    // The Markdown cell is not sent, and the second code cell waits in the queue the strip
+    // reads, so the command reports what it still owes.
+    expect(runtime.pendingQueueLength('tab-1')).toBe(1)
+  })
+
+  it('leaves nothing queued when the restart fails', async () => {
+    const { api, getByLabelText, runtime } = setup(nb([code('c1', 'a = 1'), code('c2', 'print(a)')]))
+    await act(async () => {
+      await runtime.ensureKernel('tab-1', 'ws-1', 'nb.ipynb')
+    })
+    api.kernelRestart.mockRejectedValueOnce(new Error('the kernel could not be restarted'))
+    await act(async () => {
+      fireEvent.click(getByLabelText(labels.restartRunAll))
+    })
+    expect(api.kernelExecute).not.toHaveBeenCalled()
+    expect(runtime.pendingQueueLength('tab-1')).toBe(0)
   })
 })
 

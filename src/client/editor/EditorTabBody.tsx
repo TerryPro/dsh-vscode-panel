@@ -238,6 +238,7 @@ export function EditorTabBody({
     cellMenu: t('notebook.cellMenu'),
     runAbove: t('notebook.runAbove'),
     runBelow: t('notebook.runBelow'),
+    restartRunAll: t('notebook.restartRunAll'),
     splitCell: t('notebook.splitCell'),
     mergeDown: t('notebook.mergeDown'),
     clearCellOutputs: t('notebook.clearCellOutputs'),

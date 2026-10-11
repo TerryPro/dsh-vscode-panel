@@ -33,7 +33,7 @@ import {
   type NotebookState,
 } from './notebook-model.ts'
 import { KernelConnection, type KernelTransport } from './kernel-connection.ts'
-import { applyNotebookMutation, NotebookEditError, parseNotebook } from './notebook-document.ts'
+import { applyNotebookMutation, NotebookEditError, parseNotebook, runnableNotebookCells } from './notebook-document.ts'
 
 /** The tab draft access the runtime needs, supplied by the controller. */
 export interface NotebookDraftBridge {
@@ -57,6 +57,12 @@ interface NotebookTabRuntime {
   workspaceId: string
   /** Cell ids a Run All queued behind the one currently running. */
   queue: string[]
+  /**
+   * A Restart & Run All in flight, so a second press joins it instead of racing it.
+   * `restart()` blanks the session before its awaited call returns, and a concurrent
+   * command reading that blank would start another kernel and send the stretch twice.
+   */
+  restarting: Promise<void> | null
 }
 
 export class NotebookRuntime {
@@ -320,9 +326,19 @@ export class NotebookRuntime {
     }
   }
 
-  /** Restart this tab's kernel. Every cell keeps its outputs; the namespace is new. */
+  /**
+   * Restart this tab's kernel. Stored output stays; the namespace and any cell still
+   * waiting in the queue are discarded, so a restart never runs a stale cell against
+   * fresh state.
+   */
   async restart(tabId: string, workspaceId: string, path: string): Promise<void> {
     const state = this.state(tabId)
+    // A cell still queued behind a Run All was queued against the namespace this restart
+    // is throwing away. `reset-runs` clears what the cells show, but the queue of cell ids
+    // the tab owes lives on the runtime and fires the moment the new kernel reports ready —
+    // so abandoning it here is the same thing `shutdown`, `interrupt` and `forget` each do,
+    // and the one reason a restarted notebook cannot run a stale cell against fresh state.
+    this.runtime(tabId).queue = []
     this.detach(tabId)
     // Outputs belong to the file, not to the process, so they are kept on screen and
     // only the live run state and prompt numbers are treated as stale.
@@ -353,6 +369,66 @@ export class NotebookRuntime {
     } catch (error: unknown) {
       this.dispatch(tabId, { type: 'kernel', phase: 'failed', message: messageOf(error) })
     }
+  }
+
+  /**
+   * Restart this tab's kernel and run the whole notebook in the new namespace.
+   *
+   * One command because the two halves are not separable for the reader: a restart that
+   * leaves the cells un-run asks them to press again and wait for nothing, and a Run All
+   * on a kernel that still holds last run's variables quietly succeeds at the wrong thing.
+   *
+   * The queue is filled only after the new session is known to exist. Cells queued before
+   * a restart would otherwise be sent with the session that was current when they were
+   * queued — an id that is gone, in a namespace that no longer holds their variables — and
+   * a failed restart that left a queue behind would have it fire at the first idle signal
+   * the tab ever receives, running a notebook nobody asked to run.
+   */
+  async restartAndRunAll(tabId: string, workspaceId: string, path: string): Promise<void> {
+    const runtime = this.runtime(tabId)
+    const inFlight = runtime.restarting
+    if (inFlight !== null) {
+      // A second press asked for what the command already running is doing, so it joins it
+      // instead of racing it. Racing is not merely redundant: `restart()` blanks the
+      // session before its awaited call returns, so the newcomer would read that blank as
+      // "nothing to restart", start a *second* kernel on the Host, and send the whole
+      // stretch twice — the second time into the namespace being replaced.
+      await inFlight
+      return
+    }
+    const command = this.runAfterRestart(tabId, workspaceId, path)
+    // The gate covers this command alone: the toolbar's plain Restart button calls
+    // `restart()` directly and does not take it. That is safe because the two now do the
+    // same thing to the queue — whichever runs second still finds an abandoned queue — but
+    // it means this field is not "a restart is in flight", only "a Restart & Run All is".
+    runtime.restarting = command
+    try {
+      await command
+    } finally {
+      runtime.restarting = null
+    }
+  }
+
+  private async runAfterRestart(tabId: string, workspaceId: string, path: string): Promise<void> {
+    const state = this.state(tabId)
+    // Read from the same bridge `drainQueue` reads, so the stretch that goes out and the
+    // cells that follow it cannot come from two different versions of the notebook.
+    const targets = runnableNotebookCells(parseNotebook(this.bridge.getDraft(tabId)).cells)
+    if (state.kernel.kernelId === null || state.kernel.token === null) {
+      // Nothing to restart: start one and run, so this is also how a freshly opened
+      // notebook is executed top to bottom.
+      await this.runCells(tabId, workspaceId, path, targets)
+      return
+    }
+    // `restart` reuses the session stored on the tab, so the path it was written with has
+    // to be the one being run — a tab reopened on another file would restart the wrong one.
+    this.runtime(tabId).path = path
+    await this.restart(tabId, workspaceId, path)
+    const restarted = this.state(tabId).kernel
+    // A failed restart has already reported its own reason through the kernel phase, and
+    // that reason is worth more to the reader than anything said here.
+    if (restarted.kernelId === null || restarted.phase === 'failed') return
+    await this.runCells(tabId, workspaceId, path, targets)
   }
 
   /** Stop this tab's kernel; the tab stays open and can start another one. */
@@ -547,6 +623,7 @@ export class NotebookRuntime {
       path: '',
       workspaceId: '',
       queue: [],
+      restarting: null,
     }
     this.tabs.set(tabId, created)
     // Anyone who mounted before this tab had a runtime is reading a snapshot of

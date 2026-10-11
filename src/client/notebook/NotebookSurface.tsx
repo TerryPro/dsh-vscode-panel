@@ -33,6 +33,7 @@ import {
   IconMoveUp16,
   IconRenderCell16,
   IconRestartKernel16,
+  IconRestartRunAll16,
   IconRunAll16,
   IconRunCell16,
   IconSave16,
@@ -50,8 +51,10 @@ import {
 import {
   applyNotebookMutation,
   createNotebookSkeleton,
+  isRunnableNotebookCell,
   notebookIsBlank,
   parseNotebook,
+  runnableNotebookCells,
   type NotebookCellKind,
   type NotebookCellModel,
   type NotebookDocument,
@@ -116,6 +119,7 @@ export interface NotebookLabels {
   cellMenu: string
   runAbove: string
   runBelow: string
+  restartRunAll: string
   splitCell: string
   mergeDown: string
   clearCellOutputs: string
@@ -278,10 +282,17 @@ export function NotebookSurface({
   }, [document, patchView, runCellById, state.focusedCellId])
 
   const runAll = useCallback(async (): Promise<void> => {
-    const targets = runnableCells(document.cells)
+    const targets = runnableNotebookCells(document.cells)
     if (targets.length === 0) return
     await runtime.runCells(tabId, workspaceId, path, targets)
   }, [document, path, runtime, tabId, workspaceId])
+
+  // One press, because the two halves are not separable for the reader: restarting and
+  // then having to press run again would leave the notebook showing last run's output
+  // against a namespace that no longer exists.
+  const restartRunAll = useCallback(async (): Promise<void> => {
+    await runtime.restartAndRunAll(tabId, workspaceId, path)
+  }, [path, runtime, tabId, workspaceId])
 
   // How many runnable cells sit strictly before and strictly after each index. One pass
   // each way: the menu asks this of every cell on every render, and filtering the whole
@@ -292,14 +303,14 @@ export function NotebookSurface({
     let seen = 0
     for (const cell of document.cells) {
       above.push(seen)
-      if (isRunnableCell(cell)) seen += 1
+      if (isRunnableNotebookCell(cell)) seen += 1
     }
     let after = 0
     for (let index = document.cells.length - 1; index >= 0; index -= 1) {
       const cell = document.cells[index]
       if (cell === undefined) continue
       below[index] = after
-      if (isRunnableCell(cell)) after += 1
+      if (isRunnableNotebookCell(cell)) after += 1
     }
     return { above, below }
   }, [document])
@@ -319,9 +330,9 @@ export function NotebookSurface({
     const index = document.cells.findIndex(candidate => candidate.id === cellId)
     if (index < 0) return
     const slice = side === 'above' ? document.cells.slice(0, index) : document.cells.slice(index + 1)
-    const runnable = runnableCells(slice)
-    if (runnable.length === 0) return
-    void runtime.runCells(tabId, workspaceId, path, runnable)
+    const targets = runnableNotebookCells(slice)
+    if (targets.length === 0) return
+    void runtime.runCells(tabId, workspaceId, path, targets)
   }, [document, path, runtime, tabId, workspaceId])
 
   const clearAll = useCallback((): void => {
@@ -420,6 +431,7 @@ export function NotebookSurface({
       saving={saving}
       onSave={onSave}
       onRunAll={runAll}
+      onRestartRunAll={restartRunAll}
       onInterrupt={() => { void runtime.interrupt(tabId, workspaceId) }}
       onClearAll={clearAll}
       onRestart={() => { void runtime.restart(tabId, workspaceId, path) }}
@@ -959,6 +971,7 @@ function NotebookToolbar({
   saving,
   onSave,
   onRunAll,
+  onRestartRunAll,
   onInterrupt,
   onClearAll,
   onRestart,
@@ -974,6 +987,7 @@ function NotebookToolbar({
   saving: boolean
   onSave: () => void
   onRunAll: () => void
+  onRestartRunAll: () => void
   onInterrupt: () => void
   onClearAll: () => void
   onRestart: () => void
@@ -1006,6 +1020,21 @@ function NotebookToolbar({
       <span className={css.toolbarDivider} aria-hidden="true" />
       <button type="button" className={css.toolbarAction} aria-label={labels.runAll} title={labels.runAll} onClick={onRunAll}>
         <IconRunAll16 />
+      </button>
+      {/*
+        Restart & Run All sits with the run buttons rather than with the kernel's restart
+        and stop, because it is available before a kernel exists at all: with nothing to
+        restart the command starts one and runs, which is how a freshly opened notebook is
+        executed top to bottom.
+      */}
+      <button
+        type="button"
+        className={css.toolbarAction}
+        aria-label={labels.restartRunAll}
+        title={labels.restartRunAll}
+        onClick={onRestartRunAll}
+      >
+        <IconRestartRunAll16 />
       </button>
       <button
         type="button"
@@ -1057,27 +1086,6 @@ function NotebookToolbar({
       </select>
     </div>
   )
-}
-
-/**
- * The cells a run would actually send: only code, and only cells holding something.
- *
- * Shared by Run All and by the bounded rows so the two cannot disagree about what
- * "runnable" means — a blank cell sent by one path and skipped by the other would make
- * the prompt numbers in the file diverge from Jupyter's.
- *
- * `runtime.runCell()` refuses a blank cell too, and that is a second line of defence, not
- * a copy of this one to be merged away: the surface decides what a row offers and what the
- * queue is counted to hold, while the runtime guards a call that came from anywhere else.
- * A blank cell that reached the queue would occupy a slot without ever running, so the
- * status bar would report a debt the kernel never takes on.
- */
-function isRunnableCell(cell: NotebookCellModel): boolean {
-  return cell.kind === 'code' && cell.source.trim() !== ''
-}
-
-function runnableCells(cells: readonly NotebookCellModel[]): { id: string; code: string }[] {
-  return cells.filter(isRunnableCell).map(cell => ({ id: cell.id, code: cell.source }))
 }
 
 /**
