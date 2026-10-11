@@ -114,6 +114,8 @@ export interface NotebookLabels {
   editMarkdown: string
   renderMarkdown: string
   cellMenu: string
+  runAbove: string
+  runBelow: string
   splitCell: string
   mergeDown: string
   clearCellOutputs: string
@@ -276,9 +278,50 @@ export function NotebookSurface({
   }, [document, patchView, runCellById, state.focusedCellId])
 
   const runAll = useCallback(async (): Promise<void> => {
-    const code = document.cells.filter(cell => cell.kind === 'code' && cell.source.trim() !== '')
-    if (code.length === 0) return
-    await runtime.runCells(tabId, workspaceId, path, code.map(cell => ({ id: cell.id, code: cell.source })))
+    const targets = runnableCells(document.cells)
+    if (targets.length === 0) return
+    await runtime.runCells(tabId, workspaceId, path, targets)
+  }, [document, path, runtime, tabId, workspaceId])
+
+  // How many runnable cells sit strictly before and strictly after each index. One pass
+  // each way: the menu asks this of every cell on every render, and filtering the whole
+  // document per row would make opening one menu cost the square of the notebook's length.
+  const runnableCounts = useMemo(() => {
+    const above: number[] = []
+    const below: number[] = []
+    let seen = 0
+    for (const cell of document.cells) {
+      above.push(seen)
+      if (isRunnableCell(cell)) seen += 1
+    }
+    let after = 0
+    for (let index = document.cells.length - 1; index >= 0; index -= 1) {
+      const cell = document.cells[index]
+      if (cell === undefined) continue
+      below[index] = after
+      if (isRunnableCell(cell)) after += 1
+    }
+    return { above, below }
+  }, [document])
+
+  /**
+   * Run every code cell on one side of the cell whose menu was used, in document order.
+   *
+   * The bounded cell itself is left out: "above" means the cells this one depends on, and
+   * running the reader is standing in would double its side effects when they choose the
+   * row precisely because that cell has already run.
+   *
+   * A cell whose source is only whitespace is not sent at all. The kernel gives every
+   * execute request a prompt number, so a blank cell would consume one for nothing and
+   * leave every later number in the file disagreeing with the one Jupyter would have used.
+   */
+  const runCellsAround = useCallback((cellId: string, side: 'above' | 'below'): void => {
+    const index = document.cells.findIndex(candidate => candidate.id === cellId)
+    if (index < 0) return
+    const slice = side === 'above' ? document.cells.slice(0, index) : document.cells.slice(index + 1)
+    const runnable = runnableCells(slice)
+    if (runnable.length === 0) return
+    void runtime.runCells(tabId, workspaceId, path, runnable)
   }, [document, path, runtime, tabId, workspaceId])
 
   const clearAll = useCallback((): void => {
@@ -423,6 +466,8 @@ export function NotebookSurface({
               onCursor={offset => { setCursorOffsets(current => (current[cell.id] === offset ? current : { ...current, [cell.id]: offset })) }}
               onClearOutputs={() => { clearCellOutputs(cell.id) }}
               onMergeDown={() => { mergeDown(cell.id) }}
+              onRunAround={side => { runCellsAround(cell.id, side) }}
+              runnable={{ above: runnableCounts.above[index] ?? 0, below: runnableCounts.below[index] ?? 0 }}
               onFocus={() => {
                 runtime.dispatch(tabId, { type: 'focus', cellId: cell.id })
               }}
@@ -465,6 +510,8 @@ function NotebookCell({
   onCursor,
   onClearOutputs,
   onMergeDown,
+  onRunAround,
+  runnable,
   onFocus,
   onPatchView,
   onEdit,
@@ -496,6 +543,10 @@ function NotebookCell({
   onClearOutputs: () => void
   /** Merge the cell below in, forgetting both cells' session copy so the screen agrees. */
   onMergeDown: () => void
+  /** Run every runnable code cell on one side of this one. */
+  onRunAround: (side: 'above' | 'below') => void
+  /** Runnable cells strictly above / below this one, for the two run rows. */
+  runnable: { above: number; below: number }
   onFocus: () => void
   onPatchView: (patch: Partial<CellView>) => void
   onEdit: (source: string) => void
@@ -637,6 +688,12 @@ function NotebookCell({
               onCloseMenu()
               if (!isCellMenuAction(id)) return
               switch (id) {
+                case 'run-above':
+                  onRunAround('above')
+                  break
+                case 'run-below':
+                  onRunAround('below')
+                  break
                 case 'split-cell':
                   // The row is disabled without an offset, so this narrow exists for the
                   // type rather than as a second policy decision.
@@ -650,7 +707,15 @@ function NotebookCell({
                   break
               }
             }}
-            items={cellMenuItems({ cell, outputs, last: index >= total - 1, canSplit: splitOffset !== undefined, editable, labels })}
+            items={cellMenuItems({
+              cell,
+              outputs,
+              last: index >= total - 1,
+              canSplit: splitOffset !== undefined,
+              editable,
+              runnable,
+              labels,
+            })}
             dense
             compact
             portal
@@ -995,6 +1060,27 @@ function NotebookToolbar({
 }
 
 /**
+ * The cells a run would actually send: only code, and only cells holding something.
+ *
+ * Shared by Run All and by the bounded rows so the two cannot disagree about what
+ * "runnable" means — a blank cell sent by one path and skipped by the other would make
+ * the prompt numbers in the file diverge from Jupyter's.
+ *
+ * `runtime.runCell()` refuses a blank cell too, and that is a second line of defence, not
+ * a copy of this one to be merged away: the surface decides what a row offers and what the
+ * queue is counted to hold, while the runtime guards a call that came from anywhere else.
+ * A blank cell that reached the queue would occupy a slot without ever running, so the
+ * status bar would report a debt the kernel never takes on.
+ */
+function isRunnableCell(cell: NotebookCellModel): boolean {
+  return cell.kind === 'code' && cell.source.trim() !== ''
+}
+
+function runnableCells(cells: readonly NotebookCellModel[]): { id: string; code: string }[] {
+  return cells.filter(isRunnableCell).map(cell => ({ id: cell.id, code: cell.source }))
+}
+
+/**
  * The rows one cell's menu carries, and the guard that keeps them and the handler in
  * step.
  *
@@ -1003,7 +1089,7 @@ function NotebookToolbar({
  * `disabled` and the switch in `onSelect` read the same `can*` flags, so a row can never
  * promise an effect the handler will refuse.
  */
-const CELL_MENU_ACTIONS = ['split-cell', 'clear-outputs', 'merge-down'] as const
+const CELL_MENU_ACTIONS = ['run-above', 'run-below', 'split-cell', 'clear-outputs', 'merge-down'] as const
 type CellMenuAction = typeof CELL_MENU_ACTIONS[number]
 
 function isCellMenuAction(id: string): id is CellMenuAction {
@@ -1016,14 +1102,23 @@ function cellMenuItems(args: {
   last: boolean
   canSplit: boolean
   editable: boolean
+  runnable: { above: number; below: number }
   labels: NotebookLabels
 }): MenuEntry[] {
-  const { cell, outputs, last, canSplit, editable, labels } = args
+  const { cell, outputs, last, canSplit, editable, runnable, labels } = args
   const hasOutput = cell.kind === 'code' && (outputs.length > 0 || cell.executionCount !== null)
-  // Every row also carries `!editable` rather than relying on the trigger being disabled:
-  // an external modification can land *while the menu is open*, and a row that stays lit
-  // after the file stopped accepting edits promises an edit that `mutate` will refuse.
+  // The three structural rows carry `!editable` rather than relying on the trigger being
+  // disabled: an external modification is detected on a poll and can land *while the menu
+  // is open*, and `open` is the owner's decision (Menu's own contract), so a row lit a
+  // moment earlier would still promise an edit `mutate` refuses.
+  //
+  // The two run rows deliberately do not carry that gate, because a run is not an edit and
+  // the workbench already treats it that way: neither the per-cell run button nor the
+  // toolbar's Run All is disabled while the file is externally modified. Gating only these
+  // two rows would grey the menu's copy of a verb the toolbar next to it still offers.
   return [
+    { id: 'run-above', label: labels.runAbove, disabled: runnable.above === 0 },
+    { id: 'run-below', label: labels.runBelow, disabled: runnable.below === 0 },
     { id: 'split-cell', label: labels.splitCell, disabled: !editable || !canSplit },
     { id: 'clear-outputs', label: labels.clearCellOutputs, disabled: !editable || !hasOutput },
     { id: 'merge-down', label: labels.mergeDown, disabled: !editable || last },

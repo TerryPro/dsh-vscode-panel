@@ -236,6 +236,8 @@ export function EditorTabBody({
     editMarkdown: t('notebook.editMarkdown'),
     renderMarkdown: t('notebook.renderMarkdown'),
     cellMenu: t('notebook.cellMenu'),
+    runAbove: t('notebook.runAbove'),
+    runBelow: t('notebook.runBelow'),
     splitCell: t('notebook.splitCell'),
     mergeDown: t('notebook.mergeDown'),
     clearCellOutputs: t('notebook.clearCellOutputs'),

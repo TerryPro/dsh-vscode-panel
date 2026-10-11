@@ -948,24 +948,33 @@ describe('notebook cell menu', () => {
     expect((view.getByLabelText(labels.cellMenu) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("disables the open menu's rows when the file stops accepting edits", () => {
+  it("disables the open menu's structural rows when the file stops accepting edits", () => {
     // The trigger's own `disabled` cannot be the only guard: the modification is detected
     // on a poll, so a menu that is already open stays on screen while the file behind it
-    // has become uneditable. A row lit in that moment promises an edit `mutate` refuses.
+    // has become uneditable, and a row lit in that moment promises an edit the surface will
+    // refuse. The two run rows keep working, because a run is not an edit: neither the
+    // per-cell run button nor the toolbar's Run All is disabled in that state either.
     const view = setup(nb([
+      code('c0', 'setup = 1'),
       { ...code('c1', 'print(1)', { execution_count: 1, outputs: [streamOutput('one\n')] }) },
       code('c2', 'y = 2'),
     ]))
     // A caret the editor reported, so the split row is genuinely available to begin with.
     fireEvent.click(view.getByTestId('cell-editor-c1'))
-    openMenu(view)
-    const names = [labels.splitCell, labels.clearCellOutputs, labels.mergeDown]
-    for (const name of names) {
+    // The middle cell, so every row has something it could act on: one runnable cell above,
+    // one below, an output to clear and a neighbour to merge with.
+    openMenu(view, 1)
+    const editRows = [labels.splitCell, labels.clearCellOutputs, labels.mergeDown]
+    const runRows = [labels.runAbove, labels.runBelow]
+    for (const name of [...editRows, ...runRows]) {
       expect(view.getByRole('menuitem', { name }).hasAttribute('disabled'), name).toBe(false)
     }
     view.rerenderSurface({ editable: false })
-    for (const name of names) {
+    for (const name of editRows) {
       expect(view.getByRole('menuitem', { name }).hasAttribute('disabled'), name).toBe(true)
+    }
+    for (const name of runRows) {
+      expect(view.getByRole('menuitem', { name }).hasAttribute('disabled'), name).toBe(false)
     }
   })
 
@@ -980,6 +989,124 @@ describe('notebook cell menu', () => {
     expect(view.getByRole('menuitem', { name: labels.clearCellOutputs }).hasAttribute('disabled')).toBe(true)
     // Merging still applies: the cell below exists.
     expect(view.getByRole('menuitem', { name: labels.mergeDown }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('runs the cells below the menu\'s cell, in document order, skipping blanks', async () => {
+    // The reader asks for "everything after this one" because a notebook only works in
+    // sequence: the cells above define what the ones below compute. A cell with no code
+    // in it must not be sent at all — the kernel would spend an execution number on
+    // nothing and every later prompt would be off by one.
+    const draft = nb([
+      code('c1', 'a = 1'),
+      { cell_type: 'markdown', id: 'm', source: '# skip', metadata: {} },
+      code('c2', 'b = 2'),
+      code('c3', '   '),
+      code('c4', 'c = 3'),
+    ])
+    const view = setup(draft)
+    openMenu(view, 0)
+    await act(async () => {
+      fireEvent.click(view.getByRole('menuitem', { name: labels.runBelow }))
+    })
+    // The first goes now; the rest queue behind it, so the readout can say what is owed.
+    expect(view.api.kernelExecute).toHaveBeenCalledTimes(1)
+    expect(view.api.kernelExecute.mock.calls[0]![0]).toMatchObject({ cellId: 'c2' })
+    expect(view.runtime.pendingQueueLength('tab-1')).toBe(1)
+    // The status bar reads the same queue through this exact accessor, so the stretch's
+    // debt shows up in the strip without any per-command wiring.
+    expect(view.runtime.peekPendingQueueLength('tab-1')).toBe(1)
+    // The queue continues on the kernel's own idle signal, not on a timer.
+    frame(view.runtime, 1, { type: 'cell_completed', msgId: 'm1', cellId: 'c2', status: 'ok', executionCount: 1 })
+    frame(view.runtime, 2, { type: 'phase', phase: 'ready' })
+    await vi.waitFor(() => { expect(view.api.kernelExecute).toHaveBeenCalledTimes(2) })
+    expect(view.api.kernelExecute.mock.calls[1]![0]).toMatchObject({ cellId: 'c4' })
+    await new Promise(resolve => { setTimeout(resolve, 60) })
+    // `c3` is blank and `m` is Markdown: neither is ever sent.
+    expect(view.api.kernelExecute).toHaveBeenCalledTimes(2)
+  })
+
+  it('runs the cells above the menu\'s cell, in document order', async () => {
+    const draft = nb([code('c1', 'a = 1'), code('c2', 'b = 2'), code('c3', 'print(c1, c2)')])
+    const view = setup(draft)
+    openMenu(view, 2)
+    await act(async () => {
+      fireEvent.click(view.getByRole('menuitem', { name: labels.runAbove }))
+    })
+    expect(view.api.kernelExecute.mock.calls[0]![0]).toMatchObject({ cellId: 'c1' })
+    expect(view.runtime.pendingQueueLength('tab-1')).toBe(1)
+    frame(view.runtime, 1, { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 1 })
+    frame(view.runtime, 2, { type: 'phase', phase: 'ready' })
+    await vi.waitFor(() => { expect(view.api.kernelExecute).toHaveBeenCalledTimes(2) })
+    // The bounded cell itself is not run: "above" means what it depends on.
+    expect(view.api.kernelExecute.mock.calls[1]![0]).toMatchObject({ cellId: 'c2' })
+    await new Promise(resolve => { setTimeout(resolve, 60) })
+    expect(view.api.kernelExecute).toHaveBeenCalledTimes(2)
+  })
+
+  it('abandons the rest of the run when the reader interrupts', async () => {
+    // One interrupt has to stop the whole stretch, which is why the queue lives on the
+    // tab instead of being a local list the click closed over.
+    const draft = nb([code('c1', 'a'), code('c2', 'b'), code('c3', 'c'), code('c4', 'd')])
+    const view = setup(draft)
+    openMenu(view, 0)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.runBelow }))
+    await act(async () => {
+      await vi.waitFor(() => { expect(view.api.kernelExecute).toHaveBeenCalledTimes(1) })
+    })
+    expect(view.runtime.pendingQueueLength('tab-1')).toBe(2)
+    await act(async () => {
+      fireEvent.click(view.getByLabelText(labels.interrupt))
+    })
+    expect(view.runtime.pendingQueueLength('tab-1')).toBe(0)
+    const after = view.api.kernelExecute.mock.calls.length
+    frame(view.runtime, 1, { type: 'cell_completed', msgId: 'm1', cellId: 'c2', status: 'ok', executionCount: 1 })
+    frame(view.runtime, 2, { type: 'phase', phase: 'ready' })
+    await new Promise(resolve => { setTimeout(resolve, 60) })
+    // Nothing half-queued survives: the kernel idle signal finds an empty queue.
+    expect(view.api.kernelExecute).toHaveBeenCalledTimes(after)
+  })
+
+  it('bounds the run at the cell whose menu was used, not at the focused cell', async () => {
+    // The row means "everything after *this* cell": the reader opened the menu on it, so
+    // it is the cell they are pointing at. Following the model's focus instead would run
+    // a stretch measured from some other cell they clicked earlier, and the row they chose
+    // would quietly mean something else.
+    const draft = nb([code('c1', 'a = 1'), code('c2', 'b = 2'), code('c3', 'print(a, b)')])
+    const view = setup(draft)
+    // Focus the first cell, then act on the last cell's menu.
+    fireEvent.click(view.getByTestId('cell-editor-c1'))
+    expect(view.runtime.state('tab-1').focusedCellId).toBe('c1')
+    openMenu(view, 2)
+    await act(async () => {
+      fireEvent.click(view.getByRole('menuitem', { name: labels.runAbove }))
+    })
+    // Measured from c1 there is nothing above it; measured from c3 there are two cells.
+    expect(view.api.kernelExecute.mock.calls[0]![0]).toMatchObject({ cellId: 'c1' })
+    frame(view.runtime, 1, { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 1 })
+    frame(view.runtime, 2, { type: 'phase', phase: 'ready' })
+    await vi.waitFor(() => { expect(view.api.kernelExecute).toHaveBeenCalledTimes(2) })
+    expect(view.api.kernelExecute.mock.calls[1]![0]).toMatchObject({ cellId: 'c2' })
+  })
+
+  it('offers no run row when that side has nothing runnable', () => {
+    // A row that can only ever submit an empty list reads as a control that broke, so it
+    // is greyed out instead. Markdown and blank cells do not count as runnable.
+    const view = setup(nb([
+      { cell_type: 'markdown', id: 'm1', source: '# intro', metadata: {} },
+      code('c1', 'a = 1'),
+      { cell_type: 'markdown', id: 'm2', source: '# between', metadata: {} },
+      code('c2', '   '),
+      code('c3', 'print(a)'),
+    ]))
+    // c1 has only prose above it, so "run above" has nothing it could send.
+    openMenu(view, 1)
+    expect(view.getByRole('menuitem', { name: labels.runAbove }).hasAttribute('disabled')).toBe(true)
+    // Below c1: a Markdown cell and a blank one (neither runnable) plus one real cell.
+    expect(view.getByRole('menuitem', { name: labels.runBelow }).hasAttribute('disabled')).toBe(false)
+    // From c3 the blank c2 is skipped, so "above" counts only c1 — one runnable cell.
+    openMenu(view, 4)
+    expect(view.getByRole('menuitem', { name: labels.runAbove }).hasAttribute('disabled')).toBe(false)
+    expect(view.getByRole('menuitem', { name: labels.runBelow }).hasAttribute('disabled')).toBe(true)
   })
 })
 
