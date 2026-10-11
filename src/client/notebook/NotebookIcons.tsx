@@ -168,3 +168,19 @@ export function IconStopKernel16({ size = 14 }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * The cell's overflow menu: three dots, the workbench's "more actions" verb.
+ *
+ * A cell has seven row buttons already and this ticket adds three more, so the
+ * structural edits live behind one control rather than crowding the row.
+ */
+export function IconCellMenu16({ size = 14 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <circle cx="3.6" cy="8" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="12.4" cy="8" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}

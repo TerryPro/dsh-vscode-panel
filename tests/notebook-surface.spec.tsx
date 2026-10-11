@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/core/locales.ts'
 import type { NotebookLabels } from '../src/client/notebook/NotebookSurface.tsx'
@@ -26,12 +27,13 @@ vi.mock('@deepseek-ai/dsh-client-store', () => ({
 
 // CodeMirror cannot run in jsdom; a textarea keeps the cell editor assertable.
 vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
-  CodeEditor: ({ value, onChange, ariaLabel, cell, path }: {
+  CodeEditor: ({ value, onChange, ariaLabel, cell, path, onCursorChange }: {
     value: string
     ariaLabel: string
     onChange: (value: string) => void
     cell?: boolean
     path?: string
+    onCursorChange?: (cursor: { offset: number }) => void
   }) => (
     <textarea
       aria-label={ariaLabel}
@@ -39,13 +41,42 @@ vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
       data-cell={cell === true || undefined}
       data-lang-path={path}
       data-testid={`cell-editor-${ariaLabel.split(' ')[0]}`}
-      onChange={event => { onChange(event.target.value) }}
+      onChange={event => {
+        onChange(event.target.value)
+        onCursorChange?.({ offset: event.target.selectionStart ?? 0 })
+      }}
+      onClick={event => {
+        // A real editor reports the caret as the reader moves it; the cell needs that
+        // offset to split where the cursor actually is.
+        onCursorChange?.({ offset: (event.target as HTMLTextAreaElement).selectionStart ?? 0 })
+      }}
     />
   ),
 }))
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   MarkdownText: ({ text }: { text: string }) => <div data-testid="markdown">{text}</div>,
+  // Replace DSH's native Menu with a plain list so its items are assertable, exactly as
+  // the file tree's spec does: the anchor (the trigger the reader clicks) stays in the
+  // tree, and an open list becomes role="menu" rows. The test still only observes public
+  // behaviour — which rows appear, whether they are disabled, what the click writes.
+  Menu: (props: {
+    open?: boolean
+    items?: { id: string; label?: string; disabled?: boolean }[]
+    onSelect?: (id: string) => void
+    anchor?: unknown
+  }) => (
+    <>
+      {props.anchor as ReactNode}
+      {props.open === true && (
+        <div role="menu">
+          {(props.items ?? []).filter(item => item.label !== undefined).map(item => (
+            <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => { props.onSelect?.(item.id) }}>{item.label}</button>
+          ))}
+        </div>
+      )}
+    </>
+  ),
 }))
 
 let NotebookRuntime: typeof import('../src/client/notebook/notebook-runtime.ts').NotebookRuntime
@@ -120,21 +151,28 @@ function setup(draft: string, options: {
   })
   const onEdit = vi.fn((text: string) => { holder.draft = text })
   const onSave = options.onSave ?? vi.fn()
-  const view = render(<NotebookSurface
-    tabId="tab-1"
-    path="nb.ipynb"
-    workspaceId="ws-1"
-    draft={holder.draft}
-    editable={options.editable ?? true}
-    runtime={runtime}
-    onEdit={onEdit}
-    dirty={options.dirty ?? false}
-    saving={options.saving ?? false}
-    onSave={onSave}
-    labels={labels}
-    markdownLabels={{ code: { copyLabel: 'copy', copiedLabel: 'copied' }, footnotes: 'notes' } as never}
-  />)
-  return { ...view, api, runtime, holder, onEdit, onSave }
+  // One tree, rendered twice on demand: a test that needs to flip `editable` *after* a
+  // menu opened (which is how an external modification actually arrives) re-renders the
+  // same surface rather than mounting a second one.
+  const surface = (overrides: Partial<typeof options> = {}) => {
+    const next = { ...options, ...overrides }
+    return <NotebookSurface
+      tabId="tab-1"
+      path="nb.ipynb"
+      workspaceId="ws-1"
+      draft={holder.draft}
+      editable={next.editable ?? true}
+      runtime={runtime}
+      onEdit={onEdit}
+      dirty={next.dirty ?? false}
+      saving={next.saving ?? false}
+      onSave={onSave}
+      labels={labels}
+      markdownLabels={{ code: { copyLabel: 'copy', copiedLabel: 'copied' }, footnotes: 'notes' } as never}
+    />
+  }
+  const view = render(surface())
+  return { ...view, api, runtime, holder, onEdit, onSave, rerenderSurface: (overrides: Partial<typeof options> = {}) => { view.rerender(surface(overrides)) } }
 }
 /** Push a frame the way the Host's stream would. */
 function frame(runtime: InstanceType<typeof NotebookRuntime>, sequence: number, event: Record<string, unknown>): void {
@@ -768,6 +806,180 @@ describe('notebook surface execution', () => {
     // start failure the reader never asked for.
     await new Promise(resolve => { setTimeout(resolve, 40) })
     expect(api.kernelStart).not.toHaveBeenCalled()
+  })
+})
+
+describe('notebook cell menu', () => {
+  /** One stored output, in the shape `.ipynb` keeps it. */
+  const streamOutput = (text: string): Record<string, unknown> => ({
+    output_type: 'stream', name: 'stdout', text: [text],
+  })
+
+  /** Open one cell's action menu. The trigger is identified by the menu's own label. */
+  const openMenu = (view: ReturnType<typeof setup>, index = 0): void => {
+    fireEvent.click(view.getAllByLabelText(labels.cellMenu)[index]!)
+  }
+
+  /** `.ipynb` stores source as a string or a list of kept-newline lines; read either. */
+  const joinSource = (source: string | string[]): string =>
+    typeof source === 'string' ? source : source.join('')
+
+  it('clears only the cell whose menu was used', () => {
+    // The per-cell action exists because clearing everything is not what a reader wants
+    // after one noisy cell: the other cells' stored output must survive untouched.
+    const draft = nb([
+      { ...code('c1', 'print(1)', { execution_count: 4, outputs: [streamOutput('one\n')] }) },
+      { ...code('c2', 'print(2)', { execution_count: 5, outputs: [streamOutput('two\n')] }) },
+    ])
+    const view = setup(draft)
+    openMenu(view)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.clearCellOutputs }))
+    const written = JSON.parse(view.onEdit.mock.calls[0]![0] as string) as {
+      cells: { id: string; outputs: unknown[]; execution_count: number | null }[]
+    }
+    expect(written.cells[0]?.outputs).toEqual([])
+    expect(written.cells[0]?.execution_count).toBeNull()
+    expect(written.cells[1]?.outputs).toEqual([streamOutput('two\n')])
+    expect(written.cells[1]?.execution_count).toBe(5)
+    // Selecting a row closes the menu: the rows are a choice, not a persistent panel,
+    // and every other menu in the workbench closes on select.
+    expect(view.queryByRole('menu')).toBeNull()
+  })
+
+  it('clears a cell this session ran, not only the file\'s stored output', () => {
+    // The screen shows what the reducer collected for a cell that has run here, and the
+    // file shows what was written. Clearing only one of the two would leave the reader
+    // staring at output they just asked to remove.
+    const view = setup(nb([code('c1', 'print(1)')]))
+    view.runtime.runCell('tab-1', 'ws-1', 'nb.ipynb', 'c1', 'print(1)')
+    frame(view.runtime, 1, { type: 'cell_started', msgId: 'm1', cellId: 'c1', code: 'print(1)', executionCount: 1 })
+    frame(view.runtime, 2, {
+      type: 'cell_output', msgId: 'm1', cellId: 'c1', truncated: false,
+      item: { kind: 'stream', name: 'stdout', text: 'shown\n' },
+    })
+    frame(view.runtime, 3, { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 1 })
+    expect(view.getByText('shown')).toBeTruthy()
+    openMenu(view)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.clearCellOutputs }))
+    expect(view.queryByText('shown')).toBeNull()
+    expect(view.runtime.state('tab-1').cells['c1']).toBeUndefined()
+  })
+
+  it('merges the cell below into this one', () => {
+    // Merge has to take the neighbour's output with its source: dropping it would make
+    // the action destroy a result the reader can see on screen.
+    const draft = nb([
+      { ...code('c1', 'print(1)', { execution_count: 4, outputs: [streamOutput('one\n')] }) },
+      { ...code('c2', 'print(2)', { execution_count: 5, outputs: [streamOutput('two\n')] }) },
+    ])
+    const view = setup(draft)
+    openMenu(view)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.mergeDown }))
+    const written = JSON.parse(view.onEdit.mock.calls[0]![0] as string) as {
+      cells: { id: string; source: string[] | string; outputs: unknown[] }[]
+    }
+    expect(written.cells).toHaveLength(1)
+    expect(joinSource(written.cells[0]!.source)).toBe('print(1)\nprint(2)')
+    expect(written.cells[0]?.outputs).toHaveLength(2)
+  })
+
+  it('forgets both session copies when merging, so the screen shows the merged file', () => {
+    // The file keeps both cells' output after a merge, but the screen renders *this
+    // session's* copy of the surviving cell — which only ever had that cell's own output.
+    // Without dropping both session copies the reader watches the vanished cell's output
+    // disappear even though it is still in the file, so a merge has to clear the merged
+    // cell and the cell that goes away.
+    const view = setup(nb([code('c1', 'print(1)'), code('c2', 'print(2)')]))
+    frame(view.runtime, 1, { type: 'cell_started', msgId: 'm1', cellId: 'c1', code: 'print(1)', executionCount: 1 })
+    frame(view.runtime, 2, { type: 'cell_output', msgId: 'm1', cellId: 'c1', truncated: false, item: { kind: 'stream', name: 'stdout', text: 'one\n' } })
+    frame(view.runtime, 3, { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 1 })
+    frame(view.runtime, 4, { type: 'cell_started', msgId: 'm2', cellId: 'c2', code: 'print(2)', executionCount: 2 })
+    frame(view.runtime, 5, { type: 'cell_output', msgId: 'm2', cellId: 'c2', truncated: false, item: { kind: 'stream', name: 'stdout', text: 'two\n' } })
+    frame(view.runtime, 6, { type: 'cell_completed', msgId: 'm2', cellId: 'c2', status: 'ok', executionCount: 2 })
+    expect(view.runtime.state('tab-1').cells['c2']?.outputs).toHaveLength(1)
+    openMenu(view)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.mergeDown }))
+    expect(view.runtime.state('tab-1').cells['c1']).toBeUndefined()
+    expect(view.runtime.state('tab-1').cells['c2']).toBeUndefined()
+  })
+
+  it('offers no merge row for the last cell', () => {
+    // There is nothing below to merge with, and a row that cannot do anything reads as
+    // a broken control rather than one that does not apply.
+    const view = setup(nb([code('c1', 'only')]))
+    openMenu(view)
+    expect(view.getByRole('menuitem', { name: labels.mergeDown }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('splits the cell at the cursor the editor reported', () => {
+    // The split point comes from the cell's own editor, not from a guess: a cell cut at
+    // the wrong offset silently rearranges code, which is worse than not splitting.
+    const view = setup(nb([code('c1', 'alpha\n')]))
+    const editor = view.getByTestId('cell-editor-c1') as HTMLTextAreaElement
+    editor.setSelectionRange(3, 3)
+    fireEvent.click(editor)
+    openMenu(view)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.splitCell }))
+    const written = JSON.parse(view.onEdit.mock.calls.at(-1)![0] as string) as {
+      cells: { id: string; source: string[] | string; outputs: unknown[]; execution_count: number | null }[]
+    }
+    expect(written.cells).toHaveLength(2)
+    expect(joinSource(written.cells[0]!.source)).toBe('alp')
+    expect(joinSource(written.cells[1]!.source)).toBe('ha\n')
+    // The second half is a fresh cell: no output and no prompt number of its own.
+    expect(written.cells[0]?.id).not.toBe(written.cells[1]?.id)
+    expect(written.cells[1]?.outputs).toEqual([])
+    expect(written.cells[1]?.execution_count).toBeNull()
+  })
+
+  it('offers no split row for a cell whose editor is not open', () => {
+    // A rendered Markdown cell has no editor mounted, so there is no caret to split at.
+    // (A code cell is never in this state: its editor reports the caret as soon as it
+    // mounts, which is why the split rows below are live without any clicking.)
+    const view = setup(nb([{ cell_type: 'markdown', id: 'm1', source: '# Title', metadata: {} }]))
+    openMenu(view)
+    expect(view.getByRole('menuitem', { name: labels.splitCell }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('refuses the menu while the file is externally modified', () => {
+    // `editable: false` is the external-change state, and a structural edit made there
+    // would be written into a file that no longer matches what is on disk.
+    const view = setup(nb([code('c1', 'x = 1')]), { editable: false })
+    expect((view.getByLabelText(labels.cellMenu) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("disables the open menu's rows when the file stops accepting edits", () => {
+    // The trigger's own `disabled` cannot be the only guard: the modification is detected
+    // on a poll, so a menu that is already open stays on screen while the file behind it
+    // has become uneditable. A row lit in that moment promises an edit `mutate` refuses.
+    const view = setup(nb([
+      { ...code('c1', 'print(1)', { execution_count: 1, outputs: [streamOutput('one\n')] }) },
+      code('c2', 'y = 2'),
+    ]))
+    // A caret the editor reported, so the split row is genuinely available to begin with.
+    fireEvent.click(view.getByTestId('cell-editor-c1'))
+    openMenu(view)
+    const names = [labels.splitCell, labels.clearCellOutputs, labels.mergeDown]
+    for (const name of names) {
+      expect(view.getByRole('menuitem', { name }).hasAttribute('disabled'), name).toBe(false)
+    }
+    view.rerenderSurface({ editable: false })
+    for (const name of names) {
+      expect(view.getByRole('menuitem', { name }).hasAttribute('disabled'), name).toBe(true)
+    }
+  })
+
+  it('offers no output-clearing row for a markdown cell', () => {
+    // A Markdown cell has no output to clear: the row would promise an effect that
+    // cannot exist for this kind.
+    const view = setup(nb([
+      { cell_type: 'markdown', id: 'm1', source: '# Title', metadata: {} },
+      code('c1', 'x = 1'),
+    ]))
+    openMenu(view)
+    expect(view.getByRole('menuitem', { name: labels.clearCellOutputs }).hasAttribute('disabled')).toBe(true)
+    // Merging still applies: the cell below exists.
+    expect(view.getByRole('menuitem', { name: labels.mergeDown }).hasAttribute('disabled')).toBe(false)
   })
 })
 

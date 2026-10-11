@@ -135,6 +135,16 @@ export type NotebookAction =
   | { type: 'frames'; frames: readonly NotebookKernelEvent[] }
   | { type: 'reset-runs' }
   | { type: 'drop-cell'; cellId: string }
+  /**
+   * Forget one cell's run state, so the cell shows the file again.
+   *
+   * Clearing a cell's output has two halves: the file's stored outputs, and what this
+   * session collected for it. The surface renders the session's copy whenever a run
+   * exists, so dropping only the file half leaves the reader staring at output they just
+   * asked to remove. `drop-cell` is not reused here because it also blurs the cell, and
+   * clearing output is not a reason to stop working on it.
+   */
+  | { type: 'clear-run'; cellId: string }
 
 /**
  * Apply one action to notebook state, returning the same object when nothing changed.
@@ -249,6 +259,15 @@ export function reduceNotebook(state: NotebookState, action: NotebookAction): No
         cells,
         focusedCellId: state.focusedCellId === action.cellId ? null : state.focusedCellId,
       }
+    }
+    case 'clear-run': {
+      // Unlike `drop-cell`, this keeps the cell focused: clearing output is not a reason
+      // to stop working on the cell, and blurring it would send the next Ctrl+Enter to a
+      // different cell than the reader pressed it in.
+      if (state.cells[action.cellId] === undefined) return state
+      const cells = { ...state.cells }
+      delete cells[action.cellId]
+      return { ...state, cells }
     }
   }
 }

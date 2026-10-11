@@ -70,7 +70,8 @@ describe('CodeEditor 语法高亮', () => {
         onCursorChange={onCursorChange}
       />,
     )
-    expect(onCursorChange).toHaveBeenCalledWith({ line: 1, column: 1, selectedChars: 0, selectedLines: 0 })
+    // offset 是文档内光标偏移，初始在开头即 0；笔记本单元格据此在光标处拆分。
+    expect(onCursorChange).toHaveBeenCalledWith({ line: 1, column: 1, selectedChars: 0, selectedLines: 0, offset: 0 })
   })
 
   it('最终结果模式（inlineDiff=false）不显示任何 Git 装饰', () => {

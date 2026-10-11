@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText, type MarkdownLabels, Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useSyncExternalStore } from 'react'
 import type { NotebookOutputItem } from '../../shared/notebook-protocol.ts'
 import { CodeEditor } from '../editor/CodeEditor.tsx'
@@ -24,6 +24,7 @@ import css from './notebook.module.css'
 import {
   IconAddCode16,
   IconAddMarkdown16,
+  IconCellMenu16,
   IconClearOutputs16,
   IconDeleteCell16,
   IconEditCell16,
@@ -112,6 +113,10 @@ export interface NotebookLabels {
   truncatedOutput: string
   editMarkdown: string
   renderMarkdown: string
+  cellMenu: string
+  splitCell: string
+  mergeDown: string
+  clearCellOutputs: string
 }
 
 interface NotebookSurfaceProps {
@@ -169,6 +174,12 @@ export function NotebookSurface({
   const [views, setViews] = useState<Record<string, CellView>>({})
   const [copiedCell, setCopiedCell] = useState<string | null>(null)
   const [inputValues, setInputValues] = useState<Record<string, string>>({})
+  // One cell's menu open at a time, kept on the notebook rather than the cell: a per-cell
+  // boolean would let every menu a reader had opened stay open at once.
+  const [menuCellId, setMenuCellId] = useState<string | null>(null)
+  // Where each cell's caret last was, so a split happens where the reader is looking
+  // rather than at a line boundary the cell itself has no opinion about.
+  const [cursorOffsets, setCursorOffsets] = useState<Record<string, number>>({})
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // A cell highlights for the language its *kernel* runs, not for the file's
   // extension: the same `.ipynb` can be driven by Python or by R, and only the
@@ -274,6 +285,26 @@ export function NotebookSurface({
     mutate({ op: 'clear-all-outputs' })
     runtime.dispatch(tabId, { type: 'reset-runs' })
   }, [mutate, runtime, tabId])
+
+  // Clearing one cell's output is two halves: the file's stored outputs and what this
+  // session collected for the cell. The surface renders the session copy whenever a run
+  // exists, so dropping only the file would leave the reader staring at output they just
+  // asked to remove.
+  const clearCellOutputs = useCallback((cellId: string): void => {
+    mutate({ op: 'clear-outputs', cellId })
+    runtime.dispatch(tabId, { type: 'clear-run', cellId })
+  }, [mutate, runtime, tabId])
+
+  // A merge writes both cells' output into the survivor, so both session copies have to
+  // go: the screen prefers a cell's session copy over the file, and keeping the survivor's
+  // would hide the half that just arrived from below.
+  const mergeDown = useCallback((cellId: string): void => {
+    const index = document.cells.findIndex(candidate => candidate.id === cellId)
+    const below = document.cells[index + 1]
+    mutate({ op: 'merge-down', cellId })
+    runtime.dispatch(tabId, { type: 'clear-run', cellId })
+    if (below !== undefined) runtime.dispatch(tabId, { type: 'clear-run', cellId: below.id })
+  }, [document, mutate, runtime, tabId])
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): void => {
     const modifier = event.ctrlKey || event.metaKey
@@ -385,6 +416,13 @@ export function NotebookSurface({
               copied={copiedCell === cell.id}
               inputValue={inputValues[cell.id] ?? ''}
               focused={state.focusedCellId === cell.id}
+              menuOpen={menuCellId === cell.id}
+              onOpenMenu={() => { setMenuCellId(cell.id) }}
+              onCloseMenu={() => { setMenuCellId(current => (current === cell.id ? null : current)) }}
+              splitOffset={cursorOffsets[cell.id]}
+              onCursor={offset => { setCursorOffsets(current => (current[cell.id] === offset ? current : { ...current, [cell.id]: offset })) }}
+              onClearOutputs={() => { clearCellOutputs(cell.id) }}
+              onMergeDown={() => { mergeDown(cell.id) }}
               onFocus={() => {
                 runtime.dispatch(tabId, { type: 'focus', cellId: cell.id })
               }}
@@ -420,6 +458,13 @@ function NotebookCell({
   copied,
   inputValue,
   focused,
+  menuOpen,
+  onOpenMenu,
+  onCloseMenu,
+  splitOffset,
+  onCursor,
+  onClearOutputs,
+  onMergeDown,
   onFocus,
   onPatchView,
   onEdit,
@@ -441,6 +486,16 @@ function NotebookCell({
   copied: boolean
   inputValue: string
   focused: boolean
+  menuOpen: boolean
+  onOpenMenu: () => void
+  onCloseMenu: () => void
+  /** Where this cell's caret last was, or `undefined` until its editor reports one. */
+  splitOffset: number | undefined
+  onCursor: (offset: number) => void
+  /** Clear this cell's output in both halves: the file's and this session's. */
+  onClearOutputs: () => void
+  /** Merge the cell below in, forgetting both cells' session copy so the screen agrees. */
+  onMergeDown: () => void
   onFocus: () => void
   onPatchView: (patch: Partial<CellView>) => void
   onEdit: (source: string) => void
@@ -568,6 +623,54 @@ function NotebookCell({
           }}>
             <IconDeleteCell16 />
           </button>
+          {/*
+            Structural edits that need a second thought (splitting at the cursor, merging
+            with a neighbour, clearing just this cell) go behind one control: the row
+            already carries seven buttons, and a menu is where the workbench puts the rest.
+          */}
+          <Menu
+            open={menuOpen}
+            onClose={onCloseMenu}
+            onSelect={(id) => {
+              // The rows are a choice, not a persistent panel: every other menu in the
+              // workbench closes on select, and the real Menu leaves that to its owner.
+              onCloseMenu()
+              if (!isCellMenuAction(id)) return
+              switch (id) {
+                case 'split-cell':
+                  // The row is disabled without an offset, so this narrow exists for the
+                  // type rather than as a second policy decision.
+                  if (splitOffset !== undefined) onMutation({ op: 'split', cellId: cell.id, offset: splitOffset })
+                  break
+                case 'clear-outputs':
+                  onClearOutputs()
+                  break
+                case 'merge-down':
+                  onMergeDown()
+                  break
+              }
+            }}
+            items={cellMenuItems({ cell, outputs, last: index >= total - 1, canSplit: splitOffset !== undefined, editable, labels })}
+            dense
+            compact
+            portal
+            anchor={(
+              <button
+                type="button"
+                className={css.cellAction}
+                aria-label={labels.cellMenu}
+                title={labels.cellMenu}
+                aria-expanded={menuOpen}
+                disabled={!editable}
+                onClick={event => {
+                  event.stopPropagation()
+                  onOpenMenu()
+                }}
+              >
+                <IconCellMenu16 />
+              </button>
+            )}
+          />
         </div>
       </div>
       <div className={css.cellBody}>
@@ -580,6 +683,7 @@ function NotebookCell({
             wrap
             cell
             onChange={onEdit}
+            onCursorChange={cursor => { onCursor(cursor.offset) }}
             languageOverride={languageForPath(languagePath) ?? undefined}
           />
         ) : (
@@ -888,6 +992,42 @@ function NotebookToolbar({
       </select>
     </div>
   )
+}
+
+/**
+ * The rows one cell's menu carries, and the guard that keeps them and the handler in
+ * step.
+ *
+ * A cell earns a row only where the action can do something: clearing output means
+ * nothing for a Markdown cell, and there is nothing below the last cell to merge with.
+ * `disabled` and the switch in `onSelect` read the same `can*` flags, so a row can never
+ * promise an effect the handler will refuse.
+ */
+const CELL_MENU_ACTIONS = ['split-cell', 'clear-outputs', 'merge-down'] as const
+type CellMenuAction = typeof CELL_MENU_ACTIONS[number]
+
+function isCellMenuAction(id: string): id is CellMenuAction {
+  return (CELL_MENU_ACTIONS as readonly string[]).includes(id)
+}
+
+function cellMenuItems(args: {
+  cell: NotebookCellModel
+  outputs: readonly NotebookOutputItem[]
+  last: boolean
+  canSplit: boolean
+  editable: boolean
+  labels: NotebookLabels
+}): MenuEntry[] {
+  const { cell, outputs, last, canSplit, editable, labels } = args
+  const hasOutput = cell.kind === 'code' && (outputs.length > 0 || cell.executionCount !== null)
+  // Every row also carries `!editable` rather than relying on the trigger being disabled:
+  // an external modification can land *while the menu is open*, and a row that stays lit
+  // after the file stopped accepting edits promises an edit that `mutate` will refuse.
+  return [
+    { id: 'split-cell', label: labels.splitCell, disabled: !editable || !canSplit },
+    { id: 'clear-outputs', label: labels.clearCellOutputs, disabled: !editable || !hasOutput },
+    { id: 'merge-down', label: labels.mergeDown, disabled: !editable || last },
+  ]
 }
 
 function kindLabel(kind: NotebookCellKind, labels: NotebookLabels): string {

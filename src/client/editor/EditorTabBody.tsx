@@ -53,7 +53,7 @@ export function EditorTabBody({
   markdownLabels,
   onViewReady,
 }: EditorTabBodyProps) {
-  const [cursor, setCursor] = useState<EditorCursorState>({ line: 1, column: 1, selectedChars: 0, selectedLines: 0 })
+  const [cursor, setCursor] = useState<EditorCursorState>({ line: 1, column: 1, selectedChars: 0, selectedLines: 0, offset: 0 })
   const [mermaidSplitRatio, setMermaidSplitRatio] = useState(readMermaidSplitRatio)
   const [csvSplitRatio, setCsvSplitRatio] = useState(readCsvSplitRatio)
   const [jsonSplitRatio, setJsonSplitRatio] = useState(readJsonSplitRatio)
@@ -235,6 +235,10 @@ export function EditorTabBody({
     truncatedOutput: t('notebook.truncatedOutput'),
     editMarkdown: t('notebook.editMarkdown'),
     renderMarkdown: t('notebook.renderMarkdown'),
+    cellMenu: t('notebook.cellMenu'),
+    splitCell: t('notebook.splitCell'),
+    mergeDown: t('notebook.mergeDown'),
+    clearCellOutputs: t('notebook.clearCellOutputs'),
   }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null

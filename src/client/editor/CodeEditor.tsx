@@ -63,6 +63,11 @@ export interface EditorCursorState {
   column: number
   selectedChars: number
   selectedLines: number
+  /**
+   * Document offset of the caret, which a line and column cannot give: a notebook cell
+   * splits where the cursor *is*, and the cell is one document among many in the file.
+   */
+  offset: number
 }
 
 const BASE_FONT_PX = 13
@@ -87,6 +92,7 @@ function cursorInfo(state: EditorState): EditorCursorState {
     column: main.head - line.from + 1,
     selectedChars: head - anchor,
     selectedLines: main.empty ? 0 : state.doc.lineAt(head).number - state.doc.lineAt(anchor).number + 1,
+    offset: main.head,
   }
 }
 
