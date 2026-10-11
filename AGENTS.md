@@ -65,3 +65,19 @@ npm run test:isolation  # scripts/probe-isolation.mjs：证明同目录两个笔
 - 一次改动只做一件事，并让它的测试同时落地：修 bug 要留下能复现该 bug 的回归用例，说明写在注释里（为什么这个形状重要，而不是它做了什么）。
 - 探针脚本分两类，不要混淆：`test:kernel` / `test:example` / `test:isolation` 是**常驻的端到端门禁**（见上），属于交付物的一部分，改动内核链路时必须重跑；而为定位某一次问题临时写的脚本，用完就删，不要留在 `scripts/` 里，也不要把一次性调试断言混进正式 spec。
 - 临时脚本里不要写死个人绝对路径；需要工作区时用参数或临时目录。注意隐私检查（`tests/package-manifest.spec.ts`）只覆盖两个 README，`scripts/` 不在其内——探针绑定回环地址是正当用法，不要为了让检查通过而扩展它或改写探针；脚本无个人路径靠的是约定。
+
+## Agent skills
+
+本仓库已按 [mattpocock/skills](https://github.com/mattpocock/skills) 的流程配置，实体安装在 `.agents/skills/`（DSH 从这里读）。`.claude/`、`.qoder/` 只是那两款工具的链接视图，已 gitignore，不要提交——git 会跟着 junction 把每个 skill 文件再存一份。
+
+### Issue tracker
+
+工作项发布在 GitHub Issues（`TerryPro/dsh-vscode-panel`），用 `gh` CLI 操作；ticket 之间的阻塞关系用 GitHub 原生 dependencies。详见 [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md)。
+
+### Triage labels
+
+沿用该套 skills 的五枚默认角色标签（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）。详见 [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md)。
+
+### Domain docs
+
+Single-context：`GLOSSARY.md` 与 `docs/adr/` 都在仓库根，由 `/domain-modeling` 在术语真正定下来时惰性创建。详见 [`docs/agents/domain.md`](docs/agents/domain.md)。

@@ -2,4 +2,8 @@ node_modules/
 lib/
 coverage/
 *.tgz
-docs/
+# .claude/ and .qoder/ are junction views that `npx skills add` creates on Windows
+# for those two tools. DSH reads the real copy under .agents/skills, and git follows
+# a junction and would commit a second copy of every skill file.
+.claude/
+.qoder/
