@@ -122,6 +122,31 @@ describe('notebook parsing', () => {
     expect(parseNotebook(huge).oversized).toBe(true)
     expect(parseNotebook('{"nbformat":4,"cells":[]}').oversized).toBe(false)
   })
+
+  it('reads the attachments of a markdown cell', () => {
+    // A reader who drags a figure into a Markdown cell gets an `attachment:` reference plus
+    // a payload in `attachments`. The view cannot draw that image without the payload, and a
+    // model that drops it on read is how a notebook ends up showing alt text where a figure was.
+    const source = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{
+        cell_type: 'markdown',
+        id: 'm1',
+        source: '![plot](attachment:plot.png)',
+        metadata: {},
+        attachments: { 'plot.png': { 'image/png': 'aGVsbG8=' } },
+      }],
+    })
+    expect(parseNotebook(source).cells[0]?.attachments).toEqual({ 'plot.png': { 'image/png': 'aGVsbG8=' } })
+  })
+
+  it('gives a cell that declares none an empty attachment bundle', () => {
+    // The view reads `attachments` on every markdown cell; a missing field must look like an
+    // empty bundle, not `undefined` the render path then has to guard against per cell.
+    expect(parseNotebook(SAMPLE).cells[1]?.attachments).toEqual({})
+  })
 })
 
 describe('notebook serialization', () => {
@@ -166,6 +191,28 @@ describe('notebook mutations preserve the document', () => {
     const cell = (parsed['cells'] as Record<string, unknown>[])[0]
     expect(cell?.['some_future_field']).toBe(42)
     expect(cell?.['metadata']).toEqual({ tags: ['keep'] })
+  })
+
+  it('keeps attachments when a cell\'s kind is switched away and back', () => {
+    // `set-kind` to a non-code kind deliberately deletes the code-only fields (outputs,
+    // execution count). Attachments are not code-only — a markdown cell authored them — so
+    // that same cleanup must not reach them, or round-tripping the kind would erase a figure.
+    const source = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{
+        cell_type: 'markdown',
+        id: 'm1',
+        source: '![plot](attachment:plot.png)',
+        metadata: {},
+        attachments: { 'plot.png': { 'image/png': 'aGVsbG8=' } },
+      }],
+    })
+    const toCode = applyNotebookMutation(source, { op: 'set-kind', cellId: 'm1', kind: 'code' })
+    const back = applyNotebookMutation(toCode, { op: 'set-kind', cellId: 'm1', kind: 'markdown' })
+    const written = JSON.parse(back) as { cells: Record<string, unknown>[] }
+    expect(written.cells[0]?.['attachments']).toEqual({ 'plot.png': { 'image/png': 'aGVsbG8=' } })
   })
 
   it('writes source back in the shape the cell already used', () => {

@@ -40,6 +40,16 @@ export interface NotebookCellModel {
   executionCount: number | null
   outputs: NotebookOutputItem[]
   metadata: NotebookMimeBundle
+  /**
+   * The cell's `attachments` map: a name to the mime bundle holding its bytes.
+   *
+   * `.ipynb` keeps an image a reader dragged in as an `attachment:` reference in the source
+   * plus its base64 payload here, so the reference and the payload are two halves of one
+   * fact. A model that dropped the payload would leave the view rendering alt text where the
+   * reader put a figure — and since the file itself is preserved key for key, the loss would
+   * be visible only on screen, never in the notebook.
+   */
+  attachments: NotebookMimeBundle
 }
 
 export interface NotebookFormat {
@@ -239,6 +249,7 @@ export function parseNotebook(text: string): NotebookDocument {
         : null,
       outputs: kind === 'code' ? readOutputs(candidate['outputs']) : [],
       metadata: readMetadata(candidate['metadata']),
+      attachments: readMetadata(candidate['attachments']),
     })
   })
   const metadata = isRecord(value['metadata']) ? value['metadata'] : {}

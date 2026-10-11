@@ -4,6 +4,7 @@ import {
   collapseNotebookStreams,
   imageDataUrl,
   isImageMime,
+  notebookAttachmentUrl,
   notebookOutputIsVisible,
   notebookOutputText,
   notebookWidgetNotice,
@@ -110,5 +111,50 @@ describe('output plain text and visibility', () => {
     expect(notebookOutputIsVisible({ kind: 'stream', name: 'stdout', text: 'x' })).toBe(true)
     expect(notebookOutputIsVisible({ kind: 'error', ename: 'E', evalue: '', traceback: [] })).toBe(true)
     expect(notebookOutputIsVisible({ kind: 'display_data', data: {}, metadata: {} })).toBe(false)
+  })
+})
+
+describe('markdown attachment references', () => {
+  // A reader who drags a figure into a Markdown cell gets `![alt](attachment:plot.png)` in
+  // the source and the bytes in the cell's `attachments`. This resolves the reference to a
+  // data URL so the shared Markdown renderer can draw it, using the same mime vocabulary the
+  // kernel-output path already uses.
+  it('resolves an attachment reference to a data URL of its richest image form', () => {
+    const attachments = { 'plot.png': { 'image/png': 'aGVsbG8=', 'text/plain': 'a figure' } }
+    expect(notebookAttachmentUrl(attachments, 'attachment:plot.png')).toBe('data:image/png;base64,aGVsbG8=')
+  })
+
+  it('leaves a non-attachment destination for the renderer to treat as a path', () => {
+    // Only `attachment:` names a payload the cell carries. An ordinary `![x](a.png)` is the
+    // author's own relative path and must not be answered here.
+    expect(notebookAttachmentUrl({ 'a.png': { 'image/png': 'zz' } }, 'a.png')).toBeUndefined()
+  })
+
+  it('returns nothing for a reference whose name the cell does not carry', () => {
+    // A dangling `attachment:gone.png` (the payload was edited out, or the file predates
+    // attachments) has to fall through to the renderer's alt text rather than invent an
+    // image — the reader should see the name, not a broken thumbnail.
+    expect(notebookAttachmentUrl({ 'plot.png': { 'image/png': 'zz' } }, 'attachment:gone.png')).toBeUndefined()
+  })
+
+  it('returns nothing for an attachment that carries no renderable image', () => {
+    // `pdf` and other unsupported forms have no bytes this view can draw; the alt text is
+    // the documented fallback, which is more honest than a blank or a broken image icon.
+    const attachments = { 'doc.pdf': { 'application/pdf': 'JVBERg==' } }
+    expect(notebookAttachmentUrl(attachments, 'attachment:doc.pdf')).toBeUndefined()
+  })
+
+  it('refuses an attachment whose richest form is markup rather than an image', () => {
+    // The security line the ticket draws: an attachment reference must never put executable
+    // HTML into the page. A bundle that offers `text/html` is exactly what `chooseNotebookRender`
+    // would rank as renderable output, so this path has to reject anything that is not an image.
+    const attachments = { 'evil': { 'text/html': '<img src=x onerror=alert(1)>' } }
+    expect(notebookAttachmentUrl(attachments, 'attachment:evil')).toBeUndefined()
+  })
+
+  it('ignores an attachment value that is not a mime bundle', () => {
+    // A hand-edited or malformed notebook can put a scalar where the bundle belongs; reading
+    // it must not throw inside a click/render path.
+    expect(notebookAttachmentUrl({ 'plot.png': 'not-a-bundle' }, 'attachment:plot.png')).toBeUndefined()
   })
 })

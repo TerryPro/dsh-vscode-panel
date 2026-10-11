@@ -56,7 +56,21 @@ vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
 }))
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  MarkdownText: ({ text }: { text: string }) => <div data-testid="markdown">{text}</div>,
+  MarkdownText: ({ text, pathImages }: {
+    text: string
+    pathImages?: { resolve: (destination: string) => string | undefined }
+  }) => {
+    // A stand-in for the real renderer's local-image contract: when the source references an
+    // `attachment:` destination, ask the owner to resolve it and record the answer, so a test
+    // can see whether this cell handed the renderer the bytes the reader put in the file.
+    const reference = /attachment:[^\s)]+/u.exec(text)?.[0]
+    return (
+      <div
+        data-testid="markdown"
+        data-attachment-src={reference === undefined ? undefined : pathImages?.resolve(reference)}
+      >{text}</div>
+    )
+  },
   // Replace DSH's native Menu with a plain list so its items are assertable, exactly as
   // the file tree's spec does: the anchor (the trigger the reader clicks) stays in the
   // tree, and an open list becomes role="menu" rows. The test still only observes public
@@ -1126,6 +1140,23 @@ describe('notebook cell menu', () => {
     expect(view.api.kernelExecute.mock.calls[1]![0]).toMatchObject({ cellId: 'c2' })
   })
 
+  it('offers the raw kind as a cell to create', () => {
+    // Raw was only ever recognised on read, so a reader who wants a plain-text block — the
+    // usual reason for one, and what Jupyter's own "+ Raw" button exists for — had to
+    // hand-edit the JSON to get it.
+    const view = setup(nb([code('c1', 'x = 1')]))
+    openMenu(view)
+    fireEvent.click(view.getByRole('menuitem', { name: labels.insertRawBelow }))
+    const written = JSON.parse(view.onEdit.mock.calls[0]![0] as string) as {
+      cells: { cell_type: string; outputs?: unknown; execution_count?: unknown }[]
+    }
+    expect(written.cells).toHaveLength(2)
+    // Raw's own field shape: no output and no prompt number, because a raw cell never runs.
+    expect(written.cells[1]?.cell_type).toBe('raw')
+    expect(written.cells[1]).not.toHaveProperty('outputs')
+    expect(written.cells[1]).not.toHaveProperty('execution_count')
+  })
+
   it('offers no run row when that side has nothing runnable', () => {
     // A row that can only ever submit an empty list reads as a control that broke, so it
     // is greyed out instead. Markdown and blank cells do not count as runnable.
@@ -1206,6 +1237,33 @@ describe('notebook cell folding', () => {
     frame(view.runtime, 3, { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 2 })
     // The run was committed to the draft even though nothing was visible while it happened.
     expect(view.holder.draft).toContain('"execution_count": 2')
+  })
+})
+
+describe('notebook attachments', () => {
+  it('hands a markdown cell\'s attachments to the renderer as a data URL', () => {
+    // The whole point of reading `attachments` into the model: a figure dragged into a text
+    // cell must show, not its alt text. The renderer is the boundary, so the assertion is
+    // that this cell resolves the reference to the bytes the file carries.
+    const draft = nb([{
+      cell_type: 'markdown',
+      id: 'm1',
+      source: '![plot](attachment:plot.png)',
+      metadata: {},
+      attachments: { 'plot.png': { 'image/png': 'aGVsbG8=' } },
+    }])
+    const view = setup(draft)
+    // A Markdown cell shows rendered by default, so its figure is visible without a click.
+    expect(view.getByTestId('markdown').getAttribute('data-attachment-src')).toBe('data:image/png;base64,aGVsbG8=')
+  })
+
+  it('leaves an ordinary image path for the renderer\'s own rules', () => {
+    // `a.png` is the author's relative path with no cell payload behind it; the surface has
+    // no business resolving it, so it hands back nothing and the renderer decides.
+    const view = setup(nb([{
+      cell_type: 'markdown', id: 'm1', source: '![x](a.png)', metadata: {},
+    }]))
+    expect(view.getByTestId('markdown').getAttribute('data-attachment-src')).toBeNull()
   })
 })
 

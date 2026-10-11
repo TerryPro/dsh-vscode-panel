@@ -195,6 +195,7 @@ export function EditorTabBody({
     addMarkdownCell: t('notebook.addMarkdownCell'),
     insertCodeBelow: t('notebook.insertCodeBelow'),
     insertMarkdownBelow: t('notebook.insertMarkdownBelow'),
+    insertRawBelow: t('notebook.insertRawBelow'),
     deleteCell: t('notebook.deleteCell'),
     moveUp: t('notebook.moveUp'),
     moveDown: t('notebook.moveDown'),

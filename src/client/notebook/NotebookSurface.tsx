@@ -48,6 +48,7 @@ import {
   chooseNotebookRender,
   collapseNotebookStreams,
   imageDataUrl,
+  notebookAttachmentUrl,
   notebookOutputText,
   notebookWidgetNotice,
 } from './notebook-output.ts'
@@ -79,6 +80,7 @@ export interface NotebookLabels {
   addMarkdownCell: string
   insertCodeBelow: string
   insertMarkdownBelow: string
+  insertRawBelow: string
   deleteCell: string
   moveUp: string
   moveDown: string
@@ -624,6 +626,15 @@ function NotebookCell({
   onAnswerInput: (value: string) => void
   onInputChange: (value: string) => void
 }) {
+  // A cell with no attachments passes `undefined`, which is value-stable, so the ordinary
+  // text cells keep the prop cache `MarkdownText` maintains. A cell that carries bytes gets a
+  // resolver rebuilt whenever the draft changes, and memoising it would save nothing: `document`
+  // is `parseNotebook(draft)`, so one keystroke anywhere rebuilds *every* cell object and a memo
+  // keyed on `cell.attachments` recomposes right along with it. The resolver must read this
+  // cell's current bytes, so that rebuild is the honest cost of the feature, not an accident.
+  const pathImages = Object.keys(cell.attachments).length === 0
+    ? undefined
+    : { resolve: (destination: string) => notebookAttachmentUrl(cell.attachments, destination) }
   // A markdown cell shows its editor until the reader renders it, then the rendered
   // body takes over and a double click returns to the source — Jupyter's two-state
   // model, which avoids a second "edit" control on every cell.
@@ -793,6 +804,9 @@ function NotebookCell({
                 case 'merge-down':
                   onMergeDown()
                   break
+                case 'insert-raw-below':
+                  onMutation({ op: 'insert', cellId: cell.id, before: false, kind: 'raw' })
+                  break
               }
             }}
             items={cellMenuItems({
@@ -849,7 +863,7 @@ function NotebookCell({
               />
             ) : (
               <div className={css.cellRendered} onDoubleClick={() => { onPatchView({ editingMarkdown: true }) }}>
-                <MarkdownText text={cell.source} labels={markdownLabels} />
+                <MarkdownText text={cell.source} labels={markdownLabels} pathImages={pathImages} />
               </div>
             )}
           </div>
@@ -1183,7 +1197,7 @@ function NotebookToolbar({
  * `disabled` and the switch in `onSelect` read the same `can*` flags, so a row can never
  * promise an effect the handler will refuse.
  */
-const CELL_MENU_ACTIONS = ['run-above', 'run-below', 'split-cell', 'clear-outputs', 'merge-down'] as const
+const CELL_MENU_ACTIONS = ['run-above', 'run-below', 'split-cell', 'clear-outputs', 'merge-down', 'insert-raw-below'] as const
 type CellMenuAction = typeof CELL_MENU_ACTIONS[number]
 
 function isCellMenuAction(id: string): id is CellMenuAction {
@@ -1216,6 +1230,9 @@ function cellMenuItems(args: {
     { id: 'split-cell', label: labels.splitCell, disabled: !editable || !canSplit },
     { id: 'clear-outputs', label: labels.clearCellOutputs, disabled: !editable || !hasOutput },
     { id: 'merge-down', label: labels.mergeDown, disabled: !editable || last },
+    // Creating a cell needs no neighbour below it, so unlike merge this row does not
+    // care whether the cell is the last one.
+    { id: 'insert-raw-below', label: labels.insertRawBelow, disabled: !editable },
   ]
 }
 

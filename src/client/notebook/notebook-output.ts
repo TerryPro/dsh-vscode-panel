@@ -167,3 +167,33 @@ export function notebookWidgetNotice(data: NotebookMimeBundle): string | null {
     ? 'jupyter widget output cannot be displayed here'
     : 'jupyter widget output cannot be displayed here'
 }
+
+/** The scheme Jupyter writes for a cell-carried figure: `![alt](attachment:name.png)`. */
+const ATTACHMENT_PREFIX = 'attachment:'
+
+/**
+ * Resolve one Markdown `attachment:` reference to a data URL, or nothing at all.
+ *
+ * A figure dragged into a Markdown cell is stored in two halves: the source keeps
+ * `![alt](attachment:plot.png)` and the cell's `attachments` map keeps the bytes. The shared
+ * Markdown renderer can only draw the first half, so this hands it the second — the same
+ * mime-ranked choice an output bundle gets, which keeps one set of rules for "what can this
+ * workbench draw" across kernel output and authored images alike.
+ *
+ * Returning `undefined` is the documented way to decline: the renderer then falls back to the
+ * image's alt text, which names the figure the reader can no longer see. That is the right
+ * outcome for a destination this cell does not carry, and for a form it cannot draw (a PDF
+ * attachment, say) — worse would be an invented or broken thumbnail.
+ */
+export function notebookAttachmentUrl(
+  attachments: NotebookMimeBundle,
+  destination: string,
+): string | undefined {
+  if (!destination.startsWith(ATTACHMENT_PREFIX)) return undefined
+  const bundle = attachments[destination.slice(ATTACHMENT_PREFIX.length)]
+  if (typeof bundle !== 'object' || bundle === null || Array.isArray(bundle)) return undefined
+  const choice = chooseNotebookRender(bundle as NotebookMimeBundle)
+  // An attachment is drawn or it is not: html or latex would mean injecting executable
+  // markup from a file into the page, which is the boundary kernel output already respects.
+  return choice.kind === 'image' ? imageDataUrl(choice.mime, String(choice.value)) : undefined
+}
