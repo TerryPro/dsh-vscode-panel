@@ -204,3 +204,19 @@ export function IconRestartRunAll16({ size = 14 }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * Fold / unfold a cell: a chevron that points down when the body is showing and right
+ * when it is folded away.
+ *
+ * It sits in the cell header's always-visible strip rather than the action row, because
+ * the action row only appears on hover or focus — and a fold control that hides itself
+ * when there is nothing on screen to reveal it would trap the reader in a collapsed cell.
+ */
+export function IconFold16({ size = 14, expanded = true }: IconProps & { expanded?: boolean }) {
+  return (
+    <svg {...svgProps(size)}>
+      {expanded ? <path d="M4.5 6.3 8 9.8l3.5-3.5" /> : <path d="M6.3 4.5 9.8 8l-3.5 3.5" />}
+    </svg>
+  )
+}

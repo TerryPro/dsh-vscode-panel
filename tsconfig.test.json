@@ -28,6 +28,7 @@
     "tests/notebook-sanitize.spec.ts",
     "tests/notebook-connection.spec.ts",
     "tests/notebook-runtime.spec.ts",
+    "tests/notebook-outline.spec.ts",
     "tests/notebook-surface.spec.tsx",
     "tests/kernel-backend.spec.ts",
     "tests/notebook-kernel-protocol.spec.ts",

@@ -236,6 +236,10 @@ export function EditorTabBody({
     editMarkdown: t('notebook.editMarkdown'),
     renderMarkdown: t('notebook.renderMarkdown'),
     cellMenu: t('notebook.cellMenu'),
+    collapseCell: t('notebook.collapseCell'),
+    expandCell: t('notebook.expandCell'),
+    outline: t('notebook.outline'),
+    outlineEmpty: t('notebook.outlineEmpty'),
     runAbove: t('notebook.runAbove'),
     runBelow: t('notebook.runBelow'),
     restartRunAll: t('notebook.restartRunAll'),
@@ -317,6 +321,7 @@ export function EditorTabBody({
         onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
         dirty={tab.dirty}
         saving={tab.saving}
+        outlineVisible={tab.outlineVisible === true}
         onSave={() => { void controller.save(tab.id) }}
         labels={notebookLabels}
         markdownLabels={markdownLabels}
@@ -481,6 +486,16 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={notebookMode === 'notebook' || undefined} aria-label={t('notebook.modeNotebook')} title={t('notebook.modeNotebook')} onClick={() => { controller.setNotebookMode('notebook', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={notebookMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setNotebookMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
+            )}
+            {/*
+              The outline toggle is offered only in notebook view, mirroring Markdown's rule
+              that the outline appears only where a rendered document is shown. The two views
+              share one `outlineVisible` flag but never both draw an outline at once: the
+              source view is the raw JSON, whose "structure" is the cell list the reader is
+              already scrolling, so a panel there would report what the file itself reports.
+            */}
+            {isNotebookTab && notebookMode === 'notebook' && (
+              <button type="button" className={css.editorStatusBarAction} data-active={tab.outlineVisible === true || undefined} aria-label={t('notebook.outline')} title={t('notebook.outline')} aria-pressed={tab.outlineVisible === true} onClick={() => { controller.toggleMarkdownOutline(tab.id) }}><IconOutline16 /></button>
             )}
             {isCsvTab && (
               <div className={css.editorStatusBarSwitch} role="group" aria-label={t('editor.csvTable')}>

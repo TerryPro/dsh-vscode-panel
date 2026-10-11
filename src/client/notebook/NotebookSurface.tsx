@@ -28,6 +28,7 @@ import {
   IconClearOutputs16,
   IconDeleteCell16,
   IconEditCell16,
+  IconFold16,
   IconInterrupt16,
   IconMoveDown16,
   IconMoveUp16,
@@ -40,6 +41,8 @@ import {
   IconStopKernel16,
 } from './NotebookIcons.tsx'
 import { ansiToHtml, escapeHtmlText } from './ansi-text.ts'
+import { buildNotebookOutline } from './notebook-outline.ts'
+import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { sanitizeKernelHtml } from './sanitize-html.ts'
 import {
   chooseNotebookRender,
@@ -117,6 +120,10 @@ export interface NotebookLabels {
   editMarkdown: string
   renderMarkdown: string
   cellMenu: string
+  collapseCell: string
+  expandCell: string
+  outline: string
+  outlineEmpty: string
   runAbove: string
   runBelow: string
   restartRunAll: string
@@ -142,6 +149,11 @@ interface NotebookSurfaceProps {
    */
   dirty: boolean
   saving: boolean
+  /**
+   * Whether the outline panel is showing. Like the Markdown outline it is a choice stored
+   * on the tab, so the surface only renders and scrolls; it never owns the flag.
+   */
+  outlineVisible: boolean
   onSave: () => void
   labels: NotebookLabels
   markdownLabels: MarkdownLabels
@@ -157,9 +169,11 @@ interface NotebookSurfaceProps {
 interface CellView {
   editingMarkdown: boolean
   outputsVisible: boolean
+  /** Folded to its header row: the body and outputs are hidden, the cell is untouched. */
+  folded: boolean
 }
 
-const DEFAULT_VIEW: CellView = { editingMarkdown: false, outputsVisible: true }
+const DEFAULT_VIEW: CellView = { editingMarkdown: false, outputsVisible: true, folded: false }
 
 export function NotebookSurface({
   tabId,
@@ -174,9 +188,18 @@ export function NotebookSurface({
   onSave,
   labels,
   markdownLabels,
+  outlineVisible,
 }: NotebookSurfaceProps) {
   const state = useNotebookState(runtime, tabId)
   const document = useMemo(() => parseNotebook(draft), [draft])
+  // The outline jumps by cell id, so it needs the DOM the cells live in. `data-cell-id` is
+  // already stamped on every cell row and read the same way by the Escape handler, so this
+  // reuses the notebook's own anchor rather than building a ref per cell.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const outline = useMemo(
+    () => outlineVisible ? buildNotebookOutline(document) : [],
+    [document, outlineVisible],
+  )
   const [views, setViews] = useState<Record<string, CellView>>({})
   const [copiedCell, setCopiedCell] = useState<string | null>(null)
   const [inputValues, setInputValues] = useState<Record<string, string>>({})
@@ -240,6 +263,24 @@ export function NotebookSurface({
   const patchView = useCallback((cellId: string, patch: Partial<CellView>): void => {
     setViews(current => ({ ...current, [cellId]: { ...(current[cellId] ?? DEFAULT_VIEW), ...patch } }))
   }, [])
+
+  // An outline row names a cell, so that is what gets scrolled: resolving it by id rather
+  // than by position survives whatever the reader does to the notebook in between — and a
+  // folded row still has a header in the DOM to receive it, which is the other half of why
+  // folding keeps the header instead of removing the cell.
+  const scrollToCell = useCallback((index: number): void => {
+    const cellId = outline[index]?.cellId
+    if (cellId === undefined) return
+    // Matched by walking the stamped rows rather than a `[data-cell-id="…"]` selector: cell
+    // ids are arbitrary text a third-party notebook may contain, and building a selector out
+    // of one needs escaping that is not worth a reader's jump depending on.
+    for (const row of rootRef.current?.querySelectorAll<HTMLElement>('[data-cell-id]') ?? []) {
+      if (row.dataset.cellId === cellId) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+    }
+  }, [outline])
 
   const mutate = useCallback((mutation: NotebookMutation): void => {
     if (!editable) return
@@ -443,60 +484,75 @@ export function NotebookSurface({
   )
 
   return (
-    <div className={css.root} onKeyDown={onKeyDown}>
+    <div className={css.root} onKeyDown={onKeyDown} ref={rootRef}>
       {toolbar}
-      {document.cells.length === 0 ? (
-        <div className={css.empty}>
-          <p className={css.emptyText}>{emptyNotebookMessage(document, notebookIsBlank(draft), labels)}</p>
-          {editable && (
-            <button type="button" className={css.emptyAction} onClick={() => { mutate({ op: 'insert', cellId: null, before: false, kind: 'code' }) }}>
-              {labels.addCodeCell}
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className={css.cells}>
-          {document.cells.map((cell, index) => (
-            <NotebookCell
-              key={cell.id}
-              cell={cell}
-              index={index}
-              total={document.cells.length}
-              view={views[cell.id] ?? DEFAULT_VIEW}
-              run={state.cells[cell.id]}
-              languagePath={cellPathFor(cell.kind)}
-              editable={editable}
-              labels={labels}
-              markdownLabels={markdownLabels}
-              copied={copiedCell === cell.id}
-              inputValue={inputValues[cell.id] ?? ''}
-              focused={state.focusedCellId === cell.id}
-              menuOpen={menuCellId === cell.id}
-              onOpenMenu={() => { setMenuCellId(cell.id) }}
-              onCloseMenu={() => { setMenuCellId(current => (current === cell.id ? null : current)) }}
-              splitOffset={cursorOffsets[cell.id]}
-              onCursor={offset => { setCursorOffsets(current => (current[cell.id] === offset ? current : { ...current, [cell.id]: offset })) }}
-              onClearOutputs={() => { clearCellOutputs(cell.id) }}
-              onMergeDown={() => { mergeDown(cell.id) }}
-              onRunAround={side => { runCellsAround(cell.id, side) }}
-              runnable={{ above: runnableCounts.above[index] ?? 0, below: runnableCounts.below[index] ?? 0 }}
-              onFocus={() => {
-                runtime.dispatch(tabId, { type: 'focus', cellId: cell.id })
-              }}
-              onPatchView={patch => { patchView(cell.id, patch) }}
-              onEdit={source => { mutate({ op: 'set-source', cellId: cell.id, source }) }}
-              onRun={() => { void runCellById(cell.id) }}
-              onMutation={mutate}
-              onCopyOutput={text => { void copyOutput(cell.id, text) }}
-              onAnswerInput={async value => {
-                setInputValues(current => ({ ...current, [cell.id]: '' }))
-                await runtime.answerInput(tabId, workspaceId, value)
-              }}
-              onInputChange={value => { setInputValues(current => ({ ...current, [cell.id]: value })) }}
-            />
-          ))}
-        </div>
-      )}
+      {/*
+        A row so the outline can stand beside the cells without either of them becoming a
+        scroll container for the other: `.cells` keeps its own scrollbar (the panel's header
+        and the toolbar's rule must not scroll away with it), and the panel scrolls inside
+        itself when a notebook has enough headings to need that.
+      */}
+      <div className={css.body}>
+        {document.cells.length === 0 ? (
+          <div className={css.empty}>
+            <p className={css.emptyText}>{emptyNotebookMessage(document, notebookIsBlank(draft), labels)}</p>
+            {editable && (
+              <button type="button" className={css.emptyAction} onClick={() => { mutate({ op: 'insert', cellId: null, before: false, kind: 'code' }) }}>
+                {labels.addCodeCell}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className={css.cells}>
+            {document.cells.map((cell, index) => (
+              <NotebookCell
+                key={cell.id}
+                cell={cell}
+                index={index}
+                total={document.cells.length}
+                view={views[cell.id] ?? DEFAULT_VIEW}
+                run={state.cells[cell.id]}
+                languagePath={cellPathFor(cell.kind)}
+                editable={editable}
+                labels={labels}
+                markdownLabels={markdownLabels}
+                copied={copiedCell === cell.id}
+                inputValue={inputValues[cell.id] ?? ''}
+                focused={state.focusedCellId === cell.id}
+                menuOpen={menuCellId === cell.id}
+                onOpenMenu={() => { setMenuCellId(cell.id) }}
+                onCloseMenu={() => { setMenuCellId(current => (current === cell.id ? null : current)) }}
+                splitOffset={cursorOffsets[cell.id]}
+                onCursor={offset => { setCursorOffsets(current => (current[cell.id] === offset ? current : { ...current, [cell.id]: offset })) }}
+                onClearOutputs={() => { clearCellOutputs(cell.id) }}
+                onMergeDown={() => { mergeDown(cell.id) }}
+                onRunAround={side => { runCellsAround(cell.id, side) }}
+                runnable={{ above: runnableCounts.above[index] ?? 0, below: runnableCounts.below[index] ?? 0 }}
+                onFocus={() => {
+                  runtime.dispatch(tabId, { type: 'focus', cellId: cell.id })
+                }}
+                onPatchView={patch => { patchView(cell.id, patch) }}
+                onEdit={source => { mutate({ op: 'set-source', cellId: cell.id, source }) }}
+                onRun={() => { void runCellById(cell.id) }}
+                onMutation={mutate}
+                onCopyOutput={text => { void copyOutput(cell.id, text) }}
+                onAnswerInput={async value => {
+                  setInputValues(current => ({ ...current, [cell.id]: '' }))
+                  await runtime.answerInput(tabId, workspaceId, value)
+                }}
+                onInputChange={value => { setInputValues(current => ({ ...current, [cell.id]: value })) }}
+              />
+            ))}
+          </div>
+        )}
+        {outlineVisible && (
+          <MarkdownOutline
+            entries={outline}
+            labels={{ title: labels.outline, empty: labels.outlineEmpty }}
+            onSelect={scrollToCell}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -616,6 +672,26 @@ function NotebookCell({
         <span className={css.cellKind}>{kindLabel(cell.kind, labels)}</span>
         {running && <span className={css.cellRunning}>{run?.status === 'queued' ? labels.queued : labels.running}</span>}
         {!running && run?.interruptRequested === true && <span className={css.cellInterrupted}>{labels.interrupted}</span>}
+        {/*
+          The fold control lives in the always-visible header strip, not the hover action
+          row: a collapsed cell shows no body, so if its only expand button appeared on
+          hover the reader would have to hover an empty row to find the way back — and a
+          fold that could not be unfolded would read as lost work. Folding is a view state,
+          not an edit, so it is never gated on `editable`.
+        */}
+        <button
+          type="button"
+          className={css.cellAction}
+          aria-label={view.folded ? labels.expandCell : labels.collapseCell}
+          title={view.folded ? labels.expandCell : labels.collapseCell}
+          aria-expanded={!view.folded}
+          onClick={event => {
+            event.stopPropagation()
+            onPatchView({ folded: !view.folded })
+          }}
+        >
+          <IconFold16 expanded={!view.folded} />
+        </button>
         <div className={css.cellActions}>
           {cell.kind === 'code' && (
             <button type="button" className={css.cellAction} aria-label={labels.runCell} title={labels.runCell} onClick={onRun}>
@@ -750,58 +826,68 @@ function NotebookCell({
           />
         </div>
       </div>
-      <div className={css.cellBody}>
-        {showsEditor ? (
-          <CodeEditor
-            key={`${cell.id}:${cell.kind}:${languagePath}`}
-            value={cell.source}
-            ariaLabel={`${cell.id} ${cell.kind}`}
-            path={languagePath}
-            wrap
-            cell
-            onChange={onEdit}
-            onCursorChange={cursor => { onCursor(cursor.offset) }}
-            languageOverride={languageForPath(languagePath) ?? undefined}
-          />
-        ) : (
-          <div className={css.cellRendered} onDoubleClick={() => { onPatchView({ editingMarkdown: true }) }}>
-            <MarkdownText text={cell.source} labels={markdownLabels} />
+      {/*
+        Folding renders the header and nothing else, rather than hiding the body with CSS:
+        a folded cell that keeps its CodeEditor mounted keeps a live editor, a caret and a
+        whole CodeMirror instance that nobody can see, and a reader who types into a folded
+        cell has no way to know what they are changing.
+      */}
+      {!view.folded && (
+        <>
+          <div className={css.cellBody}>
+            {showsEditor ? (
+              <CodeEditor
+                key={`${cell.id}:${cell.kind}:${languagePath}`}
+                value={cell.source}
+                ariaLabel={`${cell.id} ${cell.kind}`}
+                path={languagePath}
+                wrap
+                cell
+                onChange={onEdit}
+                onCursorChange={cursor => { onCursor(cursor.offset) }}
+                languageOverride={languageForPath(languagePath) ?? undefined}
+              />
+            ) : (
+              <div className={css.cellRendered} onDoubleClick={() => { onPatchView({ editingMarkdown: true }) }}>
+                <MarkdownText text={cell.source} labels={markdownLabels} />
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      {cell.kind === 'code' && hasOutputRegion && (
-        <div className={css.cellOutputs}>
-          {outputs.length > 0 && (
-            <button
-              type="button"
-              className={css.outputsToggle}
-              aria-label={view.outputsVisible ? labels.outputsShown : labels.outputsHidden}
-              aria-pressed={view.outputsVisible}
-              onClick={() => { onPatchView({ outputsVisible: !view.outputsVisible }) }}
-            >
-              {labels.output}
-            </button>
+          {cell.kind === 'code' && hasOutputRegion && (
+            <div className={css.cellOutputs}>
+              {outputs.length > 0 && (
+                <button
+                  type="button"
+                  className={css.outputsToggle}
+                  aria-label={view.outputsVisible ? labels.outputsShown : labels.outputsHidden}
+                  aria-pressed={view.outputsVisible}
+                  onClick={() => { onPatchView({ outputsVisible: !view.outputsVisible }) }}
+                >
+                  {labels.output}
+                </button>
+              )}
+              {/*
+                The list renders for a live prompt or progress bar even when the cell has
+                emitted no output yet; those are carried by the run, not by `outputs`.
+              */}
+              {(outputs.length > 0 || runExtras) && view.outputsVisible && (
+                <NotebookOutputList
+                  outputs={outputs}
+                  run={run}
+                  labels={labels}
+                  copied={copied}
+                  markdownLabels={markdownLabels}
+                  inputValue={inputValue}
+                  inputId={inputId}
+                  onCopy={onCopyOutput}
+                  onAnswer={onAnswerInput}
+                  onInputChange={onInputChange}
+                />
+              )}
+              {showNoOutputNote && <div className={css.noOutputs}>{labels.noOutputsYet}</div>}
+            </div>
           )}
-          {/*
-            The list renders for a live prompt or progress bar even when the cell has
-            emitted no output yet; those are carried by the run, not by `outputs`.
-          */}
-          {(outputs.length > 0 || runExtras) && view.outputsVisible && (
-            <NotebookOutputList
-              outputs={outputs}
-              run={run}
-              labels={labels}
-              copied={copied}
-              markdownLabels={markdownLabels}
-              inputValue={inputValue}
-              inputId={inputId}
-              onCopy={onCopyOutput}
-              onAnswer={onAnswerInput}
-              onInputChange={onInputChange}
-            />
-          )}
-          {showNoOutputNote && <div className={css.noOutputs}>{labels.noOutputsYet}</div>}
-        </div>
+        </>
       )}
     </div>
   )

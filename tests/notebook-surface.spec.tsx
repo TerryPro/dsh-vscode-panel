@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+
 import { zh } from '../src/client/core/locales.ts'
 import type { NotebookLabels } from '../src/client/notebook/NotebookSurface.tsx'
 import type { NotebookKernelFrame, NotebookOutputItem } from '../src/shared/notebook-protocol.ts'
@@ -142,6 +143,7 @@ function setup(draft: string, options: {
   dirty?: boolean
   saving?: boolean
   onSave?: () => void
+  outlineVisible?: boolean
 } = {}) {
   const api = apiStub()
   // The surface asks the host which kernels this workspace can run as soon as it
@@ -169,6 +171,7 @@ function setup(draft: string, options: {
       onEdit={onEdit}
       dirty={next.dirty ?? false}
       saving={next.saving ?? false}
+      outlineVisible={next.outlineVisible === true}
       onSave={onSave}
       labels={labels}
       markdownLabels={{ code: { copyLabel: 'copy', copiedLabel: 'copied' }, footnotes: 'notes' } as never}
@@ -1142,6 +1145,112 @@ describe('notebook cell menu', () => {
     openMenu(view, 4)
     expect(view.getByRole('menuitem', { name: labels.runAbove }).hasAttribute('disabled')).toBe(false)
     expect(view.getByRole('menuitem', { name: labels.runBelow }).hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('notebook cell folding', () => {
+  /** One stored output, in the shape `.ipynb` keeps it. */
+  const streamOutput = (text: string): Record<string, unknown> => ({
+    output_type: 'stream', name: 'stdout', text: [text],
+  })
+
+  it('collapses a cell to its header row, keeping the prompt and the kind readable', () => {
+    // Folding exists so a long notebook can be skimmed: hiding the body is only useful if
+    // what remains still says *which* cell it is and whether it ran.
+    const view = setup(nb([
+      { ...code('c1', 'secret = 1\nprint(secret)', { execution_count: 7, outputs: [streamOutput('1\n')] }) },
+    ]))
+    expect(view.getByTestId('cell-editor-c1')).toBeTruthy()
+    fireEvent.click(view.getByLabelText(labels.collapseCell))
+    // Body and output both go; the header keeps the number Jupyter gave this cell.
+    expect(view.queryByTestId('cell-editor-c1')).toBeNull()
+    expect(view.queryByText('1')).toBeNull()
+    // A folded cell holds nothing but its header, so the cell's own text is the header's:
+    // asking it for the prompt number says both survived and nothing else is left.
+    const foldedCell = view.getByLabelText(labels.expandCell).closest('[data-cell-id]') as HTMLElement
+    expect(foldedCell.textContent).toContain('[7]')
+    // And the same control opens it again: a cell the reader cannot un-collapse would have
+    // destroyed their work in the most convincing way.
+    fireEvent.click(view.getByLabelText(labels.expandCell))
+    expect(view.getByTestId('cell-editor-c1')).toBeTruthy()
+  })
+
+  it('collapses a markdown cell without leaving its rendered text behind', () => {
+    // A text cell has two faces and folding has to cover both: collapsing the source while
+    // the rendered prose stayed on screen would read as an action that half worked.
+    const view = setup(nb([{ cell_type: 'markdown', id: 'm1', source: '# Title', metadata: {} }]))
+    fireEvent.click(view.getByLabelText(labels.collapseCell))
+    expect(view.queryByTestId('markdown')).toBeNull()
+    expect(view.queryByTestId('cell-editor-m1')).toBeNull()
+    // The row that is left names the kind it folded away.
+    const foldedCell = view.getByLabelText(labels.expandCell).closest('[data-cell-id]') as HTMLElement
+    expect(foldedCell.textContent).toContain(labels.markdownCell)
+  })
+
+  it('runs a collapsed cell and writes its output into the file anyway', async () => {
+    // The reason folding is safe: it is a view state, not a change to the notebook. A
+    // collapsed cell still runs and its output still lands — it is only not looked at
+    // until the reader opens it again.
+    const view = setup(nb([{ ...code('c1', 'print(1)', { execution_count: 1, outputs: [streamOutput('1\n')] }) }]))
+    fireEvent.click(view.getByLabelText(labels.collapseCell))
+    // Folded first, so this really is "run a hidden cell": the body is gone, only the
+    // header's run control remains. Without this the test would pass on an unfolded cell too
+    // and prove nothing about folding leaving the run path alone.
+    expect(view.queryByTestId('cell-editor-c1')).toBeNull()
+    await act(async () => {
+      fireEvent.click(view.getByLabelText(labels.runCell))
+    })
+    expect(view.api.kernelExecute.mock.calls[0]![0]).toMatchObject({ cellId: 'c1', code: 'print(1)' })
+    frame(view.runtime, 1, { type: 'cell_started', msgId: 'm1', cellId: 'c1', code: 'print(1)', executionCount: 2 })
+    frame(view.runtime, 2, { type: 'cell_output', msgId: 'm1', cellId: 'c1', truncated: false, item: { kind: 'stream', name: 'stdout', text: '1\n' } })
+    frame(view.runtime, 3, { type: 'cell_completed', msgId: 'm1', cellId: 'c1', status: 'ok', executionCount: 2 })
+    // The run was committed to the draft even though nothing was visible while it happened.
+    expect(view.holder.draft).toContain('"execution_count": 2')
+  })
+})
+
+describe('notebook outline panel', () => {
+  it('lists the notebook structure in a panel that opens only when asked', () => {
+    // Off by default: the panel spends horizontal room the reader did not ask for. This
+    // mirrors the Markdown outline, which is a per-tab choice stored on the tab.
+    const off = setup(nb([code('c1', 'a = 1')]))
+    expect(off.queryByRole('navigation', { name: labels.outline })).toBeNull()
+    // On: the rows use the same heading extractor the Markdown preview uses, so `# Setup`
+    // reads identically in both views of one document, and a code cell earns its own row.
+    const on = setup(nb([
+      { cell_type: 'markdown', id: 'm1', source: '# Setup', metadata: {} },
+      code('c1', 'df = load()'),
+    ]), { outlineVisible: true })
+    const nav = on.getByRole('navigation', { name: labels.outline })
+    expect(nav.textContent).toContain('Setup')
+    expect(nav.textContent).toContain('df = load()')
+  })
+
+  it('scrolls the cell an outline row names, not the row at that position', () => {
+    let scrolled: Element | null = null
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled = this }
+    // `m1` carries two headings on purpose. The outline then holds three rows over two
+    // cells, so an implementation that took "the cell at that outline position" would walk
+    // off the end of the cell list rather than reaching `c2` — and a fixture where the two
+    // orders agreed would let that mistake pass.
+    const view = setup(nb([
+      { cell_type: 'markdown', id: 'm1', source: '# First\n## Also first', metadata: {} },
+      code('c2', 'x = 2'),
+    ]), { outlineVisible: true })
+    const nav = view.getByRole('navigation', { name: labels.outline })
+    const row = Array.from(nav.querySelectorAll('button')).find(button => button.textContent === 'x = 2')!
+    expect(Array.from(nav.querySelectorAll('button')).indexOf(row)).toBe(2)
+    try {
+      fireEvent.click(row)
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+    // The row carries a cell id, not an ordinal, because the only thing stable across
+    // insert / delete / move is the id — a heading index would jump the reader to whatever
+    // now happens to sit at that position.
+    expect(scrolled).not.toBeNull()
+    expect(scrolled!.getAttribute('data-cell-id')).toBe('c2')
   })
 })
 

@@ -8,6 +8,14 @@ import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/editor
 
 const workbenchState = vi.hoisted(() => ({ current: {} as WorkbenchState }))
 
+/** The smallest `.ipynb` the shell will open; the surface is mocked, so its contents are inert here. */
+const NOTEBOOK_DRAFT = JSON.stringify({
+  cells: [{ cell_type: 'markdown', id: 'm1', source: '# Title', metadata: {} }],
+  metadata: {},
+  nbformat: 4,
+  nbformat_minor: 5,
+})
+
 vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbenchState.current }))
 vi.mock('../src/client/core/clipboard.ts', () => ({ copyTextToClipboard: vi.fn(() => Promise.resolve()) }))
 vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
@@ -20,6 +28,15 @@ vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
   ),
 }))
 vi.mock('../src/client/git/GitDiffEditor.tsx', () => ({ GitDiffEditor: () => <div>diff</div> }))
+// The notebook surface owns its own cell editors and outline panel, neither of which the
+// shell test is about; a stand-in that echoes the flag back lets the test assert that the
+// shell is the one holding the per-tab outline choice.
+vi.mock('../src/client/notebook/NotebookSurface.tsx', () => ({
+  NotebookSurface: ({ outlineVisible }: { outlineVisible: boolean }) => (
+    <div data-testid="notebook-surface" data-outline-visible={outlineVisible ? 'true' : 'false'} />
+  ),
+}))
+vi.mock('../src/client/notebook/NotebookKernelStatus.tsx', () => ({ NotebookKernelStatus: () => null }))
 vi.mock('../src/client/mermaid/MermaidPreview.tsx', () => ({
   MermaidPreview: ({ source, split }: { source: string; split?: boolean }) => (
     <div data-testid="mermaid-preview" data-source={source} data-split={split === true ? 'true' : 'false'} />
@@ -158,6 +175,41 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const controller = controllerFake()
     const view = renderEditor(controller)
     expect(view.queryByRole('button', { name: '大纲' })).toBeNull()
+  })
+
+  it('offers the notebook outline from the status bar, one tab at a time', () => {
+    // The notebook toggle matches Markdown's rule — it lives in the status bar and writes
+    // the per-tab flag through the same controller call — so the two structured views feel
+    // like one feature rather than two.
+    openNotebookTab('nb.ipynb', NOTEBOOK_DRAFT, 'notebook')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    fireEvent.click(view.getByRole('button', { name: '笔记本大纲' }))
+    expect(controller.toggleMarkdownOutline).toHaveBeenCalledWith('file:nb.ipynb')
+  })
+
+  it('gives the notebook outline only to notebook view, not the source view', () => {
+    // The source view is the raw `.ipynb` JSON, whose structure the reader is already
+    // looking at; a second panel spelling out the same cells would report one fact twice —
+    // the shell's whole rule for what the status bar is allowed to show at once.
+    openNotebookTab('nb.ipynb', NOTEBOOK_DRAFT, 'source')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    expect(view.queryByRole('button', { name: '笔记本大纲' })).toBeNull()
+  })
+
+  it('hands the per-tab outline flag to the notebook surface', () => {
+    // The surface renders and scrolls the panel; the shell owns whether it is showing. A
+    // tab with the flag off must not reserve the panel's width, and the choice belongs to
+    // this tab alone — the same flag Markdown's outline uses, kept per-tab by the store.
+    openNotebookTab('nb.ipynb', NOTEBOOK_DRAFT, 'notebook')
+    const off = renderEditor(controllerFake())
+    expect(off.getByTestId('notebook-surface').getAttribute('data-outline-visible')).toBe('false')
+    cleanup()
+    openNotebookTab('nb.ipynb', NOTEBOOK_DRAFT, 'notebook')
+    fileTab(2).outlineVisible = true
+    const on = renderEditor(controllerFake())
+    expect(on.getByTestId('notebook-surface').getAttribute('data-outline-visible')).toBe('true')
   })
 
   it('uses a DSH modal before discarding an unsaved tab', () => {
@@ -606,6 +658,16 @@ function tab(path: string, content: string, markdown: boolean, mermaidMode?: Wor
     externalChange: null,
     error: null,
   }
+}
+
+/**
+ * Open a notebook in the primary pane and make it active. `isNotebookPath` matches on the
+ * `.ipynb` extension, so the tab needs nothing beyond the shape a normal file tab has,
+ * plus the view mode the shell reads to decide between notebook and source.
+ */
+function openNotebookTab(path: string, content: string, notebookMode: NonNullable<WorkbenchFileTab['notebookMode']>): void {
+  workbenchState.current.tabs.push({ ...tab(path, content, false), notebookMode })
+  focusPrimaryTab(`file:${path}`)
 }
 
 function diffTab(path: string) {
