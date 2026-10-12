@@ -243,9 +243,12 @@ npm run test:bundle
 npm run test:kernel     # 可选：笔记本内核的端到端验证
 npm run test:example    # 可选：逐格执行示例笔记本
 npm run test:isolation  # 可选：证明两个笔记本互不影响
+npm run test:sql        # 可选：SQL 笔记门禁，跑在 DSH 宿主 runtime 上
 ```
 
 `npm run typecheck` 除了插件源码，还检查模拟 DSH 快照的测试桩（`workspace-binding`、`workbench-sidebar`、`workbench-editor`）以及笔记本相关测试：宿主类型变更会直接让构建失败，而不是静默关掉这些检查。部分其余测试文件暂未做类型检查。
+
+`npm run test:sql` 分两层报告。**事实层**在插件真正运行的那个 runtime——DSH 宿主内嵌的 Node，不是 PATH 上的 Node——上量 `node:sqlite` 的行为，必须常绿：任何一条翻转，就说明 SQL 笔记建立在一条已不成立的结论上，门禁会直接把这件事指出。**闸门层**断言的是 SQL 笔记的功能面（路由、`.sqlnb`、取消、可写占用）；某个里程碑尚未实现时，它对应的闸门为红是预期状态。它会用 `--host <路径>`、`DSH_HOST_EXE`、以及定位正在运行的 DSH 进程这三步找到宿主可执行文件并在其下重新执行自己；找不到就报错，而不是退回到 PATH 上的 Node 去量一个错的 runtime。
 
 `npm run test:kernel` 会把**构建后**的宿主包挂载到一个最小模拟上下文中，再用真实的 `ipykernel` 通过 HTTP 驱动它自己的路由：内核发现、来源与令牌校验、断线后事件流补齐、轮询兜底、输出转换、Windows 上打断长单元格、两个笔记本各自独立的命名空间，以及收尾后不残留内核进程。它需要工作区可访问且装有 `ipykernel` 的 Python，因此没有被纳入 `npm test`。
 

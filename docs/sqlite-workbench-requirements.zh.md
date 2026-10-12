@@ -193,13 +193,37 @@ npm run build
 npm run test:bundle
 ```
 
-本模块**不碰 `src/host/kernel/**`**，所以 `test:kernel` / `test:example` / `test:isolation` 三条内核门禁不适用；取而代之新增一条常驻门禁：
+本模块**不碰 `src/host/kernel/**`**，所以 `test:kernel` / `test:example` / `test:isolation` 三条内核门禁不适用；取而代之新增一条常驻门禁（A0 已交付：`scripts/probe-sql.mjs` + `scripts/probe-sql-scenarios.mjs`，`package.json` 已挂 `test:sql`，README 中英已同步）：
 
 ```sh
-npm run test:sql    # §3 的实测事实场景，宿主 runtime 上跑
+npm run test:sql              # 全量：事实层 + 全部闸门层
+npm run test:sql -- --only A1 # 只看某个里程碑的闸门（--only=A1 同义）
 ```
 
-其余硬约束：新文案同时进 `src/client/core/locales.ts` 中英两本字典并在消费它的 labels 对象补字段；宿主路由只接受官方工作区 id 与工作区相对路径、复用 `workspace-backend.ts` 的 `resolve()` 那道闸（越界与符号链接）、绝对路径只当参数用绝不回传；SQL 原文与新错误码都要过 `publicFailureMessage`；客户端不得新增运行时依赖；README 两个文件不得出现个人路径、盘符路径或 `localhost`/`127.0.0.1`/`192.168.*` 示例（`tests/package-manifest.spec.ts` 会拦）。
+它分两层报告，**退出码是契约的一部分**：
+
+| 退出码 | 含义 |
+| --- | --- |
+| 0 | 事实层全绿，且所选闸门全绿 |
+| 1 | 事实层全绿，所选闸门仍未实现（A0 交付时就是这个状态，属预期） |
+| 2 | **事实层有断言翻转** —— 宿主 runtime 的行为变了，本功能建立在一条已不成立的结论上；或门禁脚本自身崩溃 |
+
+设计上有两条不能让步：
+
+- **门禁必须跑在宿主 runtime 上**（Electron 内嵌 Node），因为 §3 全部事实都是从那儿量来的。`probe-sql.mjs` 用 `--host <路径>` → `DSH_HOST_EXE` → 定位正在运行的 DSH 进程这三步找到宿主可执行文件，然后以 `ELECTRON_RUN_AS_NODE=1` 重新执行场景包；**找不到就报错退出，绝不退回到 PATH 上的 node 去量一个错的 runtime**。
+- **负向断言不许被"端点不存在"满足**。首版有两条门禁用 `error !== undefined` 判"被拒绝"，于是在路由还没实现时就绿了——那正是 AGENTS.md 禁止的 `expect(true).toBe(true)`。所有拒绝类闸门都要求**专门错误码**。
+
+### 门禁定义的错误码契约（A1/A4 必须照此实现）
+
+| 错误码 | 触发 | 里程碑 |
+| --- | --- | --- |
+| `SQL_WRITE_OCCUPIED` | 同一库文件已有活动连接时再开可写连接（含分页中、含宽限期内的连接） | A1 |
+| `SQL_AUTHORIZATION_DENIED` | authorizer 拒绝的语句（`ATTACH`、名单内 PRAGMA、只读档下的主库写） | A1 |
+| `SQL_INVALID_TABLE` | schema 路由收到不是普通标识符的表名（含引号、分号、空白） | A4 |
+
+三者都要在 `publicFailureMessage` 里补中英文案分支，且响应与日志里不得出现宿主绝对路径或 SQL 原文。
+
+其余硬约束：新文案同时进 `src/client/core/locales.ts` 中英两本字典并在消费它的 labels 对象补字段；宿主路由只接受官方工作区 id 与工作区相对路径、复用 `workspace-backend.ts` 的 `resolve()` 那道闸（越界与符号链接）、绝对路径只当参数用绝不回传；客户端不得新增运行时依赖；README 两个文件不得出现个人路径、盘符路径或 `localhost`/`127.0.0.1`/`192.168.*` 示例（`tests/package-manifest.spec.ts` 会拦）。
 
 ### 必红的核心用例（每条都对应 §3 的一条实测事实）
 

@@ -67,6 +67,7 @@
     "test:kernel": "npm run build && node scripts/probe-kernel.mjs",
     "test:example": "npm run build && node scripts/probe-example.mjs",
     "test:isolation": "npm run build && node scripts/probe-isolation.mjs",
+    "test:sql": "npm run build && node scripts/probe-sql.mjs",
     "test:watch": "vitest",
     "prepare": "npm run build"
   },

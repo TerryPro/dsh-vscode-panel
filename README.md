@@ -242,9 +242,12 @@ npm run test:bundle
 npm run test:kernel     # optional: end-to-end notebook kernel check
 npm run test:example    # optional: runs every cell of the example notebook
 npm run test:isolation  # optional: proves two notebooks cannot affect each other
+npm run test:sql        # optional: SQL-notebook gate, runs on the DSH host runtime
 ```
 
 `npm run typecheck` covers the plugin sources plus the test harnesses that stub DSH snapshots (`workspace-binding`, `workbench-sidebar`, `workbench-editor`) and the notebook suite, so a host shape change fails the build instead of silently switching those checks off. Some remaining specs are not type-checked yet.
+
+`npm run test:sql` reports in two layers. **Facts** measure `node:sqlite` behaviour on the runtime the plugin actually ships into — the Node embedded in the DSH host, which is not the Node on your PATH — and must stay green: if one flips, the SQL notebook would be built on a claim that no longer holds, and the gate says so. **Gates** assert the SQL-notebook surface (routes, `.sqlnb`, cancellation, write occupancy); while a milestone is unimplemented its gates are expected red. It re-executes itself under the host executable, found by `--host <path>`, then `DSH_HOST_EXE`, then by locating the running DSH process, and refuses to fall back to PATH Node rather than measure the wrong runtime.
 
 `npm run test:kernel` mounts the **built** host bundle in a minimal stand-in context and drives its real routes over HTTP against a real `ipykernel` — discovery, the origin and token fences, SSE replay after a dropped stream, the poll fallback, output translation, interrupting a long cell on Windows, two notebooks keeping separate namespaces, and no kernel process surviving teardown. It needs a Python with `ipykernel` reachable from the workspace, which is why it is not part of `npm test`.
 
