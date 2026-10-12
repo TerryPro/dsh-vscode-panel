@@ -41,6 +41,8 @@
     "tests/reveal-path.spec.ts",
     "tests/workspace-backend.spec.ts",
     "tests/api.spec.ts",
+    "tests/sql-values.spec.ts",
+    "tests/sql-guards.spec.ts",
     "tests/rightbar-seat.spec.ts",
     "tests/native-rightbar-entry.spec.ts"
   ]

@@ -1,0 +1,210 @@
+/**
+ * The SQL notebook's vocabulary, shared by the Host and browser halves.
+ *
+ * Deliberately separate from `notebook-protocol.ts`: that one is the Jupyter session
+ * contract (kernel ids, stream tokens, mime bundles) and the SQL notebook shares none of
+ * it. ADR 0002 — the browser half reuses the cell *view*, not the kernel's session or
+ * transport. Putting these types beside the Jupyter ones would quietly undo that, because
+ * the next reader would see one protocol and try to drive both from it.
+ */
+
+import { WORKBENCH_API_PREFIX } from './contracts.ts'
+
+/** Prefix every SQL notebook route hangs off. POST-only, like the file and Git APIs. */
+export const SQL_POST_PREFIX = `${WORKBENCH_API_PREFIX}/sqlnotebook`
+
+/**
+ * The reserved target meaning "an empty in-memory database".
+ *
+ * Not a workspace-relative path: it is matched before path validation, because handing it
+ * to `normalizeWorkspacePath` would reject a perfectly good request. It has no access tier
+ * (there is no file to damage), so the client must not offer a toggle for it.
+ */
+export const SQL_MEMORY_TARGET = ':memory:'
+
+/** Lowercase extensions the workbench will open as a database. */
+export const SQL_DATABASE_EXTENSIONS = ['db', 'sqlite', 'sqlite3'] as const
+
+/** What a connection may do to the file behind it. `:memory:` is always writable. */
+export type SqlAccess = 'read-only' | 'writable'
+
+/** The tier a request gets when it does not say. Requirement: read-only is the default. */
+export const SQL_ACCESS_DEFAULT: SqlAccess = 'read-only'
+
+/**
+ * Caps that stay constants rather than settings.
+ *
+ * Only `maxRows` is a setting: it is the one number a user has a reason to change for a
+ * particular query. The rest are protection values that nobody should be tuning — a wider
+ * column cap is not readable, and a larger BLOB cap is not useful in a table cell.
+ */
+export const SQL_LIMITS = {
+  /** Columns one result block may carry before the rest are dropped with a count. */
+  maxColumns: 64,
+  /** Characters kept per text value. Longer text arrives clipped, with the full length. */
+  maxValueChars: 1000,
+  /** Raw bytes kept per BLOB, carried as base64. A thumbnail does not belong in a response. */
+  maxBlobBytes: 64 * 1024,
+  /** Live connections one workspace may hold. Each one is an open file handle. */
+  maxConnectionsPerWorkspace: 16,
+  /** Tables the schema tree lists before saying it stopped. */
+  maxTreeTables: 100,
+  /**
+   * Wall clock for one cell, checked between row chunks.
+   *
+   * It cannot abort a statement that is already stepping — this runtime has no interrupt —
+   * so it bounds row-yielding scans and leaves aggregates honest about being unbounded.
+   * That limitation belongs to the panel's wording, not to this number.
+   */
+  cellDeadlineMs: 15_000,
+  /** Rows pulled per chunk before yielding the event loop back to the host. */
+  rowChunk: 200,
+  /**
+   * How long a statement waits for a lock before failing.
+   *
+   * Measured: this is SQLite's busy timeout, so it bounds lock waiting only — it has no
+   * effect on a query that is already running, which is why `cellDeadlineMs` exists apart
+   * from it. Without it the default is 0, and a momentarily locked file would fail at once.
+   */
+  busyTimeoutMs: 2_000,
+} as const
+
+/** One column header. */
+export interface SqlColumn {
+  /**
+   * What the header shows. Unique within its block.
+   *
+   * SQLite permits duplicate result names and an object row would silently lose a value,
+   * so names are numbered here (`a`, `a_2`) — see ADR 0005.
+   */
+  label: string
+  /** The name SQLite reported, unaltered. Kept because `label` may be disambiguated. */
+  name: string
+  /** Declared type, when the expression has one. Absent for `SELECT 1+1`. */
+  type?: string
+}
+
+/**
+ * One value as it reaches the browser. Nothing here may throw or lie under
+ * `JSON.stringify`.
+ *
+ * No `boolean`: measured, SQLite has no boolean storage, so `INSERT … VALUES (true)` reads
+ * back as the integer 1. Declaring a type the driver never produces would invite the panel
+ * to branch on it for nothing.
+ */
+export type SqlValue = string | number | null
+
+/** A BLOB, carried as base64 with its true size, because bytes have no better JSON shape. */
+export interface SqlBlobValue {
+  base64: string
+  /** Bytes in the original value, which may exceed what `base64` carries. */
+  byteLength: number
+  truncated: boolean
+}
+
+/** One row, indexed in `columns` order. Never an object: keys would collide. */
+export type SqlRow = (SqlValue | SqlBlobValue)[]
+
+/** Why a statement did not run, as one safe line of SQLite's own words. */
+export interface SqlStatementError {
+  code: string
+  /**
+   * At most one line of SQLite's message, and only when it names no path.
+   *
+   * Measured: SQLite reports no line or column, so this is the whole precision available —
+   * the UI must not imply it can point at a position.
+   */
+  message: string
+}
+
+/** One executed statement's outcome. A cell of three statements produces three blocks. */
+export interface SqlResultBlock {
+  columns: SqlColumn[]
+  rows: SqlRow[]
+  /** The row cap in force for this connection, so the panel can say "of {limit}". */
+  rowLimit: number
+  /** True when the row cap stopped reading. */
+  truncated: boolean
+  /**
+   * Values clipped by the per-value or per-blob caps in this block.
+   *
+   * Counted, not marked in place: appending an ellipsis would change what the user copies
+   * or exports, which is data corruption in a viewer whose whole job is showing values.
+   */
+  valuesTruncated: number
+  /** True when the cell deadline stopped reading, which the panel words differently. */
+  stoppedByDeadline?: true
+  /** Present when this statement failed. Blocks produced before it stay. */
+  error?: SqlStatementError
+}
+
+export interface SqlExecuteResult {
+  path: string
+  blocks: SqlResultBlock[]
+  /** Cell-wide milliseconds, for the per-block execution-time read-out (N0-P1-3). */
+  elapsedMs: number
+  /** The `In[n]` this cell ran as. Session-local; `.sqlnb` never stores it. */
+  executionCount: number
+}
+
+export interface SqlOpenResult {
+  path: string
+  access: SqlAccess
+  sqliteVersion: string
+  /**
+   * True when opening proved this file is a WAL database.
+   *
+   * Measured: the first statement on a read-only WAL connection creates `-wal` and `-shm`
+   * beside the file and `close()` does not remove them. The panel must say so up front —
+   * this flag is what makes that sentence honest rather than a footnote.
+   */
+  walSidecarExpected: boolean
+  rowLimit: number
+}
+
+export interface SqlCloseResult {
+  path: string
+  closed: boolean
+  /** True when a transaction was open and rolled back on the way out (requirement Q47). */
+  rolledBack: boolean
+}
+
+/** First schema level. */
+export interface SqlTreeEntry {
+  name: string
+  /** Anything else sqlite_master holds (indexes, triggers) is not offered as a tree node. */
+  kind: 'table' | 'view'
+}
+
+export interface SqlTablesResult {
+  path: string
+  tables: SqlTreeEntry[]
+  /** True when more exist than were returned, so a short list does not look like all of them. */
+  truncated: boolean
+}
+
+export interface SqlColumnEntry {
+  name: string
+  type?: string
+  notNull: boolean
+  primaryKey: boolean
+}
+
+export interface SqlColumnsResult {
+  path: string
+  table: string
+  columns: SqlColumnEntry[]
+}
+
+/** What the panel needs in order to show the caps the Host actually enforces. */
+export interface SqlLimitsResult {
+  defaultRowLimit: number
+  maxRowLimit: number
+  columnLimit: number
+  valueCharLimit: number
+  blobByteLimit: number
+  cellDeadlineMs: number
+  maxConnectionsPerWorkspace: number
+  /** The cap in force for this connection, when one is open. */
+  currentRowLimit?: number
+}
