@@ -780,6 +780,7 @@ export interface NotebookUndoStack {
 
 - 折叠：`CellView.folded`，折叠只渲染 header。
 - 大纲：第一期给「单元格列表 + markdown 标题」下拉跳转，复用 `MarkdownOutline.tsx`（它接的是 `MarkdownOutlineEntry[]`，从 `document.cells` 里提取标题即可，`markdown-outline.ts` 现成）。
+- 落地调整：只提取 markdown 单元格里的标题，代码格/raw 格不再按首行进大纲——大纲是目录，`df = load(...)`、`# 注释` 这类源码行不是标题；单元格本身仍可通过单元格列表与折叠导航。见 `notebook-outline.ts`。
 
 ### D21 单元格菜单与键盘可达性统一入口
 

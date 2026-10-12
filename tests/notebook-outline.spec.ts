@@ -30,9 +30,8 @@ describe('notebook outline', () => {
     ]))
     expect(buildNotebookOutline(document)).toEqual([
       { index: 0, level: 1, text: 'Setup', cellId: 'm1' },
-      { index: 1, level: 1, text: 'x = 1', cellId: 'c1' },
-      { index: 2, level: 2, text: 'Load data', cellId: 'm2' },
-      { index: 3, level: 3, text: 'From S3', cellId: 'm2' },
+      { index: 1, level: 2, text: 'Load data', cellId: 'm2' },
+      { index: 2, level: 3, text: 'From S3', cellId: 'm2' },
     ])
   })
 
@@ -51,22 +50,24 @@ describe('notebook outline', () => {
     expect(buildNotebookOutline(document)).toEqual([])
   })
 
-  it('labels a code cell by its first line that has content', () => {
-    // Leading blank lines are the shape a hand-run notebook actually accumulates — a
-    // reader who cleared a cell keeps the newline — and a row reading `''` would be an
-    // entry that names nothing.
-    const document = parseNotebook(nb([code('c1', '\n\n  df = load("x.csv")  \nprint(df)')]))
-    expect(buildNotebookOutline(document)).toEqual([
-      { index: 0, level: 1, text: 'df = load("x.csv")', cellId: 'c1' },
-    ])
+  it('leaves code cells out, including the ones that start with a comment', () => {
+    // The outline is a table of contents, not a list of steps: a code cell's first line is
+    // a statement or a `# comment` in that language, and neither is a heading the reader is
+    // scanning for. Cells stay navigable through the cell list and folding.
+    const document = parseNotebook(nb([
+      code('c1', 'df = load("x.csv")\nprint(df)'),
+      code('c2', '# not a heading\n# neither is this'),
+    ]))
+    expect(buildNotebookOutline(document)).toEqual([])
   })
 
-  it('gives a raw cell a row too, because it is part of the document', () => {
-    // Raw cells carry prose and scripts the reader placed deliberately; leaving them out
-    // of the outline would make the panel a map with holes in it.
-    const document = parseNotebook(nb([{ cell_type: 'raw', id: 'r1', source: 'make deploy', metadata: {} }]))
-    expect(buildNotebookOutline(document)).toEqual([
-      { index: 0, level: 1, text: 'make deploy', cellId: 'r1' },
-    ])
+  it('leaves raw cells out too', () => {
+    // Raw is source as well; its content is prose the reader wrote outside the Markdown
+    // cells, and lifting its first line into the outline would name a heading that is
+    // rendered nowhere.
+    const document = parseNotebook(nb([
+      { cell_type: 'raw', id: 'r1', source: '# looks like a heading\nmake deploy', metadata: {} },
+    ]))
+    expect(buildNotebookOutline(document)).toEqual([])
   })
 })

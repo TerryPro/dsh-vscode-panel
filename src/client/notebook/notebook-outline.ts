@@ -12,7 +12,7 @@ import type { NotebookDocument } from './notebook-document.ts'
 export interface NotebookOutlineEntry {
   /** Position in the outline, used as the React key. */
   index: number
-  /** Heading depth, for indentation: 1 for `#`, and for a cell named by its own text. */
+  /** Heading depth, for indentation: 1 for `#` through 6 for `######`. */
   level: number
   /** Display text, stripped of inline Markdown by the shared extractor. */
   text: string
@@ -21,15 +21,13 @@ export interface NotebookOutlineEntry {
 }
 
 /**
- * The notebook's structure as a flat list: every Markdown heading, plus every cell that
- * is not Markdown.
+ * The notebook's structure as a flat list: the Markdown headings, in document order.
  *
- * A non-Markdown cell gets a row of its own because a notebook is read as a sequence of
- * steps, not as prose with attachments: on a long notebook the question is usually "which
- * cell computes that?", which a headings-only outline cannot answer. Its first line with
- * content names it, since that line is the step and its whole source would be a paragraph
- * the panel cannot show. Raw cells are included on the same terms as code cells — leaving
- * them out would make the panel a map with holes in it.
+ * Only Markdown cells contribute rows. A code or raw cell is source, not prose: its first
+ * line is a statement (`df = load("x.csv")`, `make deploy`), and putting those in a table of
+ * contents mixes two kinds of entry the reader is scanning for different reasons — headings
+ * on one side, whatever happened to sit at the top of a cell on the other. Cells stay
+ * navigable through the cell list and folding, which is the surface built for them.
  *
  * Heading extraction is delegated to the function the Markdown preview uses, so the fenced
  * code and setext rules cannot drift between two views of one file.
@@ -37,30 +35,10 @@ export interface NotebookOutlineEntry {
 export function buildNotebookOutline(document: NotebookDocument): NotebookOutlineEntry[] {
   const entries: NotebookOutlineEntry[] = []
   for (const cell of document.cells) {
-    if (cell.kind === 'markdown') {
-      for (const heading of extractMarkdownOutline(cell.source)) {
-        entries.push({ index: entries.length, level: heading.level, text: heading.text, cellId: cell.id })
-      }
-      continue
+    if (cell.kind !== 'markdown') continue
+    for (const heading of extractMarkdownOutline(cell.source)) {
+      entries.push({ index: entries.length, level: heading.level, text: heading.text, cellId: cell.id })
     }
-    const label = firstMeaningfulLine(cell.source)
-    if (label === null) continue
-    entries.push({ index: entries.length, level: 1, text: label, cellId: cell.id })
   }
   return entries
-}
-
-/**
- * The line that names a cell, or `null` when it holds nothing to name.
- *
- * Leading blank lines are the shape a worked-on notebook actually accumulates — clearing a
- * cell leaves its newline behind — so the first *content* line is what a reader would call
- * the cell, not the first line of the file.
- */
-function firstMeaningfulLine(source: string): string | null {
-  for (const line of source.split('\n')) {
-    const text = line.trim()
-    if (text !== '') return text
-  }
-  return null
 }

@@ -1601,20 +1601,21 @@ describe('notebook cell drag reorder', () => {
 })
 
 describe('notebook outline panel', () => {
-  it('lists the notebook structure in a panel that opens only when asked', () => {
+  it('lists the markdown headings in a panel that opens only when asked', () => {
     // Off by default: the panel spends horizontal room the reader did not ask for. This
     // mirrors the Markdown outline, which is a per-tab choice stored on the tab.
     const off = setup(nb([code('c1', 'a = 1')]))
     expect(off.queryByRole('navigation', { name: labels.outline })).toBeNull()
     // On: the rows use the same heading extractor the Markdown preview uses, so `# Setup`
-    // reads identically in both views of one document, and a code cell earns its own row.
+    // reads identically in both views of one document. A code cell's source is not a heading
+    // and stays out of the table of contents.
     const on = setup(nb([
       { cell_type: 'markdown', id: 'm1', source: '# Setup', metadata: {} },
       code('c1', 'df = load()'),
     ]), { outlineVisible: true })
     const nav = on.getByRole('navigation', { name: labels.outline })
     expect(nav.textContent).toContain('Setup')
-    expect(nav.textContent).toContain('df = load()')
+    expect(nav.textContent).not.toContain('df = load()')
   })
 
   it('scrolls the cell an outline row names, not the row at that position', () => {
@@ -1623,14 +1624,14 @@ describe('notebook outline panel', () => {
     Element.prototype.scrollIntoView = function (this: Element) { scrolled = this }
     // `m1` carries two headings on purpose. The outline then holds three rows over two
     // cells, so an implementation that took "the cell at that outline position" would walk
-    // off the end of the cell list rather than reaching `c2` — and a fixture where the two
+    // off the end of the cell list rather than reaching `m2` — and a fixture where the two
     // orders agreed would let that mistake pass.
     const view = setup(nb([
       { cell_type: 'markdown', id: 'm1', source: '# First\n## Also first', metadata: {} },
-      code('c2', 'x = 2'),
+      { cell_type: 'markdown', id: 'm2', source: '# Second', metadata: {} },
     ]), { outlineVisible: true })
     const nav = view.getByRole('navigation', { name: labels.outline })
-    const row = Array.from(nav.querySelectorAll('button')).find(button => button.textContent === 'x = 2')!
+    const row = Array.from(nav.querySelectorAll('button')).find(button => button.textContent === 'Second')!
     expect(Array.from(nav.querySelectorAll('button')).indexOf(row)).toBe(2)
     try {
       fireEvent.click(row)
@@ -1641,7 +1642,7 @@ describe('notebook outline panel', () => {
     // insert / delete / move is the id — a heading index would jump the reader to whatever
     // now happens to sit at that position.
     expect(scrolled).not.toBeNull()
-    expect(scrolled!.getAttribute('data-cell-id')).toBe('c2')
+    expect(scrolled!.getAttribute('data-cell-id')).toBe('m2')
   })
 })
 
