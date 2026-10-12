@@ -341,6 +341,17 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
       mutations.requestDelete(entry)
       return
     }
+    // Reveal is a Host-side action, not a clipboard one, so it reports the Host's own
+    // reason (no file manager on this platform, the entry vanished) rather than a
+    // browser-permission message that would describe a different failure.
+    if (action === 'reveal-in-file-manager') {
+      try {
+        await controller.api.revealPath(targetWorkspace, entry.path)
+      } catch (reason: unknown) {
+        if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      }
+      return
+    }
     try {
       if (action === 'copy-relative-path') {
         await copyTextToClipboard(entry.path)

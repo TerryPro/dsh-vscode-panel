@@ -94,6 +94,16 @@ export class WorkbenchApi {
     return this.post('/path/absolute', { workspaceId, path })
   }
 
+  /**
+   * Show one entry in the operating system's file manager.
+   *
+   * The answer carries only the workspace-relative path: the absolute path is what the
+   * Host spends on the way out, not something this page needs back.
+   */
+  async revealPath(workspaceId: string, path: string): Promise<WorkspaceRelativePath> {
+    return this.post('/path/reveal', { workspaceId, path })
+  }
+
   async relativePath(workspaceId: string, path: string): Promise<WorkspaceRelativePath> {
     return this.post('/path/relative', { workspaceId, path })
   }

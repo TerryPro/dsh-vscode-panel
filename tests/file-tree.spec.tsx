@@ -59,6 +59,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconPlusOutlineMedium: () => <span data-icon="official-plus" />,
   IconRefreshOutlineRegular: () => <span />,
   IconRefreshOutlineMedium: () => <span />,
+  IconRightUpOutlineMedium: () => <span />,
   IconTrashOutlineMedium: () => <span />,
 }))
 
@@ -373,6 +374,64 @@ describe('文件目录', () => {
       expect(clipboard.writeText).toHaveBeenCalledWith('README.md')
       expect(view.getByRole('status').textContent).toContain('已复制相对路径。')
     })
+  })
+
+  it('通过右键菜单在系统文件管理器中显示所选条目', async () => {
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: {
+        listDirectory: vi.fn(() => Promise.resolve({
+          path: '', truncated: false,
+          entries: [
+            { name: 'docs', path: 'docs', kind: 'directory' as const },
+            { name: 'README.md', path: 'README.md', kind: 'file' as const },
+          ],
+        })),
+        revealPath: vi.fn(() => Promise.resolve({ path: 'README.md' })),
+      },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+
+    // The row names the entry, never an absolute path: the Host resolves it.
+    const fileRow = await view.findByRole('treeitem', { name: 'README.md' })
+    fireEvent.contextMenu(fileRow, { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '在文件资源管理器中显示' }))
+    await waitFor(() => {
+      expect(controller.api.revealPath).toHaveBeenCalledWith('workspace-1', 'README.md')
+    })
+
+    // A folder is a file manager's own subject, so it gets the row too.
+    fireEvent.contextMenu(view.getByRole('treeitem', { name: 'docs' }), { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '在文件资源管理器中显示' }))
+    await waitFor(() => {
+      expect(controller.api.revealPath).toHaveBeenCalledWith('workspace-1', 'docs')
+    })
+  })
+
+  it('显示文件管理器失败的宿主原因而不是剪贴板文案', async () => {
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: {
+        listDirectory: vi.fn(() => Promise.resolve({
+          path: '', truncated: false, entries: [{ name: 'README.md', path: 'README.md', kind: 'file' as const }],
+        })),
+        revealPath: vi.fn(() => Promise.reject(new Error('当前系统没有可用的文件管理器。'))),
+      },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    const row = await view.findByRole('treeitem', { name: 'README.md' })
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '在文件资源管理器中显示' }))
+    // The host's message is the useful one: "no file manager here" and "the clipboard was
+    // blocked" are different failures needing different fixes.
+    expect((await view.findByRole('alert')).textContent).toContain('当前系统没有可用的文件管理器。')
+    expect(view.getByRole('alert').textContent).not.toContain('剪贴板')
   })
 
   it('通过右键菜单展开全部，递归加载并展开目录树', async () => {

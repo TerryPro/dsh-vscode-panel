@@ -899,6 +899,104 @@ describe('WorkbenchController', () => {
     expect(setActive.mock.calls).toEqual([[true], [false], [true]])
   })
 
+  // The plugin's editor takes the *single* `rightbar.session` cell, which shadows
+  // DSH's native right Sidebar entirely. Releasing that cell when the middle
+  // column is hidden is the only way the native Sidebar comes back, so the
+  // callback is asserted on the shape the seat actually observes: `true` while
+  // the workbench holds the seat, `false` the moment it must give it back —
+  // seeded from the current state so a mount during a collapsed Session yields
+  // at once rather than shadowing a column it will never fill.
+  it('holds the rightbar seat only while the middle editor is expanded', () => {
+    const layout = { openRightbar: vi.fn(), closeRightbar: vi.fn() }
+    const logger = { info: vi.fn(), warn: vi.fn() }
+    const controller = new WorkbenchController({} as never, logger, layout)
+    const setActive = vi.fn()
+    controller.attachRightbarShadow(setActive)
+    expect(setActive.mock.calls).toEqual([[true]])
+
+    controller.toggleEditor()
+    expect(controller.store.getSnapshot().editorExpanded).toBe(false)
+    expect(setActive).toHaveBeenLastCalledWith(false)
+
+    controller.toggleEditor()
+    expect(setActive).toHaveBeenLastCalledWith(true)
+  })
+
+  it('releases the native right Sidebar to the frame while the editor is collapsed', () => {
+    const layout = { openRightbar: vi.fn(), closeRightbar: vi.fn() }
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, layout)
+    const setActive = vi.fn()
+    const detach = controller.attachRightbarShadow(setActive)
+    setActive.mockReset()
+
+    controller.toggleEditor()
+    controller.synchronizeEditorLayout()
+    // Collapsed: the native seat is the winner, so the workbench must not report
+    // an editor track over it — the frame's rightbar is closed by the yield.
+    expect(setActive).toHaveBeenCalledWith(false)
+    expect(layout.closeRightbar).toHaveBeenCalled()
+    expect(layout.openRightbar).not.toHaveBeenCalled()
+
+    detach()
+  })
+
+  // Yielding the seat later unmounts DSH's RightbarSeat, whose cleanup reports the
+  // column closed from the React commit the reclaim call only scheduled — i.e.
+  // after this controller's own openRightbar. Left alone, the frame carries
+  // data-rightbar-collapsed and every workbench reorder rule is guarded by
+  // `:not([data-rightbar-collapsed])`, so the middle column snaps back into the
+  // native right track for a frame. The re-assert must therefore land deferred.
+  it('re-asserts the editor track after the reclaimed seat has unmounted', () => {
+    const frames: Frame[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: Frame) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const layout = { openRightbar: vi.fn(), closeRightbar: vi.fn() }
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, layout)
+    controller.attachRightbarShadow(vi.fn())
+
+    controller.toggleEditor()
+    layout.openRightbar.mockClear()
+    layout.closeRightbar.mockClear()
+    controller.toggleEditor()
+
+    expect(layout.openRightbar).toHaveBeenCalledWith(true, false)
+    expect(layout.closeRightbar).not.toHaveBeenCalled()
+    // Deferred: the unmount cleanup has not run yet at this point.
+    expect(layout.closeRightbar).not.toHaveBeenCalled()
+
+    frames.forEach(frame => { frame(0) })
+    expect(layout.openRightbar).toHaveBeenCalledTimes(2)
+
+    vi.unstubAllGlobals()
+  })
+
+  // A collapse queued inside the same frame owns the track; the deferred re-assert
+  // must not resurrect an editor the user just hid.
+  it('drops the deferred track re-assert when the editor collapsed again first', () => {
+    const frames: Frame[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: Frame) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const layout = { openRightbar: vi.fn(), closeRightbar: vi.fn() }
+    const controller = new WorkbenchController({} as never, { info: vi.fn(), warn: vi.fn() }, layout)
+    controller.attachRightbarShadow(vi.fn())
+
+    controller.toggleEditor()
+    controller.toggleEditor()
+    // Collapse again before the queued frame runs: the deferred re-assert must see
+    // the current state, not the one that scheduled it.
+    controller.toggleEditor()
+    layout.openRightbar.mockClear()
+    frames.forEach(frame => { frame(0) })
+
+    expect(layout.openRightbar).not.toHaveBeenCalled()
+
+    vi.unstubAllGlobals()
+  })
+
   it('collapses the middle editor explicitly and reveals it for files, Diffs, terminals, and tab selections', async () => {
     const layout = { openRightbar: vi.fn(), closeRightbar: vi.fn() }
     const api = {
@@ -1289,6 +1387,9 @@ describe('WorkbenchController', () => {
     expect(controller.store.getSnapshot().activeTabId).toBe(terminalId)
   })
 })
+
+/** One `requestAnimationFrame` callback, collected so a deferred write can be flushed. */
+type Frame = (time: number) => void
 
 function createController(api: object) {
   return new WorkbenchController(api as never, { info: vi.fn(), warn: vi.fn() })

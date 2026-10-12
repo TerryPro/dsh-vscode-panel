@@ -60,6 +60,21 @@ export class WorkbenchController {
 
   private sidebarActionId = 0
   private setSidebarShadow: ((active: boolean) => void) | undefined
+  /**
+   * Whether the workbench holds the official `rightbar.session` seat.
+   *
+   * `rightbar.session` is a *single* slot, so its lowest-priority registrant is
+   * its only renderer. The workbench editor takes that seat (that is how it gets
+   * a session-scoped column at all), which necessarily shadows DSH's own
+   * `RightbarSeat` — and with it the whole native right Sidebar: its dock panel,
+   * its guide/file/browser/terminal tabs, its own divider, and the `openRightbar`
+   * report that makes the frame reserve a track for it.
+   *
+   * So the shadow is handed to the same switch as the middle column it lives in:
+   * while the editor is collapsed the plugin releases the seat, DSH's own seat
+   * becomes the winner again, and the native right Sidebar is fully usable.
+   */
+  private setRightbarShadow: ((active: boolean) => void) | undefined
   readonly fileTreeExpanded = new Map<string, Set<string>>()
   private readonly data: WorkbenchData
   private readonly edits: WorkbenchEdits
@@ -125,6 +140,23 @@ export class WorkbenchController {
     setActive(this.store.getSnapshot().sidebarMode !== 'sessions')
     return () => {
       if (this.setSidebarShadow === setActive) this.setSidebarShadow = undefined
+    }
+  }
+
+  /**
+   * Bind the official right-column seat so its occupant follows the middle column.
+   *
+   * The callback receives `true` while the workbench editor should hold
+   * `rightbar.session` and `false` when the plugin must release it. Releasing is
+   * what returns DSH's native right Sidebar to the screen, and the seat is only
+   * ever needed while the middle column is on screen to fill it, so collapse is
+   * the one gesture that both hides the editor and gives the column back.
+   */
+  attachRightbarShadow(setActive: (active: boolean) => void): () => void {
+    this.setRightbarShadow = setActive
+    setActive(this.store.getSnapshot().editorExpanded)
+    return () => {
+      if (this.setRightbarShadow === setActive) this.setRightbarShadow = undefined
     }
   }
 
@@ -572,9 +604,34 @@ export class WorkbenchController {
     const current = this.store.getSnapshot().editorExpanded
     if (current !== expanded) {
       this.store.update((state) => { state.editorExpanded = expanded })
+      // Hand the official right column back before the frame reports its track, so
+      // the occupant DSH's own seat starts drawing is the one that ends up owning
+      // the report. Expanding reverses it: the editor is mounted again before the
+      // track is claimed, and the native seat's unmount report cannot strand it.
+      this.setRightbarShadow?.(expanded)
       this.logger.info(`workbench-layout: ${expanded ? 'expanded' : 'collapsed'} middle editor from ${source}`)
     }
-    if (expanded) this.editorLayout?.openRightbar(true, false)
-    else this.editorLayout?.closeRightbar()
+    if (expanded) {
+      this.editorLayout?.openRightbar(true, false)
+      // Reclaiming the seat dismounts DSH's RightbarSeat, and that seat's cleanup
+      // reports the column closed from the commit this call only scheduled — so it
+      // lands *after* the openRightbar above. Re-assert on the next frame, which is
+      // before its paint and before the reclaimed editor's own mount effect, or the
+      // middle column spends a frame back in the native right track with the
+      // conversation returned to the centre.
+      this.reassertEditorTrackAfterSeatHandoff()
+    } else {
+      this.editorLayout?.closeRightbar()
+    }
+  }
+
+  /** Re-apply the editor's track report once the yielded native seat has unmounted. */
+  private reassertEditorTrackAfterSeatHandoff(): void {
+    if (typeof requestAnimationFrame !== 'function') return
+    requestAnimationFrame(() => {
+      // Only while the editor is still expanded: a collapse queued in the same
+      // frame owns the track, and this deferred report must not resurrect it.
+      if (this.store.getSnapshot().editorExpanded) this.editorLayout?.openRightbar(true, false)
+    })
   }
 }

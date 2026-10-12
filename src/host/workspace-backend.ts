@@ -24,10 +24,23 @@ import { imageMimeTypeForPath } from '../shared/contracts.ts'
 import { WorkbenchHttpError } from './http.ts'
 import { isMarkdownPath } from '../shared/markdown-path.ts'
 import { childWorkspacePath, normalizeWorkspacePath, WorkbenchInputError } from '../shared/path-policy.ts'
+import { createRevealLauncher, revealCommandFor, type RevealLauncher } from './reveal-path.ts'
 
 export interface WorkspaceLimits {
   maxFileBytes: number
   maxDirectoryEntries: number
+}
+
+/**
+ * How the backend talks to the operating system's file manager.
+ *
+ * Both halves exist so the reveal path can be tested without opening a window: a spec
+ * hands in a launcher that records its commands, and a platform that is not the one the
+ * tests run on.
+ */
+export interface WorkspaceReveal {
+  launcher?: RevealLauncher
+  platform?: NodeJS.Platform
 }
 
 export interface WorkspaceGitText {
@@ -45,10 +58,17 @@ interface WorkspaceTarget {
 
 /** Read and atomically update files under an official DSH Workspace root. */
 export class WorkspaceBackend {
+  private readonly reveal: RevealLauncher
+  private readonly platform: NodeJS.Platform
+
   constructor(
     private readonly ctx: Context,
     private readonly limits: WorkspaceLimits,
-  ) {}
+    reveal: WorkspaceReveal = {},
+  ) {
+    this.platform = reveal.platform ?? process.platform
+    this.reveal = reveal.launcher ?? createRevealLauncher()
+  }
 
   async list(workspaceIdValue: unknown, pathValue: unknown): Promise<DirectoryListing> {
     const workspace = await this.resolve(workspaceIdValue, pathValue)
@@ -334,6 +354,47 @@ export class WorkspaceBackend {
     const resolved = await this.resolve(workspace.workspaceId, normalizeWorkspacePath(path))
     await this.requireType(resolved, 'file')
     return { path: resolved.path }
+  }
+
+  /**
+   * Show one existing entry in the operating system's file manager.
+   *
+   * Same resolution as `absolutePath` — an existing, non-symlink entry inside the
+   * Workspace — and the same answer shape: only the workspace-relative path comes back,
+   * because the absolute path is what this call spends rather than what it reports.
+   *
+   * The entry type decides the command: Explorer selects a file only when handed the
+   * `/select,` form, and opens a directory only when handed it plain.
+   */
+  async revealPath(workspaceIdValue: unknown, pathValue: unknown): Promise<WorkspaceRelativePath> {
+    const workspace = await this.resolve(workspaceIdValue, pathValue)
+    if (workspace.path !== '') assertMutableWorkspacePath(workspace.path)
+    const info = await this.requireType(workspace, workspace.path === '' ? 'directory' : undefined)
+    const command = revealCommandFor(
+      this.platform,
+      this.ctx.fs.processPath(workspace.target),
+      info.type === 'directory',
+    )
+    if (command === null) {
+      throw new WorkbenchHttpError(400, 'REVEAL_UNSUPPORTED', '当前系统没有可用的文件管理器。')
+    }
+    try {
+      await this.reveal.launch(command)
+    } catch (error: unknown) {
+      // Neither the reply nor the log repeats the failure's own text: the command line that
+      // failed carries the workspace's absolute path, and workbench responses and logs keep
+      // to relative paths. The error code names what went wrong well enough to act on.
+      this.ctx.logger.warn(
+        `workbench-layout: revealing workspace entry ${JSON.stringify(workspace.path)} failed (${String(errorCode(error) ?? 'unknown')})`,
+      )
+      throw new WorkbenchHttpError(502, 'REVEAL_FAILED', '无法打开系统的文件管理器。')
+    }
+    // The absolute path stays out of the log: the reader asked for a window, and the
+    // relative path is the only part of that fact worth recording.
+    this.ctx.logger.info(
+      `workbench-layout: revealed workspace ${info.type} ${JSON.stringify(workspace.path)} in ${JSON.stringify(workspace.workspaceId)}`,
+    )
+    return { path: workspace.path }
   }
 
   async rootProcessPath(workspaceIdValue: unknown): Promise<{ cwd: string; workspaceId: WorkspaceId }> {

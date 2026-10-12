@@ -3,6 +3,7 @@ import {
   IconEditOutlineMedium,
   IconFolderOpenOutlineMedium,
   IconRefreshOutlineMedium,
+  IconRightUpOutlineMedium,
   IconTrashOutlineMedium,
   Menu,
   type MenuEntry,
@@ -20,6 +21,7 @@ export type FileTreeMenuAction =
   | 'delete'
   | 'copy-relative-path'
   | 'copy-absolute-path'
+  | 'reveal-in-file-manager'
   | 'refresh'
   | 'expand-all'
   | 'collapse-all'
@@ -93,18 +95,33 @@ function entryItems(entry: WorkspaceEntry, expanded: boolean, t: TranslateNS<'wo
     { type: 'separator', id: 'entry-copy-separator' },
     { id: 'copy-relative-path', label: t('files.copyRelativePath'), icon: <IconCopyOutlineMedium size={14} /> },
     { id: 'copy-absolute-path', label: t('files.copyAbsolutePath'), icon: <IconCopyOutlineMedium size={14} /> },
+    // The row is offered on every platform rather than only where the client thinks a file
+    // manager exists: the browser's own OS is not necessarily the Host's, and the Host's
+    // `REVEAL_UNSUPPORTED` answer with its message is a better report than a row that
+    // silently vanished.
+    { id: 'reveal-in-file-manager', label: t('files.revealInFileManager'), icon: <IconRightUpOutlineMedium size={14} />, disabled: !mutable },
   ]
 }
 
+/**
+ * Every action the menus above can carry. The guard reads this list rather than restating
+ * the comparison chain: a row added to a menu and forgotten here is a row that does nothing
+ * when clicked, and one list the type has to satisfy makes that pair impossible to drift.
+ */
+const FILE_TREE_MENU_ACTIONS: readonly FileTreeMenuAction[] = [
+  'open',
+  'new-file',
+  'new-directory',
+  'rename',
+  'delete',
+  'copy-relative-path',
+  'copy-absolute-path',
+  'reveal-in-file-manager',
+  'refresh',
+  'expand-all',
+  'collapse-all',
+]
+
 function isFileTreeMenuAction(id: string): id is FileTreeMenuAction {
-  return id === 'open'
-    || id === 'new-file'
-    || id === 'new-directory'
-    || id === 'rename'
-    || id === 'delete'
-    || id === 'copy-relative-path'
-    || id === 'copy-absolute-path'
-    || id === 'refresh'
-    || id === 'expand-all'
-    || id === 'collapse-all'
+  return (FILE_TREE_MENU_ACTIONS as readonly string[]).includes(id)
 }

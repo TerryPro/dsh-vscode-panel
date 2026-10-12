@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkspaceBackend } from '../src/host/workspace-backend.ts'
+import type { WorkspaceReveal } from '../src/host/workspace-backend.ts'
+import type { RevealCommand, RevealLauncher } from '../src/host/reveal-path.ts'
 
-function harness(overrides: Record<string, unknown> = {}, workspaceRoot = '/workspace') {
+function harness(overrides: Record<string, unknown> = {}, workspaceRoot = '/workspace', reveal: WorkspaceReveal = {}) {
   const writeText = vi.fn(() => Promise.resolve({
     operation: 'update', version: 'next-version', before: 'old', after: 'new',
   }))
@@ -33,7 +35,7 @@ function harness(overrides: Record<string, unknown> = {}, workspaceRoot = '/work
     logger: { info: vi.fn(), warn: vi.fn() },
   } as unknown as Context
   return {
-    backend: new WorkspaceBackend(ctx, { maxFileBytes: 1024, maxDirectoryEntries: 100 }),
+    backend: new WorkspaceBackend(ctx, { maxFileBytes: 1024, maxDirectoryEntries: 100 }, reveal),
     fs,
     writeText,
     logger: (ctx as unknown as { logger: { info: ReturnType<typeof vi.fn> } }).logger,
@@ -260,6 +262,72 @@ describe('WorkspaceBackend', () => {
     })
     await expect(backend.readGitText('workspace-1', 'large.txt')).rejects.toMatchObject({ code: 'GIT_DIFF_TOO_LARGE' })
     expect(readText).not.toHaveBeenCalled()
+  })
+
+  it('shows a file in the system file manager with the command built from its own path', async () => {
+    // The launcher is the whole point of this route, so the assertion lands on what it
+    // actually received: the resolved absolute path, in the `/select,` form Windows needs
+    // to highlight a file rather than merely open its parent.
+    const launched: RevealCommand[] = []
+    const launcher: RevealLauncher = { launch: (command) => { launched.push(command); return Promise.resolve() } }
+    const { backend, logger } = harness({
+      processPath: vi.fn((target: { targetKey: string }) => target.targetKey),
+    }, '/workspace', { platform: 'win32', launcher })
+
+    await expect(backend.revealPath('workspace-1', 'docs/a.ts')).resolves.toEqual({ path: 'docs/a.ts' })
+    expect(launched).toEqual([{ file: 'explorer.exe', args: ['/select,/workspace/docs/a.ts'] }])
+    // The reply and the log both carry the relative path only: an absolute path in either
+    // would leak the host's filesystem into the browser.
+    expect(JSON.stringify(logger.info.mock.calls)).not.toContain('/workspace')
+  })
+
+  it('opens a directory without the select switch that would highlight nothing', async () => {
+    const launched: RevealCommand[] = []
+    const launcher: RevealLauncher = { launch: (command) => { launched.push(command); return Promise.resolve() } }
+    const { backend } = harness({
+      stat: vi.fn(() => Promise.resolve({ type: 'directory', version: 'v1', size: 0 })),
+      processPath: vi.fn((target: { targetKey: string }) => target.targetKey),
+    }, '/workspace', { platform: 'win32', launcher })
+
+    await backend.revealPath('workspace-1', 'docs')
+    expect(launched).toEqual([{ file: 'explorer.exe', args: ['/workspace/docs'] }])
+  })
+
+  it('says so when the platform has no file manager, without launching anything', async () => {
+    const launch = vi.fn(() => Promise.resolve())
+    const { backend } = harness({}, '/workspace', { platform: 'sunos', launcher: { launch } })
+    await expect(backend.revealPath('workspace-1', 'a.ts')).rejects.toMatchObject({
+      status: 400,
+      code: 'REVEAL_UNSUPPORTED',
+    })
+    expect(launch).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed launch without echoing the path it tried to open', async () => {
+    // The launcher's own words reach the reader, so a message that quoted the command line
+    // would print the workspace's absolute path in the browser.
+    const { backend } = harness({}, '/workspace', {
+      platform: 'linux',
+      launcher: { launch: () => Promise.reject(new Error('spawn xdg-open ENOENT /workspace/private/a.ts')) },
+    })
+    await expect(backend.revealPath('workspace-1', 'a.ts')).rejects.toMatchObject({
+      status: 502,
+      code: 'REVEAL_FAILED',
+    })
+  })
+
+  it('refuses to reveal a symbolic link or the protected Git metadata', async () => {
+    const launch = vi.fn(() => Promise.resolve())
+    const symlink = harness({ lstat: vi.fn(() => Promise.resolve({ type: 'symlink', version: 'v1' })) },
+      '/workspace', { platform: 'linux', launcher: { launch } })
+    await expect(symlink.backend.revealPath('workspace-1', 'linked.txt')).rejects.toMatchObject({
+      code: 'SYMLINK_UNSUPPORTED',
+    })
+    const metadata = harness({}, '/workspace', { platform: 'linux', launcher: { launch } })
+    await expect(metadata.backend.revealPath('workspace-1', '.git/config')).rejects.toMatchObject({
+      code: 'WORKSPACE_METADATA_PROTECTED',
+    })
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it('rejects an id that is not present in the official Workspace registry', async () => {

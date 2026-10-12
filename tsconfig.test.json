@@ -38,6 +38,10 @@
     "tests/kernel-panel.spec.tsx",
     "tests/notebook-kernel-status.spec.tsx",
     "tests/plugin-config.spec.ts",
-    "tests/api.spec.ts"
+    "tests/reveal-path.spec.ts",
+    "tests/workspace-backend.spec.ts",
+    "tests/api.spec.ts",
+    "tests/rightbar-seat.spec.ts",
+    "tests/native-rightbar-entry.spec.ts"
   ]
 }

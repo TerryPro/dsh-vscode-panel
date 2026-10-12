@@ -13,11 +13,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { WorkbenchApi } from './model/api.ts'
 import { WorkbenchController } from './model/controller.ts'
 import { installWorkbenchLayout } from './layout/layout-styles.ts'
+import { installNativeRightbarEntry } from './layout/native-rightbar-entry.ts'
 import { en, zh } from './core/locales.ts'
 import { ModeSwitch } from './shell/ModeSwitch.tsx'
 import { installGitDecorationRefresh } from './git/git-decoration-refresh.ts'
 import { installOpenFileRefresh } from './editor/open-file-refresh.ts'
 import { createWorkbenchWorkspaceActivator } from './model/workspace-layout.ts'
+import { holdRightbarSeatWhileEditorVisible } from './model/rightbar-seat.ts'
 import { WorkbenchEditor } from './editor/WorkbenchEditor.tsx'
 import { WorkbenchSidebar } from './shell/WorkbenchSidebar.tsx'
 import type { ConfigText } from '../shared/config-protocol.ts'
@@ -36,6 +38,10 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register('workbench', { zh, en }), 'workbench-layout: dictionaries')
   ctx.effect(() => installOpenFileRefresh(controller), 'workbench-layout: open file refresh')
   ctx.effect(() => installGitDecorationRefresh(controller), 'workbench-layout: Git file decoration refresh')
+  // DSH's own way into its right Sidebar is a header button that is always on
+  // screen while this plugin holds the right-column seat, so it is the shortest
+  // path from "I want the native Sidebar back" to releasing that seat.
+  ctx.effect(() => installNativeRightbarEntry(controller, ctx.logger), 'workbench-layout: native right Sidebar entry')
   // A shell teardown closes the browser's notebook event streams. The kernels are left
   // running on purpose: the Host owns their reclaim timer, and a hot reload of this
   // panel must not throw away a run that is still going.
@@ -71,12 +77,27 @@ export function apply(ctx: ClientContext): void {
     }
   })
 
-  ctx.slots.inject('rightbar.session', () => ctx.slots.register({
-    name: 'rightbar.session',
-    priority: -100,
-    locale: 'workbench',
-    inject: () => ({ controller, activateWorkspace }),
-  }, WorkbenchEditor))
+  /*
+   * The middle editor takes the official right column, because that is the only
+   * session-scoped seat the frame places in its own column — and `rightbar.session`
+   * is a *single* slot, so registering here necessarily shadows DSH's own
+   * `RightbarSeat`, i.e. the entire native right Sidebar with its dock panel, guide
+   * tabs, divider and track report.
+   *
+   * The seat is therefore held only while the middle column is on screen to fill it:
+   * collapsing the editor releases the registration and the native right Sidebar
+   * returns, fully usable beside the workbench sidebar. Expanding reclaims it. Same
+   * shadow pattern as `sidebar.workspaces` above, driven by the editor's visibility
+   * instead of the sidebar mode.
+   */
+  ctx.slots.inject('rightbar.session', () => holdRightbarSeatWhileEditorVisible(controller, {
+    register: () => ctx.slots.register({
+      name: 'rightbar.session',
+      priority: -100,
+      locale: 'workbench',
+      inject: () => ({ controller, activateWorkspace }),
+    }, WorkbenchEditor),
+  }, ctx.logger))
 
   /*
    * The plugin's page on DSH's Settings dialog.
