@@ -126,12 +126,27 @@ export interface SqlResultBlock {
   /** True when the row cap stopped reading. */
   truncated: boolean
   /**
+   * Columns beyond the width cap that this block does not carry.
+   *
+   * Counted rather than silently dropped, and kept apart from `truncated`: a 200-column table
+   * shown as 64 columns has to say how many it left out, and that is a different sentence from
+   * "there are more rows".
+   */
+  columnsDropped: number
+  /**
    * Values clipped by the per-value or per-blob caps in this block.
    *
    * Counted, not marked in place: appending an ellipsis would change what the user copies
    * or exports, which is data corruption in a viewer whose whole job is showing values.
    */
   valuesTruncated: number
+  /**
+   * Rows inserted, updated or deleted, for a statement that returns no result set.
+   *
+   * Only present on those blocks. Without it a cell of `UPDATE … WHERE` and a cell of
+   * `CREATE TABLE` are both empty grids, and nothing tells the user "nothing matched".
+   */
+  changes?: number
   /** True when the cell deadline stopped reading, which the panel words differently. */
   stoppedByDeadline?: true
   /** Present when this statement failed. Blocks produced before it stay. */
