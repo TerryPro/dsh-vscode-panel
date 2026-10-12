@@ -288,6 +288,48 @@
 }
 
 /*
+ * The drop line for a drag reorder, on the gap being hovered. It sits *inside* the cell's
+ * top or bottom edge rather than out in the 10px gap between cells: `.cell` is
+ * `overflow: hidden`, so a pseudo-element placed across that gap would be clipped and the
+ * reader would see a line appear and vanish as the pointer moved. It borrows the editor's
+ * tab-drop vocabulary — the same business-primary hue — but not its shape: a pane accepts a
+ * tab *into an area*, so it draws a dashed frame around the whole region, while a reorder
+ * aims at a *position between two cells*, which a line states and a box around one cell
+ * would not.
+ */
+.cell[data-drop-before='true']::before,
+.cell[data-drop-after='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--dsw-alias-state-business-primary, #2f6fb0);
+  pointer-events: none;
+}
+
+.cell[data-drop-before='true']::before {
+  top: 0;
+}
+
+.cell[data-drop-after='true']::after {
+  bottom: 0;
+}
+
+/*
+ * The header strip is the drag handle, so it earns the grab cursor the workbench's own
+ * draggable tabs use — including the `grabbing` state under the pointer. A row that can be
+ * dragged but does not say so reads as a dead strip of chrome.
+ */
+.cellHeader[draggable='true'] {
+  cursor: grab;
+}
+
+.cellHeader[draggable='true']:active {
+  cursor: grabbing;
+}
+
+/*
  * The focused cell's header carries the same fill and text colour the file tree and
  * Git lists use for a selected row, so "this one is current" reads identically
  * everywhere in the workbench. A border alone was too quiet to notice while scanning

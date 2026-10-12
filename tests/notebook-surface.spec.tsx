@@ -123,6 +123,129 @@ const code = (id: string, source: string, extra: Record<string, unknown> = {}) =
   cell_type: 'code', id, source, outputs: [], execution_count: null, metadata: {}, ...extra,
 })
 
+/** A `DOMRect` good enough for the drag geometry this file needs (top and height only). */
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left, top, width, height,
+    right: left + width, bottom: top + height,
+    x: left, y: top, toJSON: () => ({}),
+  } as DOMRect
+}
+
+/**
+ * Give three cells stacked one per 100px so a `clientY` says which half of which cell it
+ * landed in: c1 occupies 0-100, c2 100-200, c3 200-300.
+ */
+function stubCellRects(container: HTMLElement): void {
+  const cells = [...container.querySelectorAll('[data-cell-id]')]
+  expect(cells).toHaveLength(3)
+  cells.forEach((cell, index) => {
+    cell.getBoundingClientRect = () => rect(0, index * 100, 400, 100)
+  })
+}
+
+/** The header strip of one cell, which is where a drag of that cell starts. */
+function cellHandle(container: HTMLElement, cellId: string): HTMLElement {
+  const handle = container.querySelector<HTMLElement>(`[data-cell-id="${cellId}"] [data-cell-handle]`)
+  if (handle === null) throw new Error(`no drag handle for ${cellId}`)
+  return handle
+}
+
+/** One cell's whole row, which is the drop target. */
+function cellRow(container: HTMLElement, cellId: string): HTMLElement {
+  const row = container.querySelector<HTMLElement>(`[data-cell-id="${cellId}"]`)
+  if (row === null) throw new Error(`no row for ${cellId}`)
+  return row
+}
+
+/**
+ * A `DataTransfer` stand-in that records what was stored rather than knowing the payload up
+ * front. One object belongs to one gesture: the cell id only exists after a `dragStart` has
+ * put it there, so a `drop` that never began on the drag handle has nothing to move. A stub
+ * pre-filled with the id would pass even if the handle did nothing, which is precisely the
+ * regression this gesture test must catch — a `draggable` row would turn selecting code into
+ * moving cells, and only an honest payload tells them apart.
+ *
+ * `types` is a live view of what was stored, because that is all a `dragover` may read: the
+ * browser locks payload *values* mid-drag so a page cannot sniff what is about to be dropped.
+ */
+function fakeTransfer(): {
+  types: string[]
+  getData: (requested: string) => string
+  setData: (requested: string, value: string) => void
+  dropEffect: string
+  effectAllowed: string
+} {
+  const carried = new Map<string, string>()
+  return {
+    get types(): string[] { return [...carried.keys()] },
+    getData: (requested: string) => carried.get(requested) ?? '',
+    setData: (requested: string, value: string) => { carried.set(requested, value) },
+    dropEffect: '',
+    effectAllowed: '',
+  }
+}
+
+/**
+ * Fire a drag event that actually carries `clientY`.
+ *
+ * `fireEvent.dragOver(el, { clientY })` silently drops the coordinate in this environment:
+ * jsdom exposes no constructible `DragEvent`, so testing-library builds a plain event and its
+ * copy of leftover init keys dies on the setter-less `clientY` getter of the prototype. The
+ * handler then sees `undefined`, every geometry comparison goes false, and the drag lands at
+ * the end no matter where the pointer was — a test that would pass the *wrong* order. Defining
+ * the properties on the event object is what makes the pointer position real.
+ *
+ * The `dataTransfer` is passed in, not created here, because one belongs to one gesture: the
+ * id it carries has to have been stored by the `dragStart` on the handle for a later `drop`
+ * to know it.
+ */
+function fireDrag(
+  el: Element,
+  type: 'dragStart' | 'dragOver' | 'drop' | 'dragEnd',
+  transfer: ReturnType<typeof fakeTransfer>,
+  clientY?: number,
+): Event {
+  // The name handed to `dispatchEvent` is the *native* one, all lowercase: React listens for
+  // `dragover`, not the `onDragOver` prop name a caller of this helper writes. Dispatching a
+  // camel-cased type silently fires nothing, and every assertion downstream reads as "the
+  // feature does not work".
+  const native = type.toLowerCase()
+  const event = new Event(native, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'dataTransfer', { value: transfer })
+  if (clientY !== undefined) Object.defineProperty(event, 'clientY', { value: clientY })
+  act(() => {
+    el.dispatchEvent(event)
+  })
+  // Returned so a test can ask whether the surface *consumed* the event. Taking a drag the
+  // notebook was not part of is a bug no output-side assertion can see.
+  return event
+}
+
+/**
+ * One complete drag: start on the handle of `movedId`, aim at `clientY` inside `movedId`'s
+ * sibling `overId`, release. Returns the notebook text the surface wrote, or `null` when it
+ * refused to write.
+ */
+function dragTo(
+  view: { container: HTMLElement; onEdit: { mock: { calls: unknown[][] } } },
+  movedId: string,
+  overId: string,
+  clientY: number,
+): string | null {
+  const transfer = fakeTransfer()
+  fireDrag(cellHandle(view.container, movedId), 'dragStart', transfer)
+  const row = cellRow(view.container, overId)
+  fireDrag(row, 'dragOver', transfer, clientY)
+  fireDrag(row, 'drop', transfer)
+  const calls = view.onEdit.mock.calls
+  return calls.length === 0 ? null : String(calls.at(-1)![0])
+}
+
+function cellIds(text: string): string[] {
+  return (JSON.parse(text) as { cells: { id: string }[] }).cells.map(cell => cell.id)
+}
+
 function apiStub() {
   return {
     kernelDiscover: vi.fn().mockResolvedValue({ usable: true, kernels: [], environments: [] }),
@@ -1264,6 +1387,216 @@ describe('notebook attachments', () => {
       cell_type: 'markdown', id: 'm1', source: '![x](a.png)', metadata: {},
     }]))
     expect(view.getByTestId('markdown').getAttribute('data-attachment-src')).toBeNull()
+  })
+})
+
+describe('notebook cell drag reorder', () => {
+  const three = () => nb([code('c1', 'a'), code('c2', 'b'), code('c3', 'c')])
+
+  it('drags from the header, not the whole row, so selecting text in a cell still works', () => {
+    // The single most important thing a drag reorder can get wrong: `draggable` on the row
+    // turns the reader's text selection inside the editor — or inside a rendered cell — into
+    // a drag of the cell, so selecting code stops working. The handle is the header strip; the
+    // row is only ever a target. Asserting the attribute location is what pins that down,
+    // because the reorder itself behaves identically whichever element carries `draggable`.
+    const view = setup(three())
+    const row = cellRow(view.container, 'c1')
+    expect(row.getAttribute('draggable')).not.toBe('true')
+    expect(cellHandle(view.container, 'c1').getAttribute('draggable')).toBe('true')
+  })
+
+  it('moves the dragged cell to the gap the pointer is over, keeping its id', () => {
+    // The whole point of a drag: any cell to any position, one gesture. Asserting the id
+    // order (and that the cell's own source came with it) is what says the file really
+    // reordered rather than the screen just looking reordered.
+    const view = setup(three())
+    stubCellRects(view.container)
+    // The bottom half of the last cell means "after it", which is the end of the notebook.
+    const text = dragTo(view, 'c1', 'c3', 260)
+    expect(text !== null && cellIds(text)).toEqual(['c2', 'c3', 'c1'])
+    const written = JSON.parse(text as string) as { cells: { id: string; source: string }[] }
+    expect(written.cells[2]?.source).toBe('a')
+  })
+
+  it('has no off-by-one dropping into the first gap', () => {
+    // The trap: aiming at the very top must put the cell *first*, not second. A removal
+    // that is not accounted for lands it one short, and the reader's notebook is wrong.
+    const view = setup(three())
+    stubCellRects(view.container)
+    // c3 upward, into the gap above the very first cell.
+    const text = dragTo(view, 'c3', 'c1', 20)
+    expect(text !== null && cellIds(text)).toEqual(['c3', 'c1', 'c2'])
+  })
+
+  it('has no off-by-one dropping past the last cell', () => {
+    // The mirror trap, as its own mount: a second `render()` in one test would make the
+    // first one's cells findable by the same test id.
+    const view = setup(three())
+    stubCellRects(view.container)
+    // c1 downward, into the bottom half of the final cell.
+    const text = dragTo(view, 'c1', 'c3', 299)
+    expect(text !== null && cellIds(text)).toEqual(['c2', 'c3', 'c1'])
+  })
+
+  it('lands a downward drop in the middle of the notebook, not one short', () => {
+    // Aiming *between* two cells is the case the ends hide: drop c1 into the top half of c3
+    // and it belongs between c2 and c3. Ends clamp to the same answer whether or not the
+    // lift-out shift is applied, so this middle case is what pins the adjustment down.
+    const view = setup(three())
+    stubCellRects(view.container)
+    const text = dragTo(view, 'c1', 'c3', 210)
+    expect(text !== null && cellIds(text)).toEqual(['c2', 'c1', 'c3'])
+  })
+
+  it('lands an upward drop in the middle of the notebook without over-shifting', () => {
+    // The other half of the adjustment the ends cannot see: moving *up* is the branch where
+    // the reported gap already sits at or above the lifted cell, so the shift must NOT apply.
+    // c3 into the gap between c1 and c2 belongs as the second cell; an implementation that
+    // subtracted unconditionally would put it first, and this is the only case that tells them
+    // apart — the two middle-down tests pass under that bug, this one does not.
+    const view = setup(three())
+    stubCellRects(view.container)
+    const text = dragTo(view, 'c3', 'c2', 120)
+    expect(text !== null && cellIds(text)).toEqual(['c1', 'c3', 'c2'])
+  })
+
+  it('treats a drop into the gap beside a cell as the no-op it is', () => {
+    // The top half of the cell below is the same position the dragged cell already holds, so
+    // it must refuse the write. Left unchecked, a pointer that slips one row down marks a
+    // saved notebook dirty for a gesture that moved nothing.
+    const view = setup(three())
+    stubCellRects(view.container)
+    expect(dragTo(view, 'c1', 'c2', 120)).toBeNull()
+  })
+
+  it('leaves the file alone when a cell is dropped back on itself', () => {
+    // A pointer that jitters on a cell fires a drop. Writing the same order back would mark
+    // a saved notebook dirty for a gesture that changed nothing, so the edit is refused.
+    const view = setup(three())
+    stubCellRects(view.container)
+    expect(dragTo(view, 'c2', 'c2', 120)).toBeNull()
+  })
+
+  it('shows one drop line at the gap being hovered, and clears it when the drag ends', () => {
+    // The reader has to see *where* the cell will land, not just that a drag is happening:
+    // the workbench's tab drag highlights its target the same way, and a reorder that drops
+    // blind is how a notebook gets quietly mangled.
+    const view = setup(three())
+    stubCellRects(view.container)
+    const transfer = fakeTransfer()
+    fireDrag(cellHandle(view.container, 'c1'), 'dragStart', transfer)
+    const third = cellRow(view.container, 'c3')
+    const lines = () => [...view.container.querySelectorAll('[data-drop-before], [data-drop-after]')]
+      .map(node => `${node.getAttribute('data-cell-id')}:${node.getAttribute('data-drop-before') === 'true' ? 'before' : 'after'}`)
+    expect(lines()).toHaveLength(0)
+    fireDrag(third, 'dragOver', transfer, 260)
+    expect(lines()).toEqual(['c3:after'])
+    // A pointer crossing to the other half moves the line, because the target changed.
+    fireDrag(third, 'dragOver', transfer, 210)
+    expect(lines()).toEqual(['c3:before'])
+    fireDrag(third, 'drop', transfer)
+    expect(lines()).toHaveLength(0)
+  })
+
+  it('keeps a cancelled drag from leaving a drop line on screen', () => {
+    // Pressing escape, or dragging out of the window, fires dragend on the handle without any
+    // drop. The highlight is the surface's, so the handle's dragend is what clears it.
+    const view = setup(three())
+    stubCellRects(view.container)
+    const transfer = fakeTransfer()
+    const handle = cellHandle(view.container, 'c1')
+    fireDrag(handle, 'dragStart', transfer)
+    fireDrag(cellRow(view.container, 'c3'), 'dragOver', transfer, 260)
+    expect(view.container.querySelector('[data-drop-after]')).not.toBeNull()
+    fireDrag(handle, 'dragEnd', transfer)
+    expect(view.container.querySelector('[data-drop-before]')).toBeNull()
+    expect(view.container.querySelector('[data-drop-after]')).toBeNull()
+  })
+
+  it('leaves a drag the notebook does not own unconsumed', () => {
+    // The notebook is a drop *target* for its own cells only. A file dragged in from the OS,
+    // or text the reader is moving inside an editor, arrives without our payload type; taking
+    // that event (`preventDefault`) would declare it consumed and silently break whatever the
+    // real target was about to do with it. Refusing to consume a foreign drop is the whole
+    // difference between "reorders on its own drags" and "swallows every drag over it".
+    const view = setup(three())
+    stubCellRects(view.container)
+    // A payload carrying a foreign type, never ours.
+    const foreign = { types: ['Files'], getData: () => '', setData: () => {}, dropEffect: '', effectAllowed: '' }
+    const row = cellRow(view.container, 'c2')
+    const over = fireDrag(row, 'dragOver', foreign as ReturnType<typeof fakeTransfer>, 120)
+    expect(over.defaultPrevented).toBe(false)
+    expect(view.container.querySelector('[data-drop-before], [data-drop-after]')).toBeNull()
+    const dropped = fireDrag(row, 'drop', foreign as ReturnType<typeof fakeTransfer>)
+    expect(dropped.defaultPrevented).toBe(false)
+    expect(view.onEdit).not.toHaveBeenCalled()
+  })
+
+  it('keeps a cell\'s output on that cell after it is dragged', () => {
+    // Run state and stored output are both keyed by cell id, so a reorder that kept the ids
+    // carries the plot along. The trap this guards: a drag that rebuilt the list without
+    // preserving ids would leave c1's output sitting under some other cell — the screen would
+    // look reordered but the file would have moved the *result* to the wrong place.
+    const view = setup(nb([
+      code('c1', 'plot()', { execution_count: 2, outputs: [{ output_type: 'stream', name: 'stdout', text: 'FIGURE-ONE\n' }] }),
+      code('c2', 'b'),
+      code('c3', 'c'),
+    ]))
+    stubCellRects(view.container)
+    const text = dragTo(view, 'c1', 'c3', 260)
+    const written = JSON.parse(text as string) as {
+      cells: { id: string; outputs: { text?: unknown }[] }[]
+    }
+    // c1 now sits last, and the output is still *inside* c1's own record: the file and the
+    // screen agree because both key the output to the id, which a reorder never rewrites.
+    expect(written.cells.map(cell => cell.id)).toEqual(['c2', 'c3', 'c1'])
+    expect(written.cells[2]?.outputs[0]?.['text']).toContain('FIGURE-ONE')
+  })
+
+  it('keeps a live run attached to the cell it belongs to after a drag', () => {
+    // The ticket's "运行中/排队的格" in its real state, not just output saved in the file:
+    // run state lives in the session keyed by cell id, and a reorder never rewrites ids, so a
+    // cell mid-run keeps its `[*]` prompt and its running badge through the drag. The bug this
+    // pins: a gesture that rebuilt a cell instead of moving it would orphan the live run — the
+    // output would land on a cell the reader no longer sees as running.
+    const view = setup(three())
+    stubCellRects(view.container)
+    frame(view.runtime, 1, { type: 'cell_started', msgId: 'm1', cellId: 'c1', code: 'a', executionCount: 4 })
+    expect(view.getByText(labels.running)).toBeTruthy()
+    const text = dragTo(view, 'c1', 'c3', 260)
+    // The file moved c1 by its id, and the session still shows the run on that same cell.
+    expect(text !== null && cellIds(text)).toEqual(['c2', 'c3', 'c1'])
+    const row = cellRow(view.container, 'c1')
+    expect(row.textContent).toContain(labels.running)
+    expect(row.textContent).toContain('[*]')
+  })
+
+  it('refuses to start a drag or accept a drop while an external change is unresolved', () => {
+    // Reordering is an edit, and every other edit is refused while the file disagrees with
+    // what is on screen: dragging then would write a stale order over someone else's change.
+    const view = setup(three(), { editable: false })
+    stubCellRects(view.container)
+    // The handle strip is always there, but it does not invite a grab: `draggable` is the
+    // attribute that says whether this strip will move the cell right now, and a file that
+    // cannot accept edits says no in the attribute rather than only inside the handler.
+    expect(cellHandle(view.container, 'c1').getAttribute('draggable')).not.toBe('true')
+    const first = cellRow(view.container, 'c1')
+    const transfer = fakeTransfer()
+    // Even a hand-forced drag over the row is refused: no highlight, no write.
+    fireDrag(first, 'dragOver', transfer, 20)
+    expect(first.getAttribute('data-drop-before')).toBeNull()
+    fireDrag(first, 'drop', transfer)
+    expect(view.onEdit).not.toHaveBeenCalled()
+  })
+
+  it('still offers the keyboard up and down moves', () => {
+    // Dragging is a supplement. The arrows stay because they are reachable without a pointer,
+    // and they are how a reordering gets undone one step at a time.
+    const view = setup(three())
+    const down = view.getAllByLabelText(labels.moveDown) as HTMLButtonElement[]
+    expect(down).toHaveLength(3)
+    expect(down[0]?.disabled).toBe(false)
+    expect(down[2]?.disabled).toBe(true)
   })
 })
 

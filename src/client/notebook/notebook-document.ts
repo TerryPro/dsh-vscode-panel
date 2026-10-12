@@ -474,6 +474,11 @@ export type NotebookMutation =
   | { op: 'insert'; cellId: string | null; before: boolean; kind: NotebookCellKind }
   | { op: 'delete'; cellId: string }
   | { op: 'move'; cellId: string; direction: -1 | 1 }
+  /**
+   * Move one cell to an absolute position, for a drag that spans several cells. `index` is
+   * where the cell ends up in the document, after the move.
+   */
+  | { op: 'move-to'; cellId: string; index: number }
   | { op: 'split'; cellId: string; offset: number }
   | { op: 'merge-down'; cellId: string }
   | { op: 'set-outputs'; cellId: string; outputs: NotebookOutputItem[] }
@@ -520,6 +525,22 @@ export function applyNotebookMutation(text: string, mutation: NotebookMutation):
         const cells = requireCells(value)
         const index = cellIndexOf(cells, mutation.cellId)
         if (index >= 0) cells.splice(index, 1)
+        return
+      }
+      case 'move-to': {
+        const cells = requireCells(value)
+        const from = cellIndexOf(cells, mutation.cellId)
+        if (from < 0) return
+        const cell = cells[from]
+        if (cell === undefined) return
+        // Take the cell out first, then clamp against what is left. Doing it in that order
+        // is what makes `index` mean "where it ends up" rather than "a gap in a list that
+        // still contains the cell being moved" — the caller drops a cell at position 3 and it
+        // is at position 3 in the file, whether it started above or below that spot. A pointer
+        // can also report a gap past the last cell, so an out-of-range target lands on the
+        // nearest end rather than corrupting the list or throwing at a mouse-up handler.
+        cells.splice(from, 1)
+        cells.splice(Math.max(0, Math.min(mutation.index, cells.length)), 0, cell)
         return
       }
       case 'move': {

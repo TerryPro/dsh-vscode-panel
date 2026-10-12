@@ -256,6 +256,50 @@ describe('notebook mutations preserve the document', () => {
     expect(applyNotebookMutation(SAMPLE, { op: 'delete', cellId: 'ghost' })).toBe(SAMPLE)
   })
 
+  // Four code cells `a`-`d`, written the way `jupyter nbformat` writes so re-serialising an
+  // unchanged tree gives back the same bytes — that identity is what makes a "no-op returned
+  // the input" assertion mean anything rather than merely re-serialising a changed one.
+  const fourCells = () => JSON.stringify({
+    nbformat: 4,
+    nbformat_minor: 5,
+    metadata: {},
+    cells: ['a', 'b', 'c', 'd'].map(id => ({ cell_type: 'code', id, source: id, outputs: [], execution_count: null, metadata: {} })),
+  }, null, 1) + '\n'
+
+  it('moves one cell to an absolute position, keeping its id', () => {
+    // Dragging has to land a cell at *any* position, not one step at a time. `index` is
+    // where the cell sits in the result, so the caller never reasons about the shift its own
+    // removal causes — the number they aim for is the number they get.
+    const four = fourCells()
+    // a -> final index 2 pushes b and c up.
+    const down = JSON.parse(applyNotebookMutation(four, { op: 'move-to', cellId: 'a', index: 2 })) as { cells: { id: string }[] }
+    expect(down.cells.map(cell => cell.id)).toEqual(['b', 'c', 'a', 'd'])
+    // d -> the front.
+    const up = JSON.parse(applyNotebookMutation(four, { op: 'move-to', cellId: 'd', index: 0 })) as { cells: { id: string }[] }
+    expect(up.cells.map(cell => cell.id)).toEqual(['d', 'a', 'b', 'c'])
+    // The moved cell keeps its id, so a run in flight or stored output stays with it.
+    expect(down.cells.map(cell => cell.id).sort()).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('clamps a move-to to the ends and no-ops on the spot', () => {
+    // The two off-by-one traps the ticket names are the first and last drop: aiming at a
+    // gap past the end must land the cell *last*, not vanish or throw.
+    const four = fourCells()
+    const toEnd = JSON.parse(applyNotebookMutation(four, { op: 'move-to', cellId: 'a', index: 3 })) as { cells: { id: string }[] }
+    expect(toEnd.cells.map(cell => cell.id)).toEqual(['b', 'c', 'd', 'a'])
+    // Out-of-range targets clamp rather than corrupt or throw: the drop position a pointer
+    // reports can be one past the last gap.
+    const past = JSON.parse(applyNotebookMutation(four, { op: 'move-to', cellId: 'a', index: 99 })) as { cells: { id: string }[] }
+    expect(past.cells.map(cell => cell.id)).toEqual(['b', 'c', 'd', 'a'])
+    // -1 specifically, not just "some negative": `splice(-1)` treats a negative as an
+    // offset from the end, so a missing lower clamp slips a cell in second-to-last and this
+    // exact value is what makes the clamp observable. -5 would clamp to 0 either way.
+    const before = JSON.parse(applyNotebookMutation(four, { op: 'move-to', cellId: 'd', index: -1 })) as { cells: { id: string }[] }
+    expect(before.cells.map(cell => cell.id)).toEqual(['d', 'a', 'b', 'c'])
+    // Already there is a no-op: the file must not churn, so the text comes back unchanged.
+    expect(applyNotebookMutation(four, { op: 'move-to', cellId: 'a', index: 0 })).toBe(four)
+  })
+
   it('changes a cell kind and adjusts only the fields that kind owns', () => {
     const toMarkdown = JSON.parse(applyNotebookMutation(SAMPLE, { op: 'set-kind', cellId: 'alpha', kind: 'markdown' })) as {
       cells: Record<string, unknown>[]

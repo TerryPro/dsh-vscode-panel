@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { MarkdownText, type MarkdownLabels, Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useSyncExternalStore } from 'react'
 import type { NotebookOutputItem } from '../../shared/notebook-protocol.ts'
@@ -211,6 +211,12 @@ export function NotebookSurface({
   // Where each cell's caret last was, so a split happens where the reader is looking
   // rather than at a line boundary the cell itself has no opinion about.
   const [cursorOffsets, setCursorOffsets] = useState<Record<string, number>>({})
+  // The gap a drag is currently aiming at. It lives on the notebook, not the cell, because
+  // committing the drop needs the *index* of both the moved cell and the gap, and only the
+  // owner that walks `document.cells` in order has them. The cell being moved is not stored:
+  // `dragstart` puts its id in the drag payload and the drop reads it back, exactly as the
+  // editor's tab drag works.
+  const [dropTarget, setDropTarget] = useState<{ cellId: string; after: boolean } | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // A cell highlights for the language its *kernel* runs, not for the file's
   // extension: the same `.ipynb` can be driven by Python or by R, and only the
@@ -302,6 +308,97 @@ export function NotebookSurface({
       runtime.dispatch(tabId, { type: 'focus', cellId: null })
     }
   }, [draft, editable, onEdit, runtime, state.focusedCellId, state.kernel.language, tabId])
+
+  /**
+   * The gap in the cell list that a pointer at `clientY` is aiming at.
+   *
+   * The first row whose midpoint sits below the pointer takes the cell as its *upper* gap;
+   * anything past every midpoint lands after the last row. Measuring against each row's own
+   * box rather than counting rows by index is what keeps the target honest when rows differ
+   * in height — a folded cell is not the size of one holding a plot.
+   */
+  const gapAt = (clientY: number): { cellId: string; after: boolean } | null => {
+    const rows = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-cell-id]') ?? [])]
+    for (const row of rows) {
+      const id = row.dataset.cellId
+      if (id === undefined) continue
+      const box = row.getBoundingClientRect()
+      if (clientY < box.top + box.height / 2) return { cellId: id, after: false }
+    }
+    const lastId = rows.at(-1)?.dataset.cellId
+    // A pointer that overshoots the final row still means "last". A drag that silently
+    // refuses to reach the end of a long notebook is one a reader stops trusting.
+    return lastId === undefined ? null : { cellId: lastId, after: true }
+  }
+
+  const onCellDragStart = (cellId: string, event: ReactDragEvent<HTMLDivElement>): void => {
+    // `draggable={editable}` already says no in the attribute — which is the part a reader
+    // sees, since a strip that looks grabbable and does nothing reads as a broken drag rather
+    // than a refusal — so this guard covers only the case the attribute cannot: a file turning
+    // unmodifiable *while a drag is in flight*, when an external change lands on a poll.
+    if (!editable) {
+      event.preventDefault()
+      return
+    }
+    event.dataTransfer.effectAllowed = 'move'
+    // A type of our own, not `text/plain`: a cell dragged from the file tree, a URL, and a
+    // text selection all arrive with `text/plain`, and accepting those would reorder on a
+    // stray gesture or eat a drop the editor was about to make. The id travels in the payload
+    // rather than in state, as the tab drag does.
+    event.dataTransfer.setData(NOTEBOOK_CELL_DRAG_TYPE, cellId)
+  }
+
+  const onCellDragOver = (event: ReactDragEvent<HTMLDivElement>): void => {
+    if (!editable || !carriesOurCell(event.dataTransfer)) return
+    // The pointer position is read off the native event because that is the one authoritative
+    // coordinate: a `clientY` of `undefined` makes every geometry comparison in `gapAt` false,
+    // which would aim every drop at the end of the notebook with no visible error — a failure
+    // the type system cannot see, since the synthetic event claims `clientY` is a number.
+    const gap = gapAt(event.nativeEvent.clientY)
+    if (gap === null) return
+    // Without this the browser decides the notebook does not accept the drop and never fires
+    // `drop` at all, so the gesture would look broken rather than refused. Reached only for a
+    // payload this notebook owns, which is what keeps a foreign drag free to reach its own target.
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    // Identity-preserving while the pointer stays in one gap: `dragover` fires continuously,
+    // and a new object each time would re-render the notebook on every pixel of the drag.
+    setDropTarget(current => (
+      current !== null && current.cellId === gap.cellId && current.after === gap.after ? current : gap
+    ))
+  }
+
+  const onCellDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
+    // Guard before `preventDefault`, not after: taking the event is what declares the drop
+    // consumed, so consuming one we are about to refuse would silently kill the target's own
+    // handling — dropping a file onto the notebook would look like a broken file drop.
+    if (!editable || !carriesOurCell(event.dataTransfer)) return
+    event.preventDefault()
+    const movedId = event.dataTransfer.getData(NOTEBOOK_CELL_DRAG_TYPE)
+    const gap = dropTarget
+    setDropTarget(null)
+    if (movedId === '' || gap === null) return
+    const from = document.cells.findIndex(cell => cell.id === movedId)
+    const target = document.cells.findIndex(cell => cell.id === gap.cellId)
+    if (from < 0 || target < 0) return
+    // `move-to` counts the position the cell *ends up* at, so the gap has to be read after the
+    // row was lifted out: aiming below the moved cell's own old spot means one fewer cell in
+    // front of it by the time it lands. Aiming at either gap beside the cell itself collapses
+    // to `from`, which is a drag that jittered on the spot: writing the same order back would
+    // mark a saved notebook dirty for a gesture that changed nothing.
+    const gapIndex = gap.after ? target + 1 : target
+    const finalIndex = gapIndex > from ? gapIndex - 1 : gapIndex
+    if (finalIndex === from) return
+    mutate({ op: 'move-to', cellId: movedId, index: finalIndex })
+  }
+
+  const onCellDragEnd = (): void => {
+    // A drag that is cancelled — escape, or the pointer released outside the window — fires
+    // `dragend` on the source and nothing else: no `drop`, and `dragleave` is not reliable
+    // either. Without this the drop line would stay painted after the reader let go, pointing
+    // at a move that never happened.
+    setDropTarget(null)
+  }
 
   const runCellById = useCallback(async (cellId: string): Promise<void> => {
     const cell = document.cells.find(candidate => candidate.id === cellId)
@@ -529,6 +626,12 @@ export function NotebookSurface({
                 onClearOutputs={() => { clearCellOutputs(cell.id) }}
                 onMergeDown={() => { mergeDown(cell.id) }}
                 onRunAround={side => { runCellsAround(cell.id, side) }}
+                onDragStart={event => { onCellDragStart(cell.id, event) }}
+                onDragOver={onCellDragOver}
+                onDrop={onCellDrop}
+                onDragEnd={onCellDragEnd}
+                dropBefore={dropTarget !== null && dropTarget.cellId === cell.id && !dropTarget.after}
+                dropAfter={dropTarget !== null && dropTarget.cellId === cell.id && dropTarget.after}
                 runnable={{ above: runnableCounts.above[index] ?? 0, below: runnableCounts.below[index] ?? 0 }}
                 onFocus={() => {
                   runtime.dispatch(tabId, { type: 'focus', cellId: cell.id })
@@ -559,6 +662,24 @@ export function NotebookSurface({
   )
 }
 
+/**
+ * The `DataTransfer` type one of our cells travels under. A private MIME rather than
+ * `text/plain`, because `text/plain` is what a file dragged from the tree, a URL, and a text
+ * selection all arrive with.
+ */
+const NOTEBOOK_CELL_DRAG_TYPE = 'application/x-dsh-notebook-cell'
+
+/**
+ * Whether this drag carries one of our cells.
+ *
+ * `types` only, never `getData`: during a `dragover` the browser keeps payloads unreadable so
+ * a page cannot sniff what someone is about to drop. Reading the value here would always see
+ * an empty string, and the guard would silently refuse every legitimate reorder.
+ */
+function carriesOurCell(dataTransfer: DataTransfer): boolean {
+  return [...dataTransfer.types].includes(NOTEBOOK_CELL_DRAG_TYPE)
+}
+
 /** A cell: prompt gutter, editor or rendered body, then its outputs. */
 function NotebookCell({
   cell,
@@ -581,6 +702,12 @@ function NotebookCell({
   onClearOutputs,
   onMergeDown,
   onRunAround,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  dropBefore,
+  dropAfter,
   runnable,
   onFocus,
   onPatchView,
@@ -615,6 +742,17 @@ function NotebookCell({
   onMergeDown: () => void
   /** Run every runnable code cell on one side of this one. */
   onRunAround: (side: 'above' | 'below') => void
+  /** Begin a drag of this cell from its header strip. */
+  onDragStart: (event: ReactDragEvent<HTMLDivElement>) => void
+  /** Track the pointer and paint the gap it is aiming at. */
+  onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void
+  /** Commit the drag onto the gap currently highlighted. */
+  onDrop: (event: ReactDragEvent<HTMLDivElement>) => void
+  /** Clear the highlight, whether the drop landed or the drag was cancelled. */
+  onDragEnd: () => void
+  /** Which gap this cell's upper or lower edge is standing in for, or none. */
+  dropBefore: boolean
+  dropAfter: boolean
   /** Runnable cells strictly above / below this one, for the two run rows. */
   runnable: { above: number; below: number }
   onFocus: () => void
@@ -667,10 +805,43 @@ function NotebookCell({
       data-cell-id={cell.id}
       data-cell-kind={cell.kind}
       data-focused={focused || undefined}
+      /*
+        This row is a drop *target*, never a drag source. `draggable` belongs on the header
+        strip alone: set on the whole row, it turns the reader's text selection inside a cell's
+        editor — and inside a rendered Markdown cell — into a drag of the cell, so selecting
+        code would stop working. `onDragOver`/`onDrop` stay here because those fire only while a
+        drag is already in flight, so they cost the reader nothing ordinary.
+      */
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      /*
+        The drop line is painted by CSS on a pseudo-element, so committing a target costs an
+        attribute and not a layout: `.cell` must stay free of `transform`, `filter` and
+        `will-change` (see the note on `.cell` in notebook.module.css) because those would make
+        the cell the containing block for CodeMirror's popup and clip it at the cell edge.
+      */
+      data-drop-before={dropBefore || undefined}
+      data-drop-after={dropAfter || undefined}
       onFocus={onFocus}
       onClick={onFocus}
     >
-      <div className={css.cellHeader}>
+      <div
+        className={css.cellHeader}
+        /*
+          The header strip is the drag source, and the row below stays the target — which is
+          exactly how the workbench's own tabs work (`.editorTab[draggable]` holds buttons too).
+          A non-editable file is not draggable at all, so the grab cursor never promises a move
+          the file refuses.
+        */
+        draggable={editable}
+        // A stable hook for "this strip starts a drag of the cell around it": the class name is
+        // a CSS-module hash, so a style override or a test cannot name the handle without it.
+        // Present whether or not the file accepts edits — the strip is always the handle, and
+        // `draggable` is what says it will not move right now.
+        data-cell-handle=""
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      >
         {/*
           Only a code cell has an execution number, so only one shows a prompt. A
           `[ ]` beside a Markdown cell reads as "this has not run yet" for something
@@ -747,6 +918,13 @@ function NotebookCell({
               aria-label={labels.changeKind}
               value={cell.kind}
               disabled={!editable}
+              /*
+                The header is draggable, and a `<select>` inside a draggable ancestor is the one
+                control whose own gesture — pressing and moving — collides with starting a drag.
+                Declaring it not draggable is the documented fix, and it costs nothing: a cell is
+                dragged by its strip, never by its kind picker.
+              */
+              draggable={false}
               onChange={event => { onMutation({ op: 'set-kind', cellId: cell.id, kind: event.target.value as NotebookCellKind }) }}
             >
               <option value="code">{labels.codeCell}</option>
