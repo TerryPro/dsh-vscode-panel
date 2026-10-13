@@ -271,6 +271,8 @@ export function EditorTabBody({
     moveDown: t('sqlnotebook.moveDown'),
     collapseCell: t('sqlnotebook.collapseCell'),
     expandCell: t('sqlnotebook.expandCell'),
+    outline: t('sqlnotebook.outline'),
+    outlineEmpty: t('sqlnotebook.outlineEmpty'),
     changeKind: t('sqlnotebook.changeKind'),
     sqlCell: t('sqlnotebook.sqlCell'),
     markdownCell: t('sqlnotebook.markdownCell'),
@@ -432,6 +434,7 @@ export function EditorTabBody({
         path={tab.path}
         draft={tab.draft}
         editable={tab.externalChange === null && !tab.saving}
+        outlineVisible={tab.outlineVisible === true}
         dirty={tab.dirty}
         saving={tab.saving}
         runtime={controller.sqlRuntime}
@@ -610,6 +613,15 @@ export function EditorTabBody({
                 <button type="button" className={css.editorStatusBarAction} data-active={sqlNotebookMode === 'notebook' || undefined} aria-label={t('sqlnotebook.modeNotebook')} title={t('sqlnotebook.modeNotebook')} onClick={() => { controller.setSqlNotebookMode('notebook', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={sqlNotebookMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setSqlNotebookMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
+            )}
+            {/*
+              The outline is offered only in the cell view, on the same rule the notebook and the
+              Markdown preview follow: the source view is the raw JSON, whose "structure" is the
+              cell list the reader is already scrolling. It shares `tab.outlineVisible` with the
+              notebook toggle, and neither can draw an outline while the other is on screen.
+            */}
+            {isSqlNotebookTab && sqlNotebookMode === 'notebook' && (
+              <button type="button" className={css.editorStatusBarAction} data-active={tab.outlineVisible === true || undefined} aria-label={t('sqlnotebook.outline')} title={t('sqlnotebook.outline')} aria-pressed={tab.outlineVisible === true} onClick={() => { controller.toggleMarkdownOutline(tab.id) }}><IconOutline16 /></button>
             )}
             {/*
               The outline toggle is offered only in notebook view, mirroring Markdown's rule

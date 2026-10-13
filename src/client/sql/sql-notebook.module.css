@@ -75,6 +75,20 @@
   background: var(--dsw-alias-border-l1);
 }
 
+/*
+ * The row under the toolbar: the cells and the outline panel side by side.
+ *
+ * A row of its own rather than putting the panel inside `.cells`, because `.cells` is the scroll
+ * container that starts its scrollbar under the toolbar; a panel living in there would scroll away
+ * with the cells instead of staying beside them.
+ */
+.body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
 .cells {
   flex: 1 1 auto;
   min-height: 0;

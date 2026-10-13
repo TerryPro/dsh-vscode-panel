@@ -257,6 +257,24 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(controller.setSqlNotebookMode).toHaveBeenCalledWith('notebook', 'file:query.sqlnb')
   })
 
+  it('offers the SQL notebook outline in the cell view', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+
+    fireEvent.click(view.getByRole('button', { name: 'SQL 笔记大纲' }))
+    expect(controller.toggleMarkdownOutline).toHaveBeenCalledWith('file:query.sqlnb')
+  })
+
+  it('does not offer the SQL outline over the raw JSON', () => {
+    // The source view's "structure" is the cell list the reader is already scrolling, so a panel
+    // there would only report what the file itself reports.
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'source')
+    const view = renderEditor(controllerFake())
+
+    expect(view.queryByRole('button', { name: 'SQL 笔记大纲' })).toBeNull()
+  })
+
   it('uses a DSH modal before discarding an unsaved tab', () => {
     fileTab(0).dirty = true
     const controller = controllerFake()

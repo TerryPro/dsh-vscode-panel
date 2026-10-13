@@ -19,6 +19,7 @@ import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-pr
 import type { DirectoryListing } from '../../shared/contracts.ts'
 import { SQL_MEMORY_TARGET, type SqlAccess, type SqlCellKind } from '../../shared/sql-protocol.ts'
 import { CodeEditor } from '../editor/CodeEditor.tsx'
+import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import {
   IconAddCode16,
   IconAddMarkdown16,
@@ -37,6 +38,7 @@ import {
 import css from './sql-notebook.module.css'
 import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.tsx'
 import { scanDatabases, type SqlDatabaseScan } from './sql-database-scan.ts'
+import { buildSqlNotebookOutline } from './sql-notebook-outline.ts'
 import {
   applySqlNotebookEdit,
   cellIndexFromId,
@@ -66,6 +68,9 @@ export interface SqlNotebookLabels {
   /** Fold the row to its header strip, and back. View state, never in the file. */
   collapseCell: string
   expandCell: string
+  /** The outline panel's heading, and what it says when there is nothing to list. */
+  outline: string
+  outlineEmpty: string
   changeKind: string
   sqlCell: string
   markdownCell: string
@@ -136,6 +141,8 @@ interface SqlNotebookSurfaceProps {
   draft: string
   /** Editing is refused while an external change is unresolved, as in the text editor. */
   editable: boolean
+  /** Whether the text cells' headings are listed beside the cells. */
+  outlineVisible: boolean
   dirty: boolean
   saving: boolean
   runtime: SqlRuntime
@@ -153,6 +160,7 @@ export function SqlNotebookSurface({
   path,
   draft,
   editable,
+  outlineVisible,
   dirty,
   saving,
   runtime,
@@ -164,6 +172,12 @@ export function SqlNotebookSurface({
   markdownLabels,
 }: SqlNotebookSurfaceProps) {
   const document = useMemo(() => parseSqlNotebook(draft), [draft])
+  // Only text cells contribute rows, and only the surface that draws the panel pays for building
+  // them: a long notebook's headings are not recomputed on every keystroke in a SQL cell.
+  const outline = useMemo(
+    () => (outlineVisible ? buildSqlNotebookOutline(document) : []),
+    [document, outlineVisible],
+  )
   // Why the last click did nothing, when the refusal came from the file rather than the Host.
   const [refusal, setRefusal] = useState<string | null>(null)
   const [scan, setScan] = useState<SqlDatabaseScan | null>(null)
@@ -428,6 +442,24 @@ export function SqlNotebookSurface({
   const canStructure = editable && documentWritable
   const canConnect = runState !== null && !runState.connecting
 
+  /**
+   * Scroll to the cell an outline row names.
+   *
+   * Matched by walking the stamped rows rather than through a `[data-cell-id="…"]` selector, and
+   * by id rather than by the row's ordinal: the list is rebuilt whenever the document changes, and
+   * a positional selector is one the reader's own edits could outrun.
+   */
+  const scrollToCell = useCallback((index: number): void => {
+    const cellId = outline[index]?.cellId
+    if (cellId === undefined) return
+    for (const row of rootRef.current?.querySelectorAll<HTMLElement>('[data-cell-id]') ?? []) {
+      if (row.dataset.cellId === cellId) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+    }
+  }, [outline])
+
   return (
     <div className={css.root} onKeyDown={onKeyDown} ref={rootRef}>
       <div className={css.toolbar}>
@@ -565,55 +597,69 @@ export function SqlNotebookSurface({
       {scan?.truncated === true && (
         <div className={css.notice} role="status">{labels.scanTruncated}</div>
       )}
-      <div className={css.cells}>
-        {refusal !== null && <div className={css.noticeError} role="alert">{refusal}</div>}
-        {document.readOnly && document.warning !== null && (
-          <div className={css.notice} role="status">{warningMessage(document, labels)}</div>
-        )}
-        {!document.readOnly && document.degradedIndexes.length > 0 && (
-          <div className={css.notice} role="status">{labels.degradedNotice}</div>
-        )}
-        {document.cells.map((cell, index) => (
-          <SqlNotebookCell
-            key={`${cell.id}:${cell.kind}`}
-            path={path}
-            cell={cell}
-            index={index}
-            first={index === 0}
-            last={index === document.cells.length - 1}
-            documentWritable={documentWritable}
-            canStructure={canStructure}
-            run={runState?.cells[cell.id] ?? null}
-            rendered={rendered[cell.id] === true}
-            canRun={connection !== null}
-            onEdit={editDocument}
-            onMove={(from, to) => { editDocument({ type: 'move', from, to }) }}
-            folded={folded[cell.id] === true}
-            onFoldChange={(next) => { setFolded(previous => ({ ...previous, [cell.id]: next })) }}
-            onDragStart={event => { onCellDragStart(cell.id, event) }}
-            onDragOver={onCellDragOver}
-            onDrop={onCellDrop}
-            onDragEnd={onCellDragEnd}
-            dropBefore={dropTarget !== null && dropTarget.cellId === cell.id && !dropTarget.after}
-            dropAfter={dropTarget !== null && dropTarget.cellId === cell.id && dropTarget.after}
-            onRun={() => { run(cell.id) }}
-            onCancel={() => { runtime.cancel(tabId) }}
-            onClear={() => { runtime.clearOutputs(tabId, cell.id) }}
-            onRenderedChange={(rendered) => { setRendered(previous => ({ ...previous, [cell.id]: rendered })) }}
-            labels={labels}
-            resultLabels={resultLabels}
-            markdownLabels={markdownLabels}
+      <div className={css.body}>
+        <div className={css.cells}>
+          {refusal !== null && <div className={css.noticeError} role="alert">{refusal}</div>}
+          {document.readOnly && document.warning !== null && (
+            <div className={css.notice} role="status">{warningMessage(document, labels)}</div>
+          )}
+          {!document.readOnly && document.degradedIndexes.length > 0 && (
+            <div className={css.notice} role="status">{labels.degradedNotice}</div>
+          )}
+          {document.cells.map((cell, index) => (
+            <SqlNotebookCell
+              key={`${cell.id}:${cell.kind}`}
+              path={path}
+              cell={cell}
+              index={index}
+              first={index === 0}
+              last={index === document.cells.length - 1}
+              documentWritable={documentWritable}
+              canStructure={canStructure}
+              run={runState?.cells[cell.id] ?? null}
+              rendered={rendered[cell.id] === true}
+              canRun={connection !== null}
+              onEdit={editDocument}
+              onMove={(from, to) => { editDocument({ type: 'move', from, to }) }}
+              folded={folded[cell.id] === true}
+              onFoldChange={(next) => { setFolded(previous => ({ ...previous, [cell.id]: next })) }}
+              onDragStart={event => { onCellDragStart(cell.id, event) }}
+              onDragOver={onCellDragOver}
+              onDrop={onCellDrop}
+              onDragEnd={onCellDragEnd}
+              dropBefore={dropTarget !== null && dropTarget.cellId === cell.id && !dropTarget.after}
+              dropAfter={dropTarget !== null && dropTarget.cellId === cell.id && dropTarget.after}
+              onRun={() => { run(cell.id) }}
+              onCancel={() => { runtime.cancel(tabId) }}
+              onClear={() => { runtime.clearOutputs(tabId, cell.id) }}
+              onRenderedChange={(next) => { setRendered(previous => ({ ...previous, [cell.id]: next })) }}
+              labels={labels}
+              resultLabels={resultLabels}
+              markdownLabels={markdownLabels}
+            />
+          ))}
+          {document.cells.length === 0 && (
+            <div className={css.empty}>
+              <span className={css.emptyText}>{emptyMessage(document, labels)}</span>
+              {canStructure && (
+                <button type="button" className={css.emptyAction} onClick={() => { editDocument({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
+                  {labels.addFirstCell}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        {/*
+          The outline sits beside the cells rather than inside them: `.cells` is the scroll
+          container that starts its scrollbar under the toolbar, so a panel in there would scroll
+          away with the cells instead of staying put.
+        */}
+        {outlineVisible && (
+          <MarkdownOutline
+            entries={outline}
+            labels={{ title: labels.outline, empty: labels.outlineEmpty }}
+            onSelect={scrollToCell}
           />
-        ))}
-        {document.cells.length === 0 && (
-          <div className={css.empty}>
-            <span className={css.emptyText}>{emptyMessage(document, labels)}</span>
-            {canStructure && (
-              <button type="button" className={css.emptyAction} onClick={() => { editDocument({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
-                {labels.addFirstCell}
-              </button>
-            )}
-          </div>
         )}
       </div>
     </div>

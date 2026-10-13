@@ -68,6 +68,8 @@ const labels: SqlNotebookLabels = {
   moveDown: zh['sqlnotebook.moveDown'],
   collapseCell: zh['sqlnotebook.collapseCell'],
   expandCell: zh['sqlnotebook.expandCell'],
+  outline: zh['sqlnotebook.outline'],
+  outlineEmpty: zh['sqlnotebook.outlineEmpty'],
   changeKind: zh['sqlnotebook.changeKind'],
   sqlCell: zh['sqlnotebook.sqlCell'],
   markdownCell: zh['sqlnotebook.markdownCell'],
@@ -166,6 +168,8 @@ function open(draft: string, options: {
   execute?: () => Promise<{ path: string; blocks: SqlResultBlock[]; elapsedMs: number; executionCount: number }>
   /** Whether the Host says it rolled an open transaction back when the handle closed. */
   rolledBack?: boolean
+  /** Whether the outline panel is open, which the editor's status bar owns. */
+  outlineVisible?: boolean
 } = {}): Harness {
   const onEdit = vi.fn()
   const onSave = vi.fn()
@@ -205,6 +209,7 @@ function open(draft: string, options: {
         path="query.sqlnb"
         draft={text}
         editable
+        outlineVisible={options.outlineVisible === true}
         dirty={false}
         saving={false}
         runtime={runtime}
@@ -318,6 +323,7 @@ describe('SqlNotebookSurface 文档层', () => {
         path="query.sqlnb"
         draft={draft}
         editable={false}
+        outlineVisible={false}
         dirty={false}
         saving={false}
         runtime={runtime}
@@ -870,5 +876,50 @@ describe('SqlNotebookSurface 拖拽与折叠', () => {
     await waitFor(() => { expect(rowOf(view.container, 'sqlnb-0').querySelector('textarea')).not.toBeNull() })
     expect(rowOf(view.container, 'sqlnb-1').querySelector('textarea')).toBeNull()
     expect(view.getAllByRole('button', { name: labels.expandCell })).toHaveLength(1)
+  })
+
+  it('lists the headings of the text cells, and nothing out of a SQL cell', () => {
+    const { view } = open(notebookDraft([
+      { kind: 'markdown', source: '# Setup' },
+      { kind: 'sql', source: 'SELECT 1 AS first_line' },
+      { kind: 'markdown', source: '## Detail' },
+    ]), { outlineVisible: true })
+
+    const nav = view.getByRole('navigation', { name: labels.outline })
+    expect(nav.textContent).toContain('Setup')
+    expect(nav.textContent).toContain('Detail')
+    // A SQL cell's first line is a statement, not a heading: mixing the two would make the list
+    // unscannable for either purpose.
+    expect(nav.textContent).not.toContain('SELECT 1 AS first_line')
+  })
+
+  it('shows no outline until the status bar asks for one', () => {
+    const { view } = open(notebookDraft([{ kind: 'markdown', source: '# Setup' }]))
+
+    expect(view.queryByRole('navigation', { name: labels.outline })).toBeNull()
+  })
+
+  it('scrolls the cell an outline row names rather than the row at that position', () => {
+    let scrolled: Element | null = null
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled = this }
+    try {
+      // The first text cell carries two headings on purpose, so the outline's third row names the
+      // cell at position 2. An implementation that took "the cell at that outline position" would
+      // walk the heading count against the cell list and land on the SQL cell.
+      const { view } = open(notebookDraft([
+        { kind: 'markdown', source: '# First\n## Also first' },
+        { kind: 'sql', source: 'SELECT 1' },
+        { kind: 'markdown', source: '# Second' },
+      ]), { outlineVisible: true })
+      const nav = view.getByRole('navigation', { name: labels.outline })
+      const row = Array.from(nav.querySelectorAll('button')).find(button => button.textContent === 'Second')
+      if (row === null || row === undefined) throw new Error('no outline row named Second')
+      fireEvent.click(row)
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+
+    expect((scrolled as unknown as HTMLElement | null)?.getAttribute('data-cell-id')).toBe('sqlnb-2')
   })
 })
