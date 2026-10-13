@@ -386,15 +386,64 @@
  *
  * The table body is the Host's normalized values and nothing else: a clipped value keeps its
  * own text and the block says how many were clipped, because an ellipsis inside a cell would
- * change what a reader copies out of a viewer whose job is to show values.
+ * change what a reader copies out of a viewer whose job is to show values. That is also why
+ * values are not grouped with thousands separators here — `14000000` is what the database
+ * returned, and `14,000,000` is a rendering of it that would not paste back as SQL.
  */
 .result {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px 10px 10px;
   border-block-start: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-base);
+}
+
+/*
+ * The block's own headline: how many rows it holds, then everything it has to admit about them.
+ *
+ * The notices used to sit in a strip *under* the table, which meant a long result pushed the
+ * sentence "this table was cut short" below the fold — the reader had to scroll past a thousand
+ * rows to learn they were not all there. It is said above the table now, where it is read first.
+ */
+.resultBar {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.resultCount {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Now a run of spans inside `.resultBar` rather than its own strip under the table. Two admissions
+ * reading as one sentence is worse than two lines, so they keep their gaps — and the rule between
+ * them and the row count is a sibling selector, because a statement that writes shows no count and
+ * a leading rule with nothing before it would be a line hanging in the air.
+ */
+.resultNotices {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.resultCount + .resultNotices {
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--dsw-alias-border-l2);
+}
+
+/* The scrollport for a wide table. It is the table's own, not the block's, so the headline above
+   stays put while the columns slide under it. */
+.resultScroll {
   overflow-x: auto;
 }
 
@@ -404,10 +453,18 @@
   font-family: var(--dsw-font-family-code, ui-monospace, monospace);
 }
 
+/*
+ * Horizontal rules only, with the row's own hover to follow it across.
+ *
+ * The grid used to box every cell on all four sides. With a 64-column result that is 64 vertical
+ * lines competing with the values, and the design drops them: fewer rules plus a row that lights
+ * up under the pointer is what lets the eye track a row across, so the two go together rather than
+ * either alone.
+ */
 .resultTable th,
 .resultTable td {
-  padding: 2px 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
+  padding: 6px 12px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
   text-align: start;
   vertical-align: top;
   white-space: pre-wrap;
@@ -419,13 +476,50 @@
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
+  border-block-end: 1px solid var(--dsw-alias-border-l2);
 }
 
-/* The declared-type row is reference, not content, so it reads quieter than the labels. */
-.resultTypeRow th {
-  font-weight: 400;
-  font-size: 11px;
+/* The last row's rule is the block's own edge, not a separator; the pager or padding sits below. */
+.resultTable tbody tr:last-child td {
+  border-block-end: none;
+}
+
+.resultTable tbody tr:hover td {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/*
+ * One header row, not two.
+ *
+ * The declared type used to occupy its own row beneath every label, which made the header twice
+ * as tall and placed the type out of sight of the name it describes. It is a quiet chip beside the
+ * name now: the same information, one line, and the name stays the loud thing.
+ */
+.resultHeadLabel {
+  color: var(--dsw-alias-label-primary);
+}
+
+.resultHeadType {
+  margin-inline-start: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
+/*
+ * Right-aligned digits with tabular figures, so a column can be compared vertically. Which
+ * columns qualify is decided from the values, not the declared types — see `isNumericColumn`.
+ * The CSV grid has done this for its numeric columns all along; the SQL table was the one place
+ * that still left them ragged.
+ */
+.resultHeadNumeric,
+.resultCellNumeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
 }
 
 .resultNull,
@@ -433,14 +527,6 @@
 .resultBlob {
   color: var(--dsw-alias-label-tertiary);
   font-style: normal;
-}
-
-.resultNotices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
 }
 
 /*
@@ -453,7 +539,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-block-start: 4px;
+  /* The block itself carries no padding now (the table is full-bleed), so the pager pays for its
+     own. */
+  padding: 6px 10px;
   font-size: 11px;
 }
 
@@ -482,7 +570,8 @@
 }
 
 .resultError {
-  margin: 0;
+  /* The block carries no padding of its own now, so the error line pays for its own. */
+  margin: 6px 10px;
   padding: 4px 8px;
   border-radius: 4px;
   font-family: var(--dsw-font-family-code, ui-monospace, monospace);

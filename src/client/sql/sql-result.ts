@@ -93,3 +93,39 @@ export function declaredTypeOf(block: SqlResultBlock, index: number): string | n
   // inventing a column type the database never claimed.
   return column.type === undefined || column.type === '' ? null : column.type
 }
+
+/** A string the Host carried instead of a number: a decimal, optionally signed or scaled. */
+const DECIMAL_TEXT = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/u
+
+/**
+ * Whether one column reads as numeric, which decides **only its alignment**.
+ *
+ * Right-aligned digits with tabular figures are what let a reader compare a column vertically,
+ * and SQLite's own type system is too loose to decide it: a column declared `INTEGER` may hold
+ * text, and an expression like `1+1` declares nothing at all. So the answer comes from the values
+ * in this block, the same way the CSV grid decides it.
+ *
+ * A big integer arrives here as a decimal *string* (the Host does that on purpose, so no digit is
+ * lost), and it counts — aligning it left because of its JavaScript type would separate a number
+ * from its own column.
+ *
+ * Nothing about a value's *content* depends on this: an empty column, or one whose rows are all
+ * NULL, reads as not numeric and is aligned like text.
+ */
+export function isNumericColumn(block: SqlResultBlock, index: number): boolean {
+  let sawNumber = false
+  for (const row of block.rows) {
+    const value = row[index]
+    if (value === null || value === undefined) continue
+    // A BLOB has a size, not a magnitude: right-aligning it would invite the comparison it cannot
+    // support.
+    if (typeof value === 'object') return false
+    if (typeof value === 'number') {
+      sawNumber = true
+      continue
+    }
+    if (!DECIMAL_TEXT.test(value)) return false
+    sawNumber = true
+  }
+  return sawNumber
+}

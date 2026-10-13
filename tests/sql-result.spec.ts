@@ -5,6 +5,7 @@ import {
   declaredTypeOf,
   describeSqlValue,
   formatBlobSize,
+  isNumericColumn,
   sqlBlockNotices,
 } from '../src/client/sql/sql-result.ts'
 
@@ -99,5 +100,66 @@ describe('declaredTypeOf', () => {
     expect(declaredTypeOf(block({ columns: [{ label: 'x', name: 'x', type: '' }] }), 0)).toBeNull()
     // A column index past the block is the same "we do not know" answer, not a crash.
     expect(declaredTypeOf(block(), 5)).toBeNull()
+  })
+})
+
+/**
+ * Which columns read as numeric, which decides only their alignment.
+ *
+ * The decision comes from the values rather than from the declared type because SQLite's type
+ * system will not answer it: a column declared INTEGER can hold text, and an expression like
+ * `1+1` declares nothing at all.
+ */
+describe('isNumericColumn', () => {
+  const two = (rows: SqlResultBlock['rows']): SqlResultBlock =>
+    sqlBlock([{ label: 'a', name: 'a' }, { label: 'b', name: 'b' }], rows)
+
+  it('reads a column of numbers as numeric', () => {
+    expect(isNumericColumn(two([[1, 'x'], [2, 'y']]), 0)).toBe(true)
+    expect(isNumericColumn(two([[1, 'x'], [2, 'y']]), 1)).toBe(false)
+  })
+
+  it('counts a big integer the Host carried as a decimal string', () => {
+    // The Host turns an out-of-range INTEGER into a string so no digit is lost. Refusing to align
+    // it because its JavaScript type is `string` would pull a number out of its own column.
+    expect(isNumericColumn(two([['9007199254740993', 'x']]), 0)).toBe(true)
+    expect(isNumericColumn(two([['9007199254740993', 'x'], ['-12.5', 'y'], ['7e9', 'z']]), 0)).toBe(true)
+  })
+
+  it('stays numeric across a NULL, which is a missing value rather than a text one', () => {
+    expect(isNumericColumn(two([[1, 'x'], [null, 'y'], [3, 'z']]), 0)).toBe(true)
+  })
+
+  it('is not numeric when any value is text, so a mixed column is not right-aligned', () => {
+    expect(isNumericColumn(two([[1, 'x'], ['n/a', 'y']]), 0)).toBe(false)
+    // A number with a thousands separator is a formatted string, not a number: the separator is
+    // something this viewer deliberately never adds (see the note on `.result`).
+    expect(isNumericColumn(two([['1,000'], ['2,000']]), 0)).toBe(false)
+  })
+
+  it('right-aligns scientific notation, which is a number the Host sent as text', () => {
+    // `7e9` arrives as a string only because the column is TEXT; the CSV grid has always read it as
+    // numeric, and refusing it here would leave one number column aligned two ways in two views.
+    expect(isNumericColumn(two([['7e9'], ['1e999']]), 0)).toBe(true)
+  })
+
+  it('is not numeric for the overflow words the Host sends as strings', () => {
+    // Measured against `shapeValue`: a float that overflows arrives as `'Infinity'`, and NaN as
+    // `'NaN'`. Neither is a magnitude a reader can compare down a column, so the column that holds
+    // one stays with the text columns.
+    expect(isNumericColumn(two([[1.5], ['Infinity']]), 0)).toBe(false)
+    expect(isNumericColumn(two([['NaN']]), 0)).toBe(false)
+  })
+
+  it('never right-aligns bytes: a BLOB has a size, not a magnitude', () => {
+    const blob = { base64: 'eA==', byteLength: 1, truncated: false }
+    expect(isNumericColumn(two([[blob, 1], [blob, 2]]), 0)).toBe(false)
+  })
+
+  it('is not numeric when there is nothing to read', () => {
+    // An empty column, or one whose every row is NULL, has no evidence either way; aligning it as
+    // numeric would be a guess dressed up as a decision.
+    expect(isNumericColumn(sqlBlock([{ label: 'a', name: 'a' }], []), 0)).toBe(false)
+    expect(isNumericColumn(sqlBlock([{ label: 'a', name: 'a' }], [[null]]), 0)).toBe(false)
   })
 })

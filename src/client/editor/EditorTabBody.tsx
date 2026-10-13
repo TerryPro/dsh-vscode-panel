@@ -325,6 +325,7 @@ export function EditorTabBody({
     emptyString: t('sqlnotebook.emptyString'),
     blobTruncated: t('sqlnotebook.blobTruncated'),
     declaredType: t('sqlnotebook.declaredType'),
+    resultRows: count => t('sqlnotebook.resultRows', { count: String(count) }),
     rowsTruncated: limit => t('sqlnotebook.rowsTruncated', { limit: String(limit) }),
     columnsDropped: count => t('sqlnotebook.columnsDropped', { count: String(count) }),
     valuesTruncated: count => t('sqlnotebook.valuesTruncated', { count: String(count) }),

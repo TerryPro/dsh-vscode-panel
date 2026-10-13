@@ -123,6 +123,7 @@ const resultLabels: SqlResultLabels = {
   emptyString: zh['sqlnotebook.emptyString'],
   blobTruncated: zh['sqlnotebook.blobTruncated'],
   declaredType: zh['sqlnotebook.declaredType'],
+  resultRows: count => zh['sqlnotebook.resultRows'].replace('{count}', String(count)),
   rowsTruncated: limit => zh['sqlnotebook.rowsTruncated'].replace('{limit}', String(limit)),
   columnsDropped: count => zh['sqlnotebook.columnsDropped'].replace('{count}', String(count)),
   valuesTruncated: count => zh['sqlnotebook.valuesTruncated'].replace('{count}', String(count)),
@@ -540,7 +541,7 @@ describe('SqlNotebookSurface 连接与执行', () => {
 
     await harness.view.findByText('Tokyo')
     expect(harness.view.getByText('id')).toBeTruthy()
-    // The declared type sits in its own header row, under the label it describes.
+    // The declared type is still shown; it now sits beside the name in the same header cell.
     expect(harness.view.getByText('INTEGER')).toBeTruthy()
     expect(harness.view.getByText('In[1]')).toBeTruthy()
     expect(harness.view.getByText(labels.elapsed(42))).toBeTruthy()
@@ -583,6 +584,72 @@ describe('SqlNotebookSurface 连接与执行', () => {
     await harness.view.findByText(resultLabels.rowsTruncated(1000))
     expect(harness.view.getByText(resultLabels.columnsDropped(7))).toBeTruthy()
     expect(harness.view.getByText(resultLabels.valuesTruncated(3))).toBeTruthy()
+  })
+
+  /**
+   * The admissions moved above the table.
+   *
+   * They used to sit in a strip under it, so a block that hit the row cap pushed the sentence
+   * "this table is not complete" below the very rows it described — the reader had to scroll past a
+   * thousand rows to learn they were not all there. Asserting they share one bar with the row count
+   * is what pins the order, since jsdom lays nothing out.
+   */
+  it('states the row count and the block’s admissions in one bar above the table', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
+      blocks: [block({ truncated: true, rowLimit: 1000, columnsDropped: 7 })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+
+    const count = await harness.view.findByText(resultLabels.resultRows(1))
+    const bar = count.parentElement
+    expect(bar?.textContent).toContain(resultLabels.rowsTruncated(1000))
+    expect(bar?.textContent).toContain(resultLabels.columnsDropped(7))
+    // The table is a sibling after the bar, not something the bar sits inside.
+    expect(bar?.parentElement?.querySelector('table')).toBeTruthy()
+  })
+
+  it('right-aligns the columns whose values are numbers, and only those', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
+      blocks: [sqlBlock(
+        [
+          { label: 'id', name: 'id', type: 'INTEGER' },
+          { label: 'who', name: 'who', type: 'TEXT' },
+          { label: 'big', name: 'big', type: 'INTEGER' },
+        ],
+        // `big` is what the Host sends for an out-of-range INTEGER: a decimal string. Left-aligned
+        // because of its JavaScript type, it would sit apart from the numbers it belongs with.
+        [[1, 'Tokyo', '9007199254740993'], [2, 'Osaka', '2700000']],
+      )],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+    await harness.view.findByText('Tokyo')
+
+    const heads = harness.view.getAllByRole('columnheader')
+    expect(heads.map(head => head.getAttribute('data-numeric'))).toEqual(['true', null, 'true'])
+    // Two rows × three columns: the numeric ones carry the marker, the text column carries none.
+    expect(harness.view.container.querySelectorAll('td[data-numeric]')).toHaveLength(4)
+  })
+
+  it('keeps the header to one row, with the declared type inside the cell it describes', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
+      blocks: [block({
+        columns: [{ label: 'id', name: 'id', type: 'INTEGER' }, { label: 'who', name: 'who' }],
+        rows: [[7, 'Tokyo']],
+      })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+    await harness.view.findByText('Tokyo')
+
+    // One header row rather than two: the type used to occupy its own row under every label, which
+    // made the header twice as tall and put the type out of sight of the name it describes.
+    const heads = harness.view.getAllByRole('columnheader')
+    expect(heads).toHaveLength(2)
+    expect(heads[0]?.textContent).toBe('idINTEGER')
+    // A column with no declared type says nothing rather than inventing one.
+    expect(heads[1]?.textContent).toBe('who')
   })
 
   it('reserves the paging slot under a truncated block, with both arrows dark', async () => {

@@ -8,8 +8,9 @@
  * number the database never returned.
  */
 
+import { useMemo } from 'react'
 import { SQL_LIMITS, type SqlResultBlock } from '../../shared/sql-protocol.ts'
-import { declaredTypeOf, describeSqlValue, sqlBlockNotices, type SqlWireValue } from './sql-result.ts'
+import { declaredTypeOf, describeSqlValue, isNumericColumn, sqlBlockNotices, type SqlWireValue } from './sql-result.ts'
 import css from './sql-notebook.module.css'
 
 export interface SqlResultLabels {
@@ -18,6 +19,8 @@ export interface SqlResultLabels {
   emptyString: string
   blobTruncated: string
   declaredType: string
+  /** The result strip's own headline: how many rows this block shows. */
+  resultRows: (count: number) => string
   rowsTruncated: (limit: number) => string
   columnsDropped: (count: number) => string
   valuesTruncated: (count: number) => string
@@ -37,6 +40,15 @@ export interface SqlResultLabels {
 
 export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; labels: SqlResultLabels }) {
   const notices = sqlBlockNotices(block)
+  /**
+   * Decided once per block rather than per cell.
+   *
+   * A 1000-row table would otherwise ask this 64 columns × 1000 rows over.
+   */
+  const numeric = useMemo(
+    () => block.columns.map((_column, index) => isNumericColumn(block, index)),
+    [block],
+  )
   return (
     <div className={css.result}>
       {block.error !== undefined && (
@@ -44,46 +56,83 @@ export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; l
         // line or column, so nothing here may imply a position in the statement.
         <pre className={css.resultError} role="alert">{block.error.message}</pre>
       )}
-      {block.columns.length > 0 && (
-        <table className={css.resultTable}>
-          <thead>
-            <tr>
-              {block.columns.map((column, index) => (
-                // `label` is unique in the block; `name` is what SQLite called it. Two columns
-                // named `a` are two values, and the header has to say both apart.
-                <th key={`${column.label}-${index}`} scope="col">{column.label}</th>
+      {/*
+        The block's own headline: how many rows it holds, and everything it has to admit about
+        them. The notices moved up out of the strip under the table because a thousand-row result
+        pushed them past the fold — the reader had to reach the bottom of the block to learn the
+        table they were reading was cut short.
+
+        The bar is not gated on the block having columns. A statement that writes has none, and
+        "影响 3 行" is the whole of what it says; the row count is, because a write returned no rows
+        to count.
+      */}
+      {(block.columns.length > 0 || notices.length > 0) && (
+        <div className={css.resultBar}>
+          {block.columns.length > 0 && (
+            <span className={css.resultCount}>{labels.resultRows(block.rows.length)}</span>
+          )}
+          {notices.length > 0 && (
+            <span className={css.resultNotices}>
+              {notices.map((notice, index) => (
+                <span key={index} className={notice.code === 'deadline' ? css.resultWarn : undefined}>{noticeText(notice, labels)}</span>
               ))}
-            </tr>
-            <tr className={css.resultTypeRow}>
-              {block.columns.map((column, index) => (
-                <th
-                  key={`${column.name}-type-${index}`}
-                  scope="col"
-                  title={column.name === column.label ? labels.declaredType : `${labels.declaredType} · ${column.name}`}
-                >
-                  {declaredTypeOf(block, index) ?? ''}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {block.rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                {block.columns.map((column, columnIndex) => (
-                  <td key={`${column.label}-${columnIndex}`}>
-                    <SqlResultCell value={row[columnIndex]} labels={labels} />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </span>
+          )}
+        </div>
       )}
-      {notices.length > 0 && (
-        <div className={css.resultNotices}>
-          {notices.map((notice, index) => (
-            <span key={index} className={notice.code === 'deadline' ? css.resultWarn : undefined}>{noticeText(notice, labels)}</span>
-          ))}
+      {block.columns.length > 0 && (
+        <div className={css.resultScroll}>
+          <table className={css.resultTable}>
+            <thead>
+              <tr>
+                {block.columns.map((column, index) => {
+                  /**
+                   * One header row, not two.
+                   *
+                   * The declared type used to occupy its own row under every label, which made the
+                   * header twice as tall and put the type out of sight of the name it describes. It
+                   * is now a quiet chip beside the name: same information, one line, and the name
+                   * stays the loud thing.
+                   *
+                   * `label` is unique in the block and `name` is what SQLite called it — two columns
+                   * named `a` are two values, so the title still has to say both apart (ADR 0005).
+                   */
+                  const type = declaredTypeOf(block, index)
+                  const isNumeric = numeric[index] === true
+                  return (
+                    <th
+                      key={`${column.label}-${index}`}
+                      scope="col"
+                      // The attribute is the decision's own hook, the way the CSV grid carries it:
+                      // a test that reached for the CSS-module class name would be asserting a
+                      // hashed string rather than the fact that alignment happened.
+                      data-numeric={isNumeric || undefined}
+                      className={isNumeric ? css.resultHeadNumeric : undefined}
+                      title={column.name === column.label ? labels.declaredType : `${labels.declaredType} · ${column.name}`}
+                    >
+                      <span className={css.resultHeadLabel}>{column.label}</span>
+                      {type !== null && <span className={css.resultHeadType}>{type}</span>}
+                    </th>
+                  )
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {block.columns.map((column, columnIndex) => (
+                    <td
+                      key={`${column.label}-${columnIndex}`}
+                      data-numeric={numeric[columnIndex] === true || undefined}
+                      className={numeric[columnIndex] === true ? css.resultCellNumeric : undefined}
+                    >
+                      <SqlResultCell value={row[columnIndex]} labels={labels} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       {/*
