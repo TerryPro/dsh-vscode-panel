@@ -174,9 +174,22 @@ export class SqlRuntime {
     const tab = this.tabs.get(tabId)
     if (tab !== undefined) return tab.store.subscribe(listener)
     const waiting = this.pendingListeners.get(tabId) ?? new Set<() => void>()
-    waiting.add(listener)
     this.pendingListeners.set(tabId, waiting)
-    return () => { waiting.delete(listener) }
+    let attached: (() => void) | null = null
+    // The surface can mount before the tab is bound, and a listener that only fired once
+    // would leave it showing the state from before the first run.
+    const wake = (): void => {
+      const created = this.tabs.get(tabId)
+      if (created === undefined) return
+      waiting.delete(wake)
+      attached = created.store.subscribe(listener)
+      listener()
+    }
+    waiting.add(wake)
+    return () => {
+      if (attached !== null) attached()
+      waiting.delete(wake)
+    }
   }
 
   /**
@@ -524,8 +537,7 @@ export class SqlRuntime {
   private wakePending(tabId: string): void {
     const waiting = this.pendingListeners.get(tabId)
     if (waiting === undefined || waiting.size === 0) return
-    this.pendingListeners.delete(tabId)
-    for (const listener of [...waiting]) listener()
+    for (const wake of [...waiting]) wake()
   }
 }
 

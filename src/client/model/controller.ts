@@ -46,6 +46,8 @@ import { WorkbenchEdits } from './workbench-edits.ts'
 import { WorkbenchTerminals } from './workbench-terminals.ts'
 import { NotebookRuntime } from '../notebook/notebook-runtime.ts'
 import { KernelRegistry } from '../notebook/kernel-registry.ts'
+import { SqlRuntime } from '../sql/sql-runtime.ts'
+import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
 
 export * from './workbench-types.ts'
@@ -95,6 +97,15 @@ export class WorkbenchController {
    * including kernels no tab has any more, which is the whole point of the panel.
    */
   readonly kernelRegistry: KernelRegistry
+  /**
+   * SQL notebook connections and run states, scoped per tab.
+   *
+   * Separate from `notebookRuntime` on purpose (ADR 0002): a SQL notebook has no kernel,
+   * no event stream and no registry entry, and its results are never folded back into the
+   * draft. It is kept out of the shared store for the same reason the notebook runtime is -
+   * a query's rows must not make every tab in the workbench clone.
+   */
+  readonly sqlRuntime: SqlRuntime
 
   constructor(
     api: WorkbenchApi = new WorkbenchApi(),
@@ -111,9 +122,15 @@ export class WorkbenchController {
       getDraft: tabId => this.notebookDraft(tabId),
       setDraft: (tabId, text) => { this.edits.setDraft(text, 'input', tabId) },
     })
+    // The bridge has no writer. Running a SQL cell must not dirty a tab, and the strongest
+    // guarantee that no future method does it by accident is that this object cannot ask for
+    // a draft write at all.
+    this.sqlRuntime = new SqlRuntime(api, logger, {
+      getDraft: tabId => this.notebookDraft(tabId),
+    })
   }
 
-  /** The current draft text of one notebook tab, or `''` when it is not open. */
+  /** The current draft text of one file tab, or `''` when it is not open. */
   private notebookDraft(tabId: string): string {
     const tab = this.store.getSnapshot().tabs.find(candidate => candidate.id === tabId)
     return tab?.kind === 'file' ? tab.draft : ''
@@ -213,6 +230,10 @@ export class WorkbenchController {
   }
 
   setWorkspace(workspaceId: string | undefined): void {
+    const previous = this.store.getSnapshot().workspaceId
+    // Requirement: leaving a workspace releases every connection it held, rather than letting
+    // handles keep files open until the Host's grace timers happen to fire.
+    if (previous !== undefined && previous !== workspaceId) void this.sqlRuntime.releaseWorkspace(previous)
     this.data.setWorkspace(workspaceId)
   }
 
@@ -463,6 +484,10 @@ export class WorkbenchController {
     // on purpose: reopening the file a moment later should find the user's variables
     // still there, and the Host's unattended timer is what eventually reclaims it.
     if (tab.kind === 'file' && isNotebookPath(tab.path)) this.notebookRuntime.forget(tab.id)
+    // A closed SQL notebook hands its handle to the grace window instead of closing it: the
+    // reader reopening the file a second later is the same gesture as a page reload, and both
+    // are supposed to find the temporary tables still there.
+    if (tab.kind === 'file' && isSqlNotebookPath(tab.path)) this.sqlRuntime.forget(tab.id)
     this.data.forgetRequests(state.workspaceId, tabId)
     this.store.update((draft) => {
       draft.tabs.splice(index, 1)

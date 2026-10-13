@@ -269,3 +269,215 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/*
+ * ---------- connection bar ----------
+ *
+ * The picker, the tier and the two connection verbs share the toolbar row with the run
+ * controls, because they are the same question asked at different times: which database is
+ * this notebook talking to, and what may it do to it.
+ */
+.picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pickerSelect {
+  height: 22px;
+  max-width: 220px;
+  padding: 0 4px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.connectionReadout {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.connectionWarn {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.toolbarSpacer {
+  flex: 1;
+  min-width: 4px;
+}
+
+/* A named verb in the toolbar, used where an icon would already mean something else there. */
+.toolbarButton {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.toolbarButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.toolbarButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/*
+ * ---------- results ----------
+ *
+ * The table body is the Host's normalized values and nothing else: a clipped value keeps its
+ * own text and the block says how many were clipped, because an ellipsis inside a cell would
+ * change what a reader copies out of a viewer whose job is to show values.
+ */
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px 10px;
+  border-block-start: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  overflow-x: auto;
+}
+
+.resultTable {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+}
+
+.resultTable th,
+.resultTable td {
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  text-align: start;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 420px;
+}
+
+.resultTable thead th {
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+/* The declared-type row is reference, not content, so it reads quieter than the labels. */
+.resultTypeRow th {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.resultNull,
+.resultEmpty,
+.resultBlob {
+  color: var(--dsw-alias-label-tertiary);
+  font-style: normal;
+}
+
+.resultNotices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.resultWarn {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.resultError {
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/*
+ * ---------- per-cell run state ----------
+ *
+ * The prompt column carries `In[n]`, which is the reader's own ordering of what ran; the
+ * status marker sits on the cell's leading edge so a long notebook can be scanned for the
+ * cell that failed without reading every row.
+ */
+.cellPrompt {
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  font-size: 11px;
+  min-width: 42px;
+  text-align: end;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.cell[data-status='running'] .cellPrompt,
+.cell[data-status='queued'] .cellPrompt {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.cell[data-status='error'] {
+  border-inline-start: 3px solid var(--dsw-alias-state-error-primary);
+}
+
+.cell[data-status='running'],
+.cell[data-status='queued'] {
+  border-inline-start: 3px solid var(--dsw-alias-state-business-primary);
+}
+
+.cellElapsed {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.runButton {
+  width: 26px;
+}
+
+.runButtonActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.renderedMarkdown {
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: text;
+}
+
+.confirmBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-state-warn-secondary);
+  color: var(--dsw-alias-state-warn-label);
+  font-size: 11.5px;
+}
+
+.confirmButton {
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}

@@ -28,6 +28,8 @@ import { NotebookSurface, type NotebookLabels } from '../notebook/NotebookSurfac
 import { NotebookKernelStatus } from '../notebook/NotebookKernelStatus.tsx'
 import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../sql/SqlNotebookSurface.tsx'
+import type { SqlResultLabels } from '../sql/SqlResultBlockView.tsx'
+import type { DirectoryListing } from '../../shared/contracts.ts'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
@@ -279,7 +281,56 @@ export function EditorTabBody({
     missingCells: t('sqlnotebook.missingCells'),
     unsupportedVersion: t('sqlnotebook.unsupportedVersion'),
     addFirstCell: t('sqlnotebook.addFirstCell'),
+    runCell: t('sqlnotebook.runCell'),
+    runAll: t('sqlnotebook.runAll'),
+    cancel: t('sqlnotebook.cancel'),
+    cancelLimit: t('sqlnotebook.cancelLimit'),
+    clearAllOutputs: t('sqlnotebook.clearAllOutputs'),
+    clearCellOutputs: t('sqlnotebook.clearCellOutputs'),
+    renderMarkdown: t('sqlnotebook.renderMarkdown'),
+    editMarkdown: t('sqlnotebook.editMarkdown'),
+    promptNumber: t('sqlnotebook.promptNumber'),
+    elapsed: ms => t('sqlnotebook.elapsed', { ms: String(ms) }),
+    statusRunning: t('sqlnotebook.statusRunning'),
+    statusQueued: t('sqlnotebook.statusQueued'),
+    statusError: t('sqlnotebook.statusError'),
+    statusCancelled: t('sqlnotebook.statusCancelled'),
+    database: t('sqlnotebook.database'),
+    memoryDatabase: t('sqlnotebook.memoryDatabase'),
+    connect: t('sqlnotebook.connect'),
+    disconnect: t('sqlnotebook.disconnect'),
+    connecting: t('sqlnotebook.connecting'),
+    notConnected: t('sqlnotebook.notConnected'),
+    noDatabase: t('sqlnotebook.noDatabase'),
+    readOnlyTier: t('sqlnotebook.readOnlyTier'),
+    writableTier: t('sqlnotebook.writableTier'),
+    tierLocked: t('sqlnotebook.tierLocked'),
+    rescan: t('sqlnotebook.rescan'),
+    scanTruncated: t('sqlnotebook.scanTruncated'),
+    scratchNotice: t('sqlnotebook.scratchNotice'),
+    runAllNotice: count => t('sqlnotebook.runAllNotice', { count: String(count) }),
+    confirm: t('sqlnotebook.confirm'),
+    notConnectedRefusal: t('sqlnotebook.notConnectedRefusal'),
+    emptyCellRefusal: t('sqlnotebook.emptyCellRefusal'),
   }), [t])
+  const sqlResultLabels = useMemo<SqlResultLabels>(() => ({
+    nullValue: t('sqlnotebook.nullValue'),
+    emptyString: t('sqlnotebook.emptyString'),
+    blobTruncated: t('sqlnotebook.blobTruncated'),
+    declaredType: t('sqlnotebook.declaredType'),
+    rowsTruncated: limit => t('sqlnotebook.rowsTruncated', { limit: String(limit) }),
+    columnsDropped: count => t('sqlnotebook.columnsDropped', { count: String(count) }),
+    valuesTruncated: count => t('sqlnotebook.valuesTruncated', { count: String(count) }),
+    deadline: ms => t('sqlnotebook.deadline', { ms: String(ms) }),
+    changes: count => t('sqlnotebook.changes', { count: String(count) }),
+    emptyRows: t('sqlnotebook.emptyRows'),
+  }), [t])
+  // Stable across renders so the surface can keep it in an effect dependency: a fresh closure
+  // every render would restart the workspace scan on each keystroke in a cell.
+  const sqlListDirectory = useMemo<(directory: string) => Promise<DirectoryListing>>(
+    () => (directory: string) => controller.api.listDirectory(workspaceId, directory),
+    [controller, workspaceId],
+  )
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
   const outlineEntries = useMemo(() => {
@@ -367,14 +418,20 @@ export function EditorTabBody({
     ? (
       <SqlNotebookSurface
         key={`sqlnotebook-${tab.id}`}
+        tabId={tab.id}
+        workspaceId={workspaceId}
         path={tab.path}
         draft={tab.draft}
         editable={tab.externalChange === null && !tab.saving}
         dirty={tab.dirty}
         saving={tab.saving}
+        runtime={controller.sqlRuntime}
+        listDirectory={sqlListDirectory}
         onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
         onSave={() => { void controller.save(tab.id) }}
         labels={sqlNotebookLabels}
+        resultLabels={sqlResultLabels}
+        markdownLabels={markdownLabels}
       />
     )
     : null

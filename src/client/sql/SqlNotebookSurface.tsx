@@ -1,33 +1,41 @@
 /**
- * The `.sqlnb` cell surface: one row per cell, drawn over the file tab's draft text.
+ * The `.sqlnb` cell surface: cells, their results, and the connection they run on.
  *
- * Like `NotebookSurface` and `CsvTable`, this component renders the draft and writes its
- * edits back as file text — it never touches the Host, and saving, dirty tracking and the
- * external-change prompt stay in the shared file-tab machinery.
+ * Like `NotebookSurface` and `CsvTable`, this renders the file tab's draft and writes its
+ * edits back as file text. What differs, and is the reason the SQL notebook is its own
+ * surface rather than a mode of the notebook one (ADR 0002): a result never enters the file,
+ * so running a cell leaves the tab clean, and the only writer of the draft is an edit the
+ * reader made. `SqlRuntime` is handed a bridge that cannot write, so that stays true by type.
  *
- * What it adds is ADR 0003's "never auto-repair" rule made visible. A file this build
- * cannot fully read is shown as read-only text with the reason named and a pointer at the
- * raw view; no control here rewrites a document the parser does not understand, because
- * re-serializing whatever happened to parse would discard the fields only a newer format
- * carries.
- *
- * Running a cell is deliberately absent. Results never enter the file, so the run, cancel
- * and result-block controls belong to the `/sqlnotebook` wiring (A3); nothing in this file
- * needs a database connection.
+ * Nothing here reaches a kernel. The connection is the Host's in-process SQLite handle keyed
+ * by this notebook's path; it is not in the kernel registry, has no event stream, and is not
+ * in the kernel panel.
  */
 
-import { useCallback, useMemo, useState } from 'react'
-import type { SqlCellKind } from '../../shared/sql-protocol.ts'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useSyncExternalStore } from 'react'
+import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { DirectoryListing } from '../../shared/contracts.ts'
+import { SQL_MEMORY_TARGET, type SqlAccess, type SqlCellKind } from '../../shared/sql-protocol.ts'
 import { CodeEditor } from '../editor/CodeEditor.tsx'
 import {
   IconAddCode16,
   IconAddMarkdown16,
+  IconClearOutputs16,
   IconDeleteCell16,
+  IconEditCell16,
+  IconInterrupt16,
   IconMoveDown16,
   IconMoveUp16,
+  IconRenderCell16,
+  IconRestartKernel16,
+  IconRunCell16,
   IconSave16,
 } from '../notebook/NotebookIcons.tsx'
 import css from './sql-notebook.module.css'
+import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.tsx'
+import { scanDatabases, type SqlDatabaseScan } from './sql-database-scan.ts'
 import {
   applySqlNotebookEdit,
   parseSqlNotebook,
@@ -37,6 +45,7 @@ import {
   type SqlNotebookDocument,
   type SqlNotebookEdit,
 } from './sql-notebook-document.ts'
+import type { SqlCellRun, SqlRuntime } from './sql-runtime.ts'
 
 export interface SqlNotebookLabels {
   save: string
@@ -64,46 +73,140 @@ export interface SqlNotebookLabels {
   missingCells: string
   unsupportedVersion: string
   addFirstCell: string
+  // --- running ---------------------------------------------------------------------------
+  runCell: string
+  runAll: string
+  cancel: string
+  /** The limit the cancel button has to state: this runtime has no interrupt. */
+  cancelLimit: string
+  clearAllOutputs: string
+  clearCellOutputs: string
+  renderMarkdown: string
+  editMarkdown: string
+  promptNumber: string
+  elapsed: (ms: number) => string
+  statusRunning: string
+  statusQueued: string
+  statusError: string
+  statusCancelled: string
+  // --- the connection --------------------------------------------------------------------
+  database: string
+  memoryDatabase: string
+  connect: string
+  disconnect: string
+  connecting: string
+  notConnected: string
+  /** Offered instead of a connection when the reader has not picked a file yet. */
+  noDatabase: string
+  readOnlyTier: string
+  writableTier: string
+  /** Why the tier cannot be changed while a handle is open. */
+  tierLocked: string
+  rescan: string
+  scanTruncated: string
+  /** Said once per new handle: what a session-scoped connection does not carry over. */
+  scratchNotice: string
+  /** Shown when a Run All is about to occupy the Host's thread. */
+  runAllNotice: (count: number) => string
+  confirm: string
+  /** The wording for a refusal the workbench raised itself, keyed by the Host's code. */
+  notConnectedRefusal: string
+  emptyCellRefusal: string
 }
 
 interface SqlNotebookSurfaceProps {
+  tabId: string
+  workspaceId: string
+  /** Workspace-relative path of the `.sqlnb`, which is also the Host's connection identity. */
   path: string
   draft: string
   /** Editing is refused while an external change is unresolved, as in the text editor. */
   editable: boolean
   dirty: boolean
   saving: boolean
+  runtime: SqlRuntime
+  listDirectory: (path: string) => Promise<DirectoryListing>
   onEdit: (text: string) => void
   onSave: () => void
   labels: SqlNotebookLabels
+  resultLabels: SqlResultLabels
+  markdownLabels: MarkdownLabels
 }
 
 export function SqlNotebookSurface({
+  tabId,
+  workspaceId,
   path,
   draft,
   editable,
   dirty,
   saving,
+  runtime,
+  listDirectory,
   onEdit,
   onSave,
   labels,
+  resultLabels,
+  markdownLabels,
 }: SqlNotebookSurfaceProps) {
   const document = useMemo(() => parseSqlNotebook(draft), [draft])
-  // Why the last click did nothing. Kept here rather than on the tab because it is a
-  // property of one surface's render, not of the file: switching to the raw view and back
-  // is allowed to forget a message the reader can no longer act on.
+  // Why the last click did nothing, when the refusal came from the file rather than the Host.
   const [refusal, setRefusal] = useState<string | null>(null)
+  const [scan, setScan] = useState<SqlDatabaseScan | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [pickPath, setPickPath] = useState<string>('')
+  const [pickAccess, setPickAccess] = useState<SqlAccess>('read-only')
+  const [confirmRunAll, setConfirmRunAll] = useState(false)
+  /** Which markdown cells are showing their rendered form. Never in the file. */
+  const [rendered, setRendered] = useState<Record<string, boolean>>({})
+  const scanWanted = useRef(false)
+
+  useEffect(() => {
+    runtime.bind(tabId, workspaceId, path)
+  }, [runtime, tabId, workspaceId, path])
+
+  const subscribe = useCallback((notify: () => void) => runtime.subscribe(tabId, notify), [runtime, tabId])
+  const snapshot = useCallback(() => runtime.peek(tabId), [runtime, tabId])
+  const runState = useSyncExternalStore(subscribe, snapshot)
+
+  const connection = runState?.connection ?? null
+  const busy = runState !== null && (runState.connection !== null) && runtime.busy(tabId)
+
+  // The workspace walk is what the picker lists; it happens once per mount and only on
+  // request afterwards, because the directory budget is the cost of being thorough.
+  const rescan = useCallback((): void => {
+    scanWanted.current = true
+    setScanning(true)
+    void scanDatabases({ list: listDirectory }).then((result) => {
+      if (!scanWanted.current) return
+      setScan(result)
+      setScanning(false)
+    }, () => {
+      if (!scanWanted.current) return
+      setScanning(false)
+    })
+  }, [listDirectory])
+
+  useEffect(() => {
+    rescan()
+    return () => { scanWanted.current = false }
+  }, [rescan])
+
+  // The "new handle" line is said once, not on every render of a long notebook.
+  useEffect(() => {
+    if (runState?.freshConnection !== true) return
+    const timer = setTimeout(() => { runtime.clearConnectionNotice(tabId) }, 6_000)
+    return () => { clearTimeout(timer) }
+  }, [runState?.freshConnection, runtime, tabId])
 
   /**
    * Apply one edit to the file text, or refuse it out loud.
    *
    * `applySqlNotebookEdit` throws instead of rewriting a document this build does not
-   * understand, and every call here comes from a click. The refusal keeps the reader's
-   * bytes: the draft is untouched, and the reason is shown above the cells.
-   *
-   * The wording comes from the locale dictionary, not from the error's own message: that
-   * message is written for whoever reads the throw site, and putting it on screen would
-   * hand an English panel a sentence in one language only.
+   * understand, and every call here comes from a click. The refusal keeps the reader's bytes:
+   * the draft is untouched, and the reason is shown above the cells. The wording comes from
+   * the locale dictionary rather than the error's own message, which is written for whoever
+   * reads the throw site.
    */
   const applyEdit = useCallback((edit: SqlNotebookEdit): void => {
     try {
@@ -115,20 +218,71 @@ export function SqlNotebookSurface({
     }
   }, [draft, labels, onEdit])
 
-  // A file that parses but carries a version this build does not know is still shown cell
-  // by cell — see `parseSqlNotebook`. `readOnly` is the one flag that says "no write may
-  // leave this surface", so the controls key off it rather than off each warning.
-  const documentWritable = !document.readOnly
-  // Structure is gated more tightly than typing: adding, deleting, moving or re-typing a
-  // cell rewrites the whole document, so it waits until an unresolved external change is
-  // settled. Editing a cell's text is left open on purpose — the plain text editor allows
-  // exactly that in the same state, and a surface that swallowed keystrokes would leave
-  // the reader hunting for a control that is not disabled.
-  const canStructure = editable && documentWritable
+  const run = useCallback((cellId: string): void => {
+    const cell = document.cells.find(candidate => candidate.id === cellId)
+    if (cell === undefined) return
+    if (cell.kind === 'markdown') {
+      // A text cell's run renders it. Sending Markdown to a database would answer with an
+      // error about the first word of a sentence nobody meant as SQL.
+      setRendered(previous => ({ ...previous, [cellId]: true }))
+      return
+    }
+    runtime.runCell(tabId, cellId)
+  }, [document.cells, runtime, tabId])
+
+  const runStretch = useCallback((): void => {
+    setConfirmRunAll(false)
+    void runtime.runAll(tabId)
+  }, [runtime, tabId])
+
+  const sqlCellCount = document.cells.filter(cell => cell.kind === 'sql').length
+
+  const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const modifier = event.ctrlKey || event.metaKey
+    if (event.key === 'Escape') {
+      const host = event.target instanceof HTMLElement ? event.target.closest('[data-cell-id]') : null
+      const cellId = host?.getAttribute('data-cell-id')
+      if (cellId === null || cellId === undefined) return
+      if (document.cells.find(cell => cell.id === cellId)?.kind !== 'markdown') return
+      setRendered(previous => ({ ...previous, [cellId]: true }))
+      return
+    }
+    // The cell is taken from the event target rather than from a tracked "focused" value,
+    // because the cell the reader is typing in is exactly what Ctrl+Enter should run, and a
+    // focus field updated by effects lags the keystroke that matters.
+    const host = event.target instanceof HTMLElement ? event.target.closest('[data-cell-id]') : null
+    const cellId = host?.getAttribute('data-cell-id')
+    if (cellId === null || cellId === undefined) return
+    if (!modifier && event.shiftKey && event.key === 'Enter') {
+      event.preventDefault()
+      run(cellId)
+      return
+    }
+    if (!modifier) return
+    if (event.altKey && event.shiftKey && event.key === 'Enter') {
+      event.preventDefault()
+      setConfirmRunAll(true)
+      return
+    }
+    if (event.altKey && event.key === 'Enter') {
+      event.preventDefault()
+      run(cellId)
+      applyEdit({ type: 'insertAfter', index: document.cells.findIndex(cell => cell.id === cellId), kind: 'sql' })
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      run(cellId)
+    }
+  }, [applyEdit, document.cells, run])
+
   const appendIndex = document.cells.length - 1
+  const documentWritable = !document.readOnly
+  const canStructure = editable && documentWritable
+  const canConnect = runState !== null && !runState.connecting
 
   return (
-    <div className={css.root}>
+    <div className={css.root} onKeyDown={onKeyDown}>
       <div className={css.toolbar}>
         <button
           type="button"
@@ -141,27 +295,116 @@ export function SqlNotebookSurface({
           <IconSave16 />
         </button>
         <span className={css.toolbarDivider} aria-hidden="true" />
-        <button
-          type="button"
-          className={css.toolbarAction}
-          aria-label={labels.addSqlCell}
-          title={labels.addSqlCell}
-          disabled={!canStructure}
-          onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}
-        >
+        <button type="button" className={css.toolbarAction} aria-label={labels.addSqlCell} title={labels.addSqlCell} disabled={!canStructure} onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
           <IconAddCode16 />
         </button>
-        <button
-          type="button"
-          className={css.toolbarAction}
-          aria-label={labels.addMarkdownCell}
-          title={labels.addMarkdownCell}
-          disabled={!canStructure}
-          onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'markdown' }) }}
-        >
+        <button type="button" className={css.toolbarAction} aria-label={labels.addMarkdownCell} title={labels.addMarkdownCell} disabled={!canStructure} onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'markdown' }) }}>
           <IconAddMarkdown16 />
         </button>
+        <span className={css.toolbarDivider} aria-hidden="true" />
+        {/*
+          A Run All occupies the Host's thread for as long as the stretch takes, which the
+          reader is about to feel everywhere else in the workbench. The confirmation is the
+          requirement's own wording, and it is one inline row rather than a dialog: the
+          number it reports is the same number the toolbar is sitting next to.
+        */}
+        {confirmRunAll ? (
+          <span className={css.confirmBar}>
+            {labels.runAllNotice(sqlCellCount)}
+            <button type="button" className={css.confirmButton} onClick={runStretch}>{labels.confirm}</button>
+            <button type="button" className={css.confirmButton} onClick={() => { setConfirmRunAll(false) }}>{labels.cancel}</button>
+          </span>
+        ) : (
+          <>
+            <button type="button" className={css.toolbarAction} aria-label={labels.runAll} title={labels.runAll} disabled={sqlCellCount === 0} onClick={() => { setConfirmRunAll(true) }}>
+              <IconRunCell16 />
+            </button>
+            <button type="button" className={css.toolbarAction} aria-label={labels.clearAllOutputs} title={labels.clearAllOutputs} onClick={() => { runtime.clearOutputs(tabId) }}>
+              <IconClearOutputs16 />
+            </button>
+            {busy && (
+              <button type="button" className={css.toolbarAction} aria-label={labels.cancel} title={`${labels.cancel} · ${labels.cancelLimit}`} onClick={() => { runtime.cancel(tabId) }}>
+                <IconInterrupt16 />
+              </button>
+            )}
+          </>
+        )}
+        <span className={css.toolbarSpacer} />
+        <label className={css.picker}>
+          <span className={css.visuallyHidden}>{labels.database}</span>
+          <select
+            className={css.pickerSelect}
+            aria-label={labels.database}
+            value={pickPath}
+            disabled={!canConnect}
+            onChange={event => { setPickPath(event.target.value) }}
+          >
+            <option value="">{labels.database}</option>
+            <option value={SQL_MEMORY_TARGET}>{labels.memoryDatabase}</option>
+            {(scan?.databases ?? []).map(choice => (
+              <option key={choice.path} value={choice.path}>{choice.path}</option>
+            ))}
+          </select>
+        </label>
+        <select
+          className={css.pickerSelect}
+          aria-label={connection === null ? labels.readOnlyTier : labels.tierLocked}
+          title={connection === null ? undefined : labels.tierLocked}
+          value={pickAccess}
+          disabled={!canConnect || connection !== null}
+          onChange={event => { setPickAccess(event.target.value === 'writable' ? 'writable' : 'read-only') }}
+        >
+          <option value="read-only">{labels.readOnlyTier}</option>
+          <option value="writable">{labels.writableTier}</option>
+        </select>
+        <button type="button" className={css.toolbarAction} aria-label={labels.rescan} title={labels.rescan} disabled={scanning} onClick={rescan}>
+          <IconRestartKernel16 />
+        </button>
+        {/*
+          Connect and disconnect are text, not glyphs. A play triangle already means "run this
+          cell" two buttons to the left of here, and a control that opens a database cannot
+          borrow that mark without a reader pressing it expecting the other effect.
+        */}
+        {connection === null
+          ? (
+            <button
+              type="button"
+              className={css.toolbarButton}
+              disabled={!canConnect || pickPath === ''}
+              title={pickPath === '' ? labels.noDatabase : labels.connect}
+              onClick={() => { void runtime.connect(tabId, pickPath, pickAccess) }}
+            >
+              {labels.connect}
+            </button>
+          )
+          : (
+            <button
+              type="button"
+              className={css.toolbarButton}
+              onClick={() => { void runtime.disconnect(tabId) }}
+            >
+              {labels.disconnect}
+            </button>
+          )}
+        <span className={css.connectionReadout} data-connected={connection !== null || undefined}>
+          {runState === null
+            ? labels.connecting
+            : runState.connecting
+            ? labels.connecting
+            : connection === null
+              ? labels.notConnected
+              : `${connection.path} · ${connection.access === 'writable' ? labels.writableTier : labels.readOnlyTier} · ${connection.rowLimit}`}
+        </span>
       </div>
+      {runState?.freshConnection === true && (
+        <div className={css.notice} role="status">{labels.scratchNotice}</div>
+      )}
+      {runState?.connectionProblem !== null && runState?.connectionProblem !== undefined && (
+        <div className={css.noticeError} role="alert">{refusalText(runState.connectionProblem, labels)}</div>
+      )}
+      {scan?.truncated === true && (
+        <div className={css.notice} role="status">{labels.scanTruncated}</div>
+      )}
       <div className={css.cells}>
         {refusal !== null && <div className={css.noticeError} role="alert">{refusal}</div>}
         {document.readOnly && document.warning !== null && (
@@ -180,8 +423,17 @@ export function SqlNotebookSurface({
             last={index === document.cells.length - 1}
             documentWritable={documentWritable}
             canStructure={canStructure}
+            run={runState?.cells[cell.id] ?? null}
+            rendered={rendered[cell.id] === true}
+            canRun={connection !== null}
             onEdit={applyEdit}
+            onRun={() => { run(cell.id) }}
+            onCancel={() => { runtime.cancel(tabId) }}
+            onClear={() => { runtime.clearOutputs(tabId, cell.id) }}
+            onRenderChange={(show) => { setRendered(previous => ({ ...previous, [cell.id]: show })) }}
             labels={labels}
+            resultLabels={resultLabels}
+            markdownLabels={markdownLabels}
           />
         ))}
         {document.cells.length === 0 && (
@@ -200,12 +452,12 @@ export function SqlNotebookSurface({
 }
 
 /**
- * One cell row.
+ * One cell row: its prompt number, editor, structural actions, and result blocks.
  *
  * A degraded cell gets no editor and no kind picker but keeps its structural controls: the
  * node it stands for is copied through the tree edit untouched, so moving or deleting it
- * cannot lose content the parser did not read. Retyping it, though, would hand text the
- * author never meant as SQL to the run that follows — so `source` writes stop at the row.
+ * cannot lose content the parser did not read. Retyping it would hand text the author never
+ * meant as SQL to the run that follows — so `source` writes stop at the row.
  */
 function SqlNotebookCell({
   path,
@@ -215,8 +467,17 @@ function SqlNotebookCell({
   last,
   documentWritable,
   canStructure,
+  run,
+  rendered,
+  canRun,
   onEdit,
+  onRun,
+  onCancel,
+  onClear,
+  onRenderChange,
   labels,
+  resultLabels,
+  markdownLabels,
 }: {
   path: string
   cell: SqlNotebookCellModel
@@ -225,14 +486,32 @@ function SqlNotebookCell({
   last: boolean
   documentWritable: boolean
   canStructure: boolean
+  run: SqlCellRun | null
+  rendered: boolean
+  canRun: boolean
   onEdit: (edit: SqlNotebookEdit) => void
+  onRun: () => void
+  onCancel: () => void
+  onClear: () => void
+  onRenderChange: (show: boolean) => void
   labels: SqlNotebookLabels
+  resultLabels: SqlResultLabels
+  markdownLabels: MarkdownLabels
 }) {
   const editableCell = documentWritable && !cell.degraded
+  const showEditor = editableCell && !(cell.kind === 'markdown' && rendered)
+  const running = run?.status === 'running' || run?.status === 'queued'
+  // Read once: the optional chain would otherwise have to be repeated in every guard, and a
+  // `run?.blocks.length` check next to a `run.blocks.map` is how a null check gets lost.
+  const blocks = run?.blocks ?? []
+  const elapsed = run?.elapsedMs ?? null
+  const failure = run?.failure ?? null
   return (
-    <div className={css.cell} data-degraded={cell.degraded || undefined} data-cell-id={cell.id}>
+    <div className={css.cell} data-degraded={cell.degraded || undefined} data-status={run?.status} data-cell-id={cell.id}>
       <div className={css.cellHeader}>
-        <span className={css.cellIndex}>{index + 1}</span>
+        <span className={css.cellPrompt} title={labels.promptNumber}>
+          {`In[${run?.executionCount ?? (running ? '…' : '')}]`}
+        </span>
         {editableCell ? (
           <label className={css.cellKindSelect}>
             <span className={css.visuallyHidden}>{labels.changeKind}</span>
@@ -253,7 +532,44 @@ function SqlNotebookCell({
           <span className={css.cellKind}>{kindLabel(cell.kind, labels)}</span>
         )}
         {cell.degraded && <span className={css.cellBadge}>{labels.degradedCell}</span>}
+        {run !== null && run.status !== 'done' && (
+          <span className={css.cellBadge}>{statusLabel(run.status, labels)}</span>
+        )}
+        {elapsed !== null && (
+          <span className={css.cellElapsed}>{labels.elapsed(elapsed)}</span>
+        )}
         <span className={css.cellActions}>
+          <button
+            type="button"
+            className={running ? `${css.cellAction} ${css.runButton} ${css.runButtonActive}` : `${css.cellAction} ${css.runButton}`}
+            aria-label={labels.runCell}
+            title={canRun ? labels.runCell : labels.noDatabase}
+            disabled={!canRun || running}
+            onClick={onRun}
+          >
+            <IconRunCell16 />
+          </button>
+          {running && (
+            <button type="button" className={css.cellAction} aria-label={labels.cancel} title={`${labels.cancel} · ${labels.cancelLimit}`} onClick={onCancel}>
+              <IconInterrupt16 />
+            </button>
+          )}
+          {cell.kind === 'markdown' && editableCell && (
+            <button
+              type="button"
+              className={css.cellAction}
+              aria-label={showEditor ? labels.renderMarkdown : labels.editMarkdown}
+              title={showEditor ? labels.renderMarkdown : labels.editMarkdown}
+              onClick={() => { onRenderChange(showEditor) }}
+            >
+              {showEditor ? <IconRenderCell16 /> : <IconEditCell16 />}
+            </button>
+          )}
+          {(blocks.length > 0) && (
+            <button type="button" className={css.cellAction} aria-label={labels.clearCellOutputs} title={labels.clearCellOutputs} onClick={onClear}>
+              <IconClearOutputs16 />
+            </button>
+          )}
           <button type="button" className={css.cellAction} aria-label={labels.insertSqlBelow} title={labels.insertSqlBelow} disabled={!canStructure} onClick={() => { onEdit({ type: 'insertAfter', index, kind: 'sql' }) }}>
             <IconAddCode16 />
           </button>
@@ -273,19 +589,36 @@ function SqlNotebookCell({
       </div>
       <div className={css.cellBody}>
         {editableCell ? (
-          <CodeEditor
-            key={`${cell.id}:${cell.kind}:${grammarPath(path, cell.kind)}`}
-            value={cell.source}
-            ariaLabel={`${cell.id} ${cell.kind}`}
-            path={grammarPath(path, cell.kind)}
-            wrap
-            cell
-            onChange={source => { onEdit({ type: 'source', index, source }) }}
-          />
+          showEditor ? (
+            <CodeEditor
+              key={`${cell.id}:${cell.kind}:${grammarPath(path, cell.kind)}`}
+              value={cell.source}
+              ariaLabel={`${cell.id} ${cell.kind}`}
+              path={grammarPath(path, cell.kind)}
+              wrap
+              cell
+              onChange={source => { onEdit({ type: 'source', index, source }) }}
+            />
+          ) : (
+            <div className={css.renderedMarkdown} onDoubleClick={() => { onRenderChange(false) }} title={labels.editMarkdown}>
+              <MarkdownText text={cell.source} labels={markdownLabels} />
+            </div>
+          )
         ) : (
           <pre className={css.cellText}>{cell.source}</pre>
         )}
       </div>
+      {blocks.map((block, blockIndex) => (
+        <SqlResultBlockView key={`${cell.id}-block-${blockIndex}`} block={block} labels={resultLabels} />
+      ))}
+      {/*
+        A refusal the cell itself has nowhere to show. A failed statement is already said by
+        its own block, in the place the result would have been, and repeating it under the
+        table would be the same line twice in two different tones.
+      */}
+      {failure !== null && blocks.length === 0 && (
+        <div className={css.noticeError} role="alert">{refusalText(failure, labels)}</div>
+      )}
     </div>
   )
 }
@@ -293,10 +626,10 @@ function SqlNotebookCell({
 /**
  * The path the cell's grammar is resolved from.
  *
- * A SQL cell is highlighted by the notebook's own path — which is exactly why
- * `editor-languages.ts` maps `sqlnb` to SQL. A Markdown cell cannot take that path (it
- * would be coloured as SQL), so it borrows the `.md` extension the text editor already
- * knows, the same way a Jupyter cell borrows the kernel's language.
+ * A SQL cell is highlighted by the notebook's own path — which is why `editor-languages.ts`
+ * maps `sqlnb` to SQL. A Markdown cell cannot take that path (it would be coloured as SQL),
+ * so it borrows the `.md` extension the text editor already knows, the same way a Jupyter
+ * cell borrows the kernel's language.
  */
 function grammarPath(path: string, kind: SqlNotebookCellKind): string {
   return kind === 'markdown' ? `${path}.md` : path
@@ -305,6 +638,13 @@ function grammarPath(path: string, kind: SqlNotebookCellKind): string {
 function kindLabel(kind: SqlNotebookCellKind, labels: SqlNotebookLabels): string {
   if (kind === 'sql') return labels.sqlCell
   return kind === 'markdown' ? labels.markdownCell : labels.rawCell
+}
+
+function statusLabel(status: string, labels: SqlNotebookLabels): string {
+  if (status === 'running') return labels.statusRunning
+  if (status === 'queued') return labels.statusQueued
+  if (status === 'cancelled') return labels.statusCancelled
+  return labels.statusError
 }
 
 /**
@@ -345,4 +685,20 @@ function refusalMessage(code: string, labels: SqlNotebookLabels): string {
   if (code === 'SQLNB_UNSUPPORTED_VERSION') return labels.unsupportedVersion
   if (code === 'SQLNB_MISSING_CELLS') return labels.missingCells
   return labels.invalidJson
+}
+
+/**
+ * A refusal in words.
+ *
+ * Two codes are the workbench's own gate rather than a database's opinion, and they arrive
+ * with no message to show; every other code carries the Host's one SQLite line, which is the
+ * only precision SQLite offers (it reports no line or column).
+ */
+function refusalText(failure: { code: string; message: string }, labels: SqlNotebookLabels): string {
+  return failure.message === '' ? localRefusalText(failure.code, labels) : failure.message
+}
+
+function localRefusalText(code: string, labels: SqlNotebookLabels): string {
+  if (code === 'SQL_NOT_CONNECTED' || code === 'SQL_NOTEBOOK_REQUIRED') return labels.notConnectedRefusal
+  return labels.emptyCellRefusal
 }
