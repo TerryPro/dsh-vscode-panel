@@ -16,6 +16,7 @@ import type {
   CsvViewMode,
   HtmlViewMode,
   NotebookViewMode,
+  SqlNotebookViewMode,
   StructuredViewMode,
   MarkdownViewMode,
   MermaidViewMode,
@@ -563,6 +564,11 @@ export class WorkbenchController {
   /** Switch one `.ipynb` file tab between the cell surface and its raw JSON source. */
   setNotebookMode(mode: NotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.edits.setNotebookMode(mode, tabId)
+  }
+
+  /** Switch one `.sqlnb` file tab between its cell surface and the file's JSON text. */
+  setSqlNotebookMode(mode: SqlNotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.edits.setSqlNotebookMode(mode, tabId)
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {

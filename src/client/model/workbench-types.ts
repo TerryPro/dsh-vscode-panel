@@ -20,6 +20,15 @@ export type StructuredViewMode = 'graph' | 'source' | 'split'
  * reader who wants to see the JSON edits the JSON.
  */
 export type NotebookViewMode = 'notebook' | 'source'
+/**
+ * How a `.sqlnb` file is shown: the SQL notebook's own cell surface, or its JSON text.
+ *
+ * A separate type from `NotebookViewMode` even though both are two-state, because the two
+ * formats diverge on what the surface writes back: running a Jupyter cell stores its
+ * output in the file, running a SQL cell must not (ADR 0003). One type per format keeps
+ * that difference from being collapsed by a shared union.
+ */
+export type SqlNotebookViewMode = 'notebook' | 'source'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
 /**
@@ -77,6 +86,8 @@ export interface WorkbenchFileTab {
   structuredMode?: StructuredViewMode
   /** Cell surface versus raw JSON; only meaningful for `.ipynb` files. */
   notebookMode?: NotebookViewMode
+  /** Cell surface versus the file's JSON text; only meaningful for `.sqlnb` files. */
+  sqlNotebookMode?: SqlNotebookViewMode
   /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
   wrap: boolean
   inlineDiff: boolean

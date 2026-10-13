@@ -32,6 +32,7 @@ describe('languageForPath', () => {
     'flow.mermaid',
     'data.csv',
     'table.tsv',
+    'query.sqlnb',
   ])('resolves a grammar for %s', path => {
     expect(languageForPath(path)).not.toBeNull()
   })
@@ -42,6 +43,14 @@ describe('languageForPath', () => {
     expect(languageForPath('old.MKD')).not.toBeNull()
     expect(languageForPath('.env')).not.toBeNull()
     expect(languageForPath('.bashrc')).not.toBeNull()
+  })
+
+  it('speaks SQL for a SQL notebook, and Markdown for a Markdown cell of one', () => {
+    // The cell surface hands the cell editor the *notebook's* path, so `sqlnb` resolving to
+    // SQL is what gives a query cell its grammar. A Markdown cell cannot take that path —
+    // it would be coloured as SQL — so it appends `.md`, and the last extension wins.
+    expect(languageLabelForPath('analysis/query.sqlnb')).toBe('SQL')
+    expect(languageLabelForPath('analysis/query.sqlnb.md')).toBe('Markdown')
   })
 
   it('leaves unknown or extension-less paths as plain text', () => {

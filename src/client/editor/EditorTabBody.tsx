@@ -26,6 +26,8 @@ import { isMermaidPath } from '../mermaid/mermaid-path.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
 import { NotebookSurface, type NotebookLabels } from '../notebook/NotebookSurface.tsx'
 import { NotebookKernelStatus } from '../notebook/NotebookKernelStatus.tsx'
+import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
+import { SqlNotebookSurface, type SqlNotebookLabels } from '../sql/SqlNotebookSurface.tsx'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
@@ -64,11 +66,13 @@ export function EditorTabBody({
   const isCsvTab = tab.kind === 'file' && tab.file !== null && isCsvPath(tab.path)
   const isStructuredTab = tab.kind === 'file' && tab.file !== null && isStructuredPath(tab.path)
   const isNotebookTab = tab.kind === 'file' && tab.file !== null && isNotebookPath(tab.path)
+  const isSqlNotebookTab = tab.kind === 'file' && tab.file !== null && isSqlNotebookPath(tab.path)
   const csvDelimiter = tab.kind === 'file' ? delimiterForCsvPath(tab.path) : undefined
   const mermaidMode = tab.kind === 'file' && tab.mermaidMode !== undefined ? tab.mermaidMode : 'split'
   const csvMode = tab.kind === 'file' && tab.csvMode !== undefined ? tab.csvMode : 'table'
   const structuredMode = tab.kind === 'file' && tab.structuredMode !== undefined ? tab.structuredMode : 'graph'
   const notebookMode = tab.kind === 'file' && tab.notebookMode !== undefined ? tab.notebookMode : 'notebook'
+  const sqlNotebookMode = tab.kind === 'file' && tab.sqlNotebookMode !== undefined ? tab.sqlNotebookMode : 'notebook'
   const showEditor = tab.kind === 'file'
     && tab.file !== null
     && !(isHtmlTab && tab.htmlMode !== 'source')
@@ -78,6 +82,9 @@ export function EditorTabBody({
     && !(isStructuredTab && structuredMode === 'graph')
     // The cell surface owns its own editors, so the whole-file editor is not also shown.
     && !(isNotebookTab && notebookMode === 'notebook')
+    // Same for the SQL notebook's cells: the file is JSON, and two editors over one buffer
+    // is how a draft ends up fighting itself.
+    && !(isSqlNotebookTab && sqlNotebookMode === 'notebook')
   // Read an interactive preview's local dependency relative to the opened HTML file;
   // the resolved path is still scope-checked by the workspace backend.
   const htmlBasePath = tab.kind === 'file' ? tab.path : undefined
@@ -248,6 +255,31 @@ export function EditorTabBody({
     mergeDown: t('notebook.mergeDown'),
     clearCellOutputs: t('notebook.clearCellOutputs'),
   }), [t])
+  const sqlNotebookLabels = useMemo<SqlNotebookLabels>(() => ({
+    save: t('notebook.save'),
+    saveDirty: t('notebook.saveDirty'),
+    saveClean: t('notebook.saveClean'),
+    saving: t('notebook.saving'),
+    addSqlCell: t('sqlnotebook.addSqlCell'),
+    addMarkdownCell: t('sqlnotebook.addMarkdownCell'),
+    insertSqlBelow: t('sqlnotebook.insertSqlBelow'),
+    insertMarkdownBelow: t('sqlnotebook.insertMarkdownBelow'),
+    deleteCell: t('sqlnotebook.deleteCell'),
+    moveUp: t('sqlnotebook.moveUp'),
+    moveDown: t('sqlnotebook.moveDown'),
+    changeKind: t('sqlnotebook.changeKind'),
+    sqlCell: t('sqlnotebook.sqlCell'),
+    markdownCell: t('sqlnotebook.markdownCell'),
+    rawCell: t('sqlnotebook.rawCell'),
+    degradedCell: t('sqlnotebook.degradedCell'),
+    degradedNotice: t('sqlnotebook.degradedNotice'),
+    blankNotebook: t('sqlnotebook.blankNotebook'),
+    emptyNotebook: t('sqlnotebook.emptyNotebook'),
+    invalidJson: t('sqlnotebook.invalidJson'),
+    missingCells: t('sqlnotebook.missingCells'),
+    unsupportedVersion: t('sqlnotebook.unsupportedVersion'),
+    addFirstCell: t('sqlnotebook.addFirstCell'),
+  }), [t])
   // Outline only makes sense where a rendered preview is shown (preview or split).
   const fileTab = tab.kind === 'file' ? tab : null
   const outlineEntries = useMemo(() => {
@@ -329,11 +361,30 @@ export function EditorTabBody({
       />
     )
     : null
+  // The SQL notebook surface is built the same way: one value ahead of the view chain, so
+  // the chain below stays a choice between bodies rather than a nest of conditionals.
+  const sqlNotebookSurface = isSqlNotebookTab && sqlNotebookMode === 'notebook'
+    ? (
+      <SqlNotebookSurface
+        key={`sqlnotebook-${tab.id}`}
+        path={tab.path}
+        draft={tab.draft}
+        editable={tab.externalChange === null && !tab.saving}
+        dirty={tab.dirty}
+        saving={tab.saving}
+        onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
+        onSave={() => { void controller.save(tab.id) }}
+        labels={sqlNotebookLabels}
+      />
+    )
+    : null
   return (
     <div className={css.editorFileArea}>
       <div className={css.editorFileBody}>
         {notebookSurface !== null
           ? notebookSurface
+          : sqlNotebookSurface !== null
+          ? sqlNotebookSurface
           : isMermaidTab && mermaidMode === 'preview'
           ? <MermaidPreview key={`mermaid-${tab.id}`} source={tab.draft} labels={mermaidLabels} />
           : isMermaidTab && mermaidMode === 'split'
@@ -486,6 +537,12 @@ export function EditorTabBody({
               <div className={css.editorStatusBarSwitch} role="group" aria-label={t('notebook.modeNotebook')}>
                 <button type="button" className={css.editorStatusBarAction} data-active={notebookMode === 'notebook' || undefined} aria-label={t('notebook.modeNotebook')} title={t('notebook.modeNotebook')} onClick={() => { controller.setNotebookMode('notebook', tab.id) }}><IconPreviewOutline16 /></button>
                 <button type="button" className={css.editorStatusBarAction} data-active={notebookMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setNotebookMode('source', tab.id) }}><IconSourceOutline16 /></button>
+              </div>
+            )}
+            {isSqlNotebookTab && (
+              <div className={css.editorStatusBarSwitch} role="group" aria-label={t('sqlnotebook.modeNotebook')}>
+                <button type="button" className={css.editorStatusBarAction} data-active={sqlNotebookMode === 'notebook' || undefined} aria-label={t('sqlnotebook.modeNotebook')} title={t('sqlnotebook.modeNotebook')} onClick={() => { controller.setSqlNotebookMode('notebook', tab.id) }}><IconPreviewOutline16 /></button>
+                <button type="button" className={css.editorStatusBarAction} data-active={sqlNotebookMode === 'source' || undefined} aria-label={t('editor.source')} title={t('editor.source')} onClick={() => { controller.setSqlNotebookMode('source', tab.id) }}><IconSourceOutline16 /></button>
               </div>
             )}
             {/*

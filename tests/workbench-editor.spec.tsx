@@ -16,6 +16,9 @@ const NOTEBOOK_DRAFT = JSON.stringify({
   nbformat_minor: 5,
 })
 
+/** One SQL cell, which is all the shell needs to hand over: the surface reads the text. */
+const SQLNB_DRAFT = JSON.stringify({ version: 1, cells: [{ kind: 'sql', source: 'SELECT 1' }] })
+
 vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbenchState.current }))
 vi.mock('../src/client/core/clipboard.ts', () => ({ copyTextToClipboard: vi.fn(() => Promise.resolve()) }))
 vi.mock('../src/client/editor/CodeEditor.tsx', () => ({
@@ -37,6 +40,13 @@ vi.mock('../src/client/notebook/NotebookSurface.tsx', () => ({
   ),
 }))
 vi.mock('../src/client/notebook/NotebookKernelStatus.tsx', () => ({ NotebookKernelStatus: () => null }))
+// The SQL notebook surface is a shell test's blind spot in the same way: what matters here
+// is which body the shell picks, and that the draft it hands over is the file text.
+vi.mock('../src/client/sql/SqlNotebookSurface.tsx', () => ({
+  SqlNotebookSurface: ({ draft, editable }: { draft: string; editable: boolean }) => (
+    <div data-testid="sql-notebook-surface" data-draft={draft} data-editable={editable ? 'true' : 'false'} />
+  ),
+}))
 vi.mock('../src/client/mermaid/MermaidPreview.tsx', () => ({
   MermaidPreview: ({ source, split }: { source: string; split?: boolean }) => (
     <div data-testid="mermaid-preview" data-source={source} data-split={split === true ? 'true' : 'false'} />
@@ -210,6 +220,41 @@ describe('WorkbenchEditor multi-file tabs', () => {
     fileTab(2).outlineVisible = true
     const on = renderEditor(controllerFake())
     expect(on.getByTestId('notebook-surface').getAttribute('data-outline-visible')).toBe('true')
+  })
+
+  it('opens a .sqlnb on its cell surface without also mounting the file editor', () => {
+    // Two editors over one buffer is how a draft ends up fighting itself, so the rule the
+    // other cell-style views already follow applies the moment `.sqlnb` is recognised.
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const view = renderEditor(controllerFake())
+    expect(view.getByTestId('sql-notebook-surface').getAttribute('data-draft')).toBe(SQLNB_DRAFT)
+    expect(view.queryByRole('textbox', { name: 'query.sqlnb' })).toBeNull()
+    expect(view.queryByRole('button', { name: '自动换行' })).toBeNull()
+  })
+
+  it('switches a .sqlnb to its text from the status bar', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    fireEvent.click(view.getByRole('button', { name: '源码' }))
+    expect(controller.setSqlNotebookMode).toHaveBeenCalledWith('source', 'file:query.sqlnb')
+  })
+
+  it('shows the file editor, not the cells, while a .sqlnb is in source mode', () => {
+    // The source view is the way out of a file the surface refuses to rewrite, so it has to
+    // really mount the editor rather than merely hide the cells.
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'source')
+    const view = renderEditor(controllerFake())
+    expect(view.queryByTestId('sql-notebook-surface')).toBeNull()
+    expect(view.getByRole('textbox', { name: 'query.sqlnb' })).toBeTruthy()
+  })
+
+  it('offers the cell surface back from a .sqlnb source view', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'source')
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+    fireEvent.click(view.getByRole('button', { name: 'SQL 笔记视图' }))
+    expect(controller.setSqlNotebookMode).toHaveBeenCalledWith('notebook', 'file:query.sqlnb')
   })
 
   it('uses a DSH modal before discarding an unsaved tab', () => {
@@ -580,6 +625,7 @@ function controllerFake() {
     closeTab: vi.fn(() => true),
     setMarkdownMode: vi.fn(),
     toggleMarkdownOutline: vi.fn(),
+    setSqlNotebookMode: vi.fn(),
     setHtmlMode: vi.fn(),
     setMermaidMode: vi.fn(),
     setEditorWrap: vi.fn(),
@@ -667,6 +713,12 @@ function tab(path: string, content: string, markdown: boolean, mermaidMode?: Wor
  */
 function openNotebookTab(path: string, content: string, notebookMode: NonNullable<WorkbenchFileTab['notebookMode']>): void {
   workbenchState.current.tabs.push({ ...tab(path, content, false), notebookMode })
+  focusPrimaryTab(`file:${path}`)
+}
+
+/** The same for a `.sqlnb`: the shell decides from the extension plus the tab's view mode. */
+function openSqlNotebookTab(path: string, content: string, mode: NonNullable<WorkbenchFileTab['sqlNotebookMode']>): void {
+  workbenchState.current.tabs.push({ ...tab(path, content, false), sqlNotebookMode: mode })
   focusPrimaryTab(`file:${path}`)
 }
 

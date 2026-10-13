@@ -6,6 +6,7 @@ import type {
   CsvViewMode,
   HtmlViewMode,
   NotebookViewMode,
+  SqlNotebookViewMode,
   StructuredViewMode,
   MarkdownViewMode,
   MermaidViewMode,
@@ -154,5 +155,15 @@ export class WorkbenchEdits {
    */
   setNotebookMode(mode: NotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.patchFileTab(tabId, (tab) => { tab.notebookMode = mode })
+  }
+
+  /**
+   * Switch one `.sqlnb` file tab between its cell surface and the file's JSON text.
+   *
+   * Nothing is written back on the way out: the draft is the file text in both views, so
+   * the switch only chooses which projection of it the reader sees.
+   */
+  setSqlNotebookMode(mode: SqlNotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
+    this.patchFileTab(tabId, (tab) => { tab.sqlNotebookMode = mode })
   }
 }

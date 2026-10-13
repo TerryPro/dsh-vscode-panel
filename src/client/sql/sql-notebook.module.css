@@ -1,0 +1,271 @@
+/*
+ * SQL notebook surface: the cell stack and the one-row toolbar above it.
+ *
+ * The shapes here are the notebook's own cell language — the same header strip, prompt
+ * column, hover-revealed actions and rounded cell border — drawn entirely from DSH's
+ * design tokens so a `.sqlnb` reads as part of the workbench rather than as an embedded
+ * web page. It is a separate module on purpose: the two surfaces share a visual grammar
+ * (ADR 0002) but not a lifecycle, and a rule added for SQL results must not reach into a
+ * Jupyter notebook's output region by accident.
+ */
+
+.root {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base);
+}
+
+/*
+ * Fixed at the shared middle-column row height, like the notebook and JSON toolbars, so the
+ * bottom rule continues the divider the rest of the centre column draws. The reserved gutter
+ * matches `.cells`, keeping the two right edges one scrollbar apart at any height.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: var(--dsh-workbench-view-toolbar-height);
+  padding: 0 10px;
+  overflow: hidden;
+  scrollbar-gutter: stable;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.toolbarAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.toolbarAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.toolbarAction:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Unsaved changes are a colour here, not a dot: the row is icons of equal size. */
+.toolbarActionActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.toolbarDivider {
+  width: 1px;
+  height: 14px;
+  background: var(--dsw-alias-border-l1);
+}
+
+.cells {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px;
+  padding-block-end: 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-block-end: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  /* Clip the header's full-bleed fill to the cell's rounded corners. */
+  overflow: hidden;
+}
+
+/*
+ * A cell whose stored kind this build does not know is shown but not editable, so it has to
+ * say so before the reader tries: the muted frame states "this row is inert" without adding
+ * a control, and the badge in the header names why.
+ */
+.cell[data-degraded='true'] {
+  border-style: dashed;
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.cellHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 3px 8px 3px 10px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.cellIndex {
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  font-size: 11px;
+  min-width: 16px;
+  text-align: end;
+}
+
+.cellKind {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cellBadge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  background: var(--dsw-alias-state-warn-secondary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.cellActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.cell:hover .cellActions {
+  opacity: 1;
+}
+
+.cellAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.cellAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.cellAction:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cellKindSelect {
+  display: inline-flex;
+}
+
+.cellKindSelect select {
+  height: 20px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cellKindSelect select:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.cellBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 30px;
+}
+
+/* A cell this surface will not edit: its text, as stored, with nothing around it. */
+.cellText {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.notice,
+.noticeError {
+  margin-block-end: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.noticeError {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 12px;
+}
+
+.emptyText {
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+
+.emptyAction {
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.emptyAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

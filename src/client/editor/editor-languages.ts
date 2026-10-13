@@ -89,6 +89,11 @@ const EXTENSION_GRAMMARS: Record<string, Grammar> = {
   // A notebook's Source view is its raw JSON, so `.ipynb` highlights as JSON in the
   // text editor; the cell surface is chosen from the path elsewhere, not here.
   ipynb: 'json',
+  // A SQL notebook's *cells* speak SQL, and the cell editor is handed the notebook's own
+  // path to pick its grammar from (that is how a Jupyter cell gets the kernel's language).
+  // So `.sqlnb` resolves to SQL even though the file on disk is JSON: the raw view reads a
+  // little worse, and every SQL cell reads correctly without each caller inventing a path.
+  sqlnb: 'sql',
   php: 'php',
   py: 'python',
   rs: 'rust',

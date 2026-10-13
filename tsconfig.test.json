@@ -46,6 +46,8 @@
     "tests/sql-execute.spec.ts",
     "tests/sql-backend.spec.ts",
     "tests/sql-notebook-document.spec.ts",
+    "tests/sql-notebook-surface.spec.tsx",
+    "tests/editor-languages.spec.ts",
     "tests/rightbar-seat.spec.ts",
     "tests/native-rightbar-entry.spec.ts"
   ]
