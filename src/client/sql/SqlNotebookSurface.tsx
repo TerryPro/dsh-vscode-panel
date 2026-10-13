@@ -106,6 +106,10 @@ export interface SqlNotebookLabels {
   scanTruncated: string
   /** Said once per new handle: what a session-scoped connection does not carry over. */
   scratchNotice: string
+  /** A Run All that stopped mid-stretch has to say where, and how many it left. */
+  runAllStopped: (index: number, remaining: number) => string
+  /** The Host rolls an open transaction back when a handle closes; that is worth saying. */
+  disconnectedRolledBack: string
   /** Shown when a Run All is about to occupy the Host's thread. */
   runAllNotice: (count: number) => string
   confirm: string
@@ -157,6 +161,8 @@ export function SqlNotebookSurface({
   const [pickPath, setPickPath] = useState<string>('')
   const [pickAccess, setPickAccess] = useState<SqlAccess>('read-only')
   const [confirmRunAll, setConfirmRunAll] = useState(false)
+  /** One-line news about the last stretch or disconnect, shown until the next one. */
+  const [news, setNews] = useState<string | null>(null)
   /** Which markdown cells are showing their rendered form. Never in the file. */
   const [rendered, setRendered] = useState<Record<string, boolean>>({})
   const scanWanted = useRef(false)
@@ -171,6 +177,13 @@ export function SqlNotebookSurface({
 
   const connection = runState?.connection ?? null
   const busy = runState !== null && (runState.connection !== null) && runtime.busy(tabId)
+  /**
+   * An in-memory database has no tier: there is no file to protect, so the Host always opens
+   * it writable and refuses a request that names a tier for it. The toggle is therefore
+   * hidden rather than defaulted, and the connect sends `writable`.
+   */
+  const memoryPicked = pickPath === SQL_MEMORY_TARGET
+  const connectAccess: SqlAccess = memoryPicked ? 'writable' : pickAccess
 
   // The workspace walk is what the picker lists; it happens once per mount and only on
   // request afterwards, because the directory budget is the cost of being thorough.
@@ -232,8 +245,16 @@ export function SqlNotebookSurface({
 
   const runStretch = useCallback((): void => {
     setConfirmRunAll(false)
-    void runtime.runAll(tabId)
-  }, [runtime, tabId])
+    void runtime.runAll(tabId).then((outcome) => {
+      if (outcome.stoppedAt === null) return
+      // "Stopped at cell N" needs the row the reader counts, not the id the queue used, so
+      // the index is taken from the same list the cells are rendered from.
+      const stoppedIndex = document.cells.findIndex(cell => cell.id === outcome.stoppedAt)
+      const remaining = document.cells.filter(cell => cell.kind === 'sql').length - outcome.ran
+      if (stoppedIndex < 0) return
+      setNews(labels.runAllStopped(stoppedIndex + 1, Math.max(0, remaining)))
+    })
+  }, [document.cells, labels, runtime, tabId])
 
   const sqlCellCount = document.cells.filter(cell => cell.kind === 'sql').length
 
@@ -346,17 +367,20 @@ export function SqlNotebookSurface({
             ))}
           </select>
         </label>
-        <select
-          className={css.pickerSelect}
-          aria-label={connection === null ? labels.readOnlyTier : labels.tierLocked}
-          title={connection === null ? undefined : labels.tierLocked}
-          value={pickAccess}
-          disabled={!canConnect || connection !== null}
-          onChange={event => { setPickAccess(event.target.value === 'writable' ? 'writable' : 'read-only') }}
-        >
-          <option value="read-only">{labels.readOnlyTier}</option>
-          <option value="writable">{labels.writableTier}</option>
-        </select>
+        {/* A `:memory:` target has no tier to choose, so the control is not shown for it. */}
+        {!memoryPicked && (
+          <select
+            className={css.pickerSelect}
+            aria-label={connection === null ? labels.readOnlyTier : labels.tierLocked}
+            title={connection === null ? undefined : labels.tierLocked}
+            value={pickAccess}
+            disabled={!canConnect || connection !== null}
+            onChange={event => { setPickAccess(event.target.value === 'writable' ? 'writable' : 'read-only') }}
+          >
+            <option value="read-only">{labels.readOnlyTier}</option>
+            <option value="writable">{labels.writableTier}</option>
+          </select>
+        )}
         <button type="button" className={css.toolbarAction} aria-label={labels.rescan} title={labels.rescan} disabled={scanning} onClick={rescan}>
           <IconRestartKernel16 />
         </button>
@@ -372,7 +396,7 @@ export function SqlNotebookSurface({
               className={css.toolbarButton}
               disabled={!canConnect || pickPath === ''}
               title={pickPath === '' ? labels.noDatabase : labels.connect}
-              onClick={() => { void runtime.connect(tabId, pickPath, pickAccess) }}
+              onClick={() => { void runtime.connect(tabId, pickPath, connectAccess) }}
             >
               {labels.connect}
             </button>
@@ -381,7 +405,14 @@ export function SqlNotebookSurface({
             <button
               type="button"
               className={css.toolbarButton}
-              onClick={() => { void runtime.disconnect(tabId) }}
+              onClick={() => {
+                void runtime.disconnect(tabId).then((outcome) => {
+                  // The Host rolls back an open transaction on the way out; a reader who had
+                  // written 500 rows into a temp table in a transaction must not learn that
+                  // from a missing table later.
+                  if (outcome?.rolledBack === true) setNews(labels.disconnectedRolledBack)
+                })
+              }}
             >
               {labels.disconnect}
             </button>
@@ -398,6 +429,9 @@ export function SqlNotebookSurface({
       </div>
       {runState?.freshConnection === true && (
         <div className={css.notice} role="status">{labels.scratchNotice}</div>
+      )}
+      {news !== null && (
+        <div className={css.notice} role="status">{news}</div>
       )}
       {runState?.connectionProblem !== null && runState?.connectionProblem !== undefined && (
         <div className={css.noticeError} role="alert">{refusalText(runState.connectionProblem, labels)}</div>

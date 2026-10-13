@@ -8,6 +8,7 @@ import type { SqlResultBlock } from '../src/shared/sql-protocol.ts'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../src/client/sql/SqlNotebookSurface.tsx'
 import type { SqlResultLabels } from '../src/client/sql/SqlResultBlockView.tsx'
 import { SqlRuntime } from '../src/client/sql/sql-runtime.ts'
+import { sqlBlock } from './sql-block-fixture.ts'
 import { parseSqlNotebook, SQLNB_VERSION } from '../src/client/sql/sql-notebook-document.ts'
 
 // The store package pulls zustand/immer, which are not installed for tests.
@@ -103,6 +104,9 @@ const labels: SqlNotebookLabels = {
   rescan: zh['sqlnotebook.rescan'],
   scanTruncated: zh['sqlnotebook.scanTruncated'],
   scratchNotice: zh['sqlnotebook.scratchNotice'],
+  runAllStopped: (index, remaining) => zh['sqlnotebook.runAllStopped']
+    .replace('{index}', String(index)).replace('{remaining}', String(remaining)),
+  disconnectedRolledBack: zh['sqlnotebook.disconnectedRolledBack'],
   runAllNotice: count => zh['sqlnotebook.runAllNotice'].replace('{count}', String(count)),
   confirm: zh['sqlnotebook.confirm'],
   notConnectedRefusal: zh['sqlnotebook.notConnectedRefusal'],
@@ -125,15 +129,7 @@ const resultLabels: SqlResultLabels = {
 const markdownLabels = {} as never
 
 function block(overrides: Partial<SqlResultBlock> = {}): SqlResultBlock {
-  return {
-    columns: [{ label: 'x', name: 'x', type: 'INTEGER' }],
-    rows: [[1]],
-    rowLimit: 1000,
-    truncated: false,
-    columnsDropped: 0,
-    valuesTruncated: 0,
-    ...overrides,
-  }
+  return sqlBlock([{ label: 'x', name: 'x', type: 'INTEGER' }], [[1]], overrides)
 }
 
 /** A `.sqlnb` written the way the surface writes one: four-space indent, trailing newline. */
@@ -160,6 +156,8 @@ function open(draft: string, options: {
   entries?: WorkspaceEntry[]
   /** Replaces the execute answer entirely, so a test can hold a run open. */
   execute?: () => Promise<{ path: string; blocks: SqlResultBlock[]; elapsedMs: number; executionCount: number }>
+  /** Whether the Host says it rolled an open transaction back when the handle closed. */
+  rolledBack?: boolean
 } = {}): Harness {
   const onEdit = vi.fn()
   const onSave = vi.fn()
@@ -173,7 +171,7 @@ function open(draft: string, options: {
       elapsedMs: 42,
       executionCount: options.executionCount ?? 1,
     }))),
-    sqlClose: vi.fn(() => Promise.resolve({ path: 'demo.db', closed: true, rolledBack: false })),
+    sqlClose: vi.fn(() => Promise.resolve({ path: 'demo.db', closed: true, rolledBack: options.rolledBack ?? false })),
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
   }
   const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => draft })
@@ -329,6 +327,45 @@ describe('SqlNotebookSurface 连接与执行', () => {
   it('offers an in-memory database beside the files', () => {
     const { view } = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
     expect(view.getByRole('combobox', { name: labels.database }).textContent).toContain(':memory:')
+  })
+
+  it('opens an in-memory database without a tier, because it has none', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+    await waitFor(() => { expect(picker.options.length).toBeGreaterThan(2) })
+    fireEvent.change(picker, { target: { value: ':memory:' } })
+
+    // The requirement is that no read-only/writable choice is shown for it; a toggle that
+    // merely defaulted to writable would still offer the answer the Host refuses.
+    expect(harness.view.queryByRole('combobox', { name: labels.readOnlyTier })).toBeNull()
+    fireEvent.click(harness.view.getByRole('button', { name: labels.connect }))
+    await waitFor(() => { expect(harness.api.sqlOpen).toHaveBeenCalled() })
+    expect(harness.api.sqlOpen).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1', notebook: 'query.sqlnb', path: ':memory:', access: 'writable',
+    })
+  })
+
+  it('says which cell a Run All stopped at, and how many it left unrun', async () => {
+    const harness = open(notebookDraft([
+      { kind: 'sql', source: 'SELEKT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]), {
+      blocks: [block({ columns: [], rows: [], error: { code: 'SQL_STATEMENT_FAILED', message: 'near "SELEKT": syntax error' } })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getByRole('button', { name: labels.runAll }))
+    fireEvent.click(harness.view.getByRole('button', { name: labels.confirm }))
+
+    await waitFor(() => { expect(harness.api.sqlExecute).toHaveBeenCalledTimes(1) })
+    expect(await harness.view.findByText(labels.runAllStopped(1, 1))).toBeTruthy()
+  })
+
+  it('says when disconnecting rolled back an open transaction', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), { rolledBack: true })
+    await harness.connect()
+    fireEvent.click(harness.view.getByRole('button', { name: labels.disconnect }))
+
+    expect(await harness.view.findByText(labels.disconnectedRolledBack)).toBeTruthy()
   })
 
   it('locks the tier once a handle is open, because changing it means reconnecting', async () => {

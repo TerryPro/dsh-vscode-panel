@@ -23,7 +23,7 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { WorkbenchApi } from '../model/api.ts'
 import type { SqlAccess, SqlExecuteResult, SqlResultBlock } from '../../shared/sql-protocol.ts'
-import { parseSqlNotebook, sqlCellId, type SqlNotebookCellModel } from './sql-notebook-document.ts'
+import { parseSqlNotebook, type SqlNotebookCellModel } from './sql-notebook-document.ts'
 
 /** The draft access this runtime needs. There is no writer in it, on purpose. */
 export interface SqlDraftBridge {
@@ -100,7 +100,19 @@ interface TabRuntime {
    * stretch queued ahead of time; a serial queue can only honestly show one step ahead.
    */
   stretch: string[]
+  /** Set when a Run All stopped at a failing cell, so the outcome can name it. */
+  stoppedAt: string | null
+  /** How many cells the current Run All finished before it stopped or completed. */
+  countedRuns: number
+  /** A Run All is in progress, so each finished cell counts and a failure ends the stretch. */
+  stretchActive: boolean
   idleWaiters: Array<() => void>
+}
+
+/** What a Run All did: how many cells ran, and the one that stopped it, if any. */
+export interface SqlRunAllOutcome {
+  ran: number
+  stoppedAt: string | null
 }
 
 function initialSqlState(): SqlNotebookState {
@@ -147,6 +159,9 @@ export class SqlRuntime {
       queue: [],
       inflight: null,
       stretch: [],
+      stoppedAt: null,
+      countedRuns: 0,
+      stretchActive: false,
       idleWaiters: [],
     })
     this.wakePending(tabId)
@@ -289,23 +304,32 @@ export class SqlRuntime {
   /**
    * Run every SQL cell in file order, stopping at the first that fails.
    *
-   * Resolves when the work this asked for is over, so the panel can say which cell the
-   * stretch stopped at without polling. Markdown and unrecognized cells are left out: a
-   * stretch that ran them would report a number the reader never saw executed.
+   * Resolves when the work this asked for is over, and says what stopped it: the reader who
+   * pressed Run All needs to know which cell the stretch ended at, not merely that nothing
+   * else is running. Markdown and unrecognized cells are left out — a stretch that ran them
+   * would report a number the reader never saw executed.
    */
-  async runAll(tabId: string): Promise<void> {
+  async runAll(tabId: string): Promise<SqlRunAllOutcome> {
     const tab = this.tabs.get(tabId)
-    if (tab === undefined) return
+    if (tab === undefined) return { ran: 0, stoppedAt: null }
     const ids = this.cells(tabId).filter(cell => cell.kind === 'sql').map(cell => cell.id)
-    if (ids.length === 0) return
+    if (ids.length === 0) return { ran: 0, stoppedAt: null }
     const [first, ...rest] = ids
-    if (first === undefined) return
+    if (first === undefined) return { ran: 0, stoppedAt: null }
     tab.stretch = rest
+    tab.stoppedAt = null
+    tab.countedRuns = 0
+    tab.stretchActive = true
     this.enqueue(tab, first)
     const started = this.drain(tabId)
     await this.whenIdle(tab)
     await started
+    const outcome = { ran: tab.countedRuns, stoppedAt: tab.stoppedAt }
     tab.stretch = []
+    tab.stretchActive = false
+    tab.stoppedAt = null
+    tab.countedRuns = 0
+    return outcome
   }
 
   /**
@@ -321,6 +345,7 @@ export class SqlRuntime {
     const queued = [...tab.queue]
     tab.queue = []
     tab.stretch = []
+    tab.stretchActive = false
     tab.store.update(state => {
       for (const id of queued) {
         const run = state.cells[id]
@@ -422,7 +447,17 @@ export class SqlRuntime {
       return
     }
 
-    const refusal = this.refuseBeforeRunning(tabId, cellId)
+    // A cell the reader deleted while it waited is passed over rather than failed: an error
+    // row for a cell that is gone describes something they cannot act on, and the queue has
+    // other work that is not that cell's failure's fault.
+    const cell = this.cellAt(tabId, cellId)
+    if (cell === undefined) {
+      tab.store.update(state => { delete state.cells[cellId] })
+      void this.drain(tabId)
+      return
+    }
+
+    const refusal = this.refuseBeforeRunning(tabId, cell)
     if (refusal !== null) {
       tab.store.update(state => { state.cells[cellId] = refusal })
       void this.drain(tabId)
@@ -431,7 +466,7 @@ export class SqlRuntime {
 
     // The source is read now rather than when the cell was queued: a reader who edits a
     // queued cell means the text that is in the cell when its turn comes.
-    const source = this.cellAt(tabId, cellId)?.source ?? ''
+    const source = cell.source
     const running = tab.store.getSnapshot().cells[cellId]
     tab.inflight = cellId
     tab.store.update(state => {
@@ -448,6 +483,7 @@ export class SqlRuntime {
         run.failure = failure
       })
       tab.inflight = null
+      this.afterCommit(tab, cellId)
       this.notifyIdle(tab)
       void this.drain(tabId)
       return
@@ -464,17 +500,36 @@ export class SqlRuntime {
       run.failure = failing === undefined ? null : { code: failing.code, message: failing.message }
     })
 
-    const stopped = tab.stretch.length > 0 && tab.store.getSnapshot().cells[cellId]?.status === 'error'
-    if (tab.stretch.length > 0 && !stopped) {
-      // Feed the stretch one step at a time, so an aborted run-all leaves nothing behind.
-      const nextId = tab.stretch.shift()
-      if (nextId !== undefined) this.enqueue(tab, nextId)
-    } else if (stopped) {
-      tab.stretch = []
-    }
+    this.afterCommit(tab, cellId)
     tab.inflight = null
     this.notifyIdle(tab)
     void this.drain(tabId)
+  }
+
+  /**
+   * Account for one finished run when it was part of a Run All.
+   *
+   * Called on both ways a run can end — an answer, or a refusal at the request level — because
+   * the stretch has to stop at whichever cell failed, whichever way it failed.
+   */
+  private afterCommit(tab: TabRuntime, cellId: string): void {
+    if (!tab.stretchActive) return
+    const status = tab.store.getSnapshot().cells[cellId]?.status
+    if (status === 'cancelled') {
+      tab.stretchActive = false
+      tab.stretch = []
+      return
+    }
+    tab.countedRuns += 1
+    if (status === 'error') {
+      tab.stoppedAt = cellId
+      tab.stretch = []
+      tab.stretchActive = false
+      return
+    }
+    // Feed the stretch one step at a time, so an aborted run-all leaves nothing behind.
+    const nextId = tab.stretch.shift()
+    if (nextId !== undefined) this.enqueue(tab, nextId)
   }
 
   /**
@@ -501,14 +556,10 @@ export class SqlRuntime {
    * own parser, which the Host already owns (ADR 0006). Duplicating a lexer in the browser
    * would be a second answer to "is there a statement in this", and the two would drift.
    */
-  private refuseBeforeRunning(tabId: string, cellId: string): SqlCellRun | null {
+  private refuseBeforeRunning(tabId: string, cell: SqlNotebookCellModel): SqlCellRun | null {
     const tab = this.tabs.get(tabId)
     if (tab === undefined) return null
     if (tab.store.getSnapshot().connection === null) return refusedLocally('SQL_NOT_CONNECTED')
-    const cell = this.cellAt(tabId, cellId)
-    // A cell that vanished from the file while queued is dropped rather than failed: the
-    // reader deleted it, and an error row for a cell they removed says nothing useful.
-    if (cell === undefined) return refusedLocally('SQL_OBJECT_NOT_FOUND')
     if (cell.kind !== 'sql') return refusedLocally('SQL_EMPTY_CELL')
     if (cell.source.trim() === '') return refusedLocally('SQL_EMPTY_CELL')
     return null
@@ -518,6 +569,9 @@ export class SqlRuntime {
     tab.queue = []
     tab.inflight = null
     tab.stretch = []
+    tab.stretchActive = false
+    tab.stoppedAt = null
+    tab.countedRuns = 0
     this.notifyIdle(tab)
     this.logger.info(`workbench-layout: sql notebook runtime cleared outstanding work (${reason})`)
   }
@@ -539,9 +593,4 @@ export class SqlRuntime {
     if (waiting === undefined || waiting.size === 0) return
     for (const wake of [...waiting]) wake()
   }
-}
-
-/** The cell id the surface holds for a cell index, so callers need not recompute it. */
-export function sqlNotebookCellId(index: number): string {
-  return sqlCellId(index)
 }

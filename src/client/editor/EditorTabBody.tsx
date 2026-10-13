@@ -308,6 +308,8 @@ export function EditorTabBody({
     rescan: t('sqlnotebook.rescan'),
     scanTruncated: t('sqlnotebook.scanTruncated'),
     scratchNotice: t('sqlnotebook.scratchNotice'),
+    runAllStopped: (index, remaining) => t('sqlnotebook.runAllStopped', { index: String(index), remaining: String(remaining) }),
+    disconnectedRolledBack: t('sqlnotebook.disconnectedRolledBack'),
     runAllNotice: count => t('sqlnotebook.runAllNotice', { count: String(count) }),
     confirm: t('sqlnotebook.confirm'),
     notConnectedRefusal: t('sqlnotebook.notConnectedRefusal'),

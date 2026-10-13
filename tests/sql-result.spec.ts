@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SqlResultBlock } from '../src/shared/sql-protocol.ts'
+import { sqlBlock } from './sql-block-fixture.ts'
 import {
   declaredTypeOf,
   describeSqlValue,
@@ -8,15 +9,7 @@ import {
 } from '../src/client/sql/sql-result.ts'
 
 function block(overrides: Partial<SqlResultBlock> = {}): SqlResultBlock {
-  return {
-    columns: [{ label: 'x', name: 'x', type: 'INTEGER' }],
-    rows: [[1]],
-    rowLimit: 1000,
-    truncated: false,
-    columnsDropped: 0,
-    valuesTruncated: 0,
-    ...overrides,
-  }
+  return sqlBlock([{ label: 'x', name: 'x', type: 'INTEGER' }], [[1]], overrides)
 }
 
 describe('formatBlobSize', () => {

@@ -5,10 +5,11 @@
  * first part is shown" note. It uses the same `/tree` route the file tree already calls, so
  * a read the client can already perform needs no new Host verb.
  *
- * A symlink is not filtered out here. This scan cannot see one — `/tree` reports it as an
- * entry like any other — and the Host already refuses a symlinked database with
- * `SYMLINK_UNSUPPORTED` when the reader picks it. Hiding paths to claim "symlinks refused"
- * would be a promise this module cannot keep.
+ * Only entries the Host reported as regular files are offered: `/tree` labels a symlink with
+ * its own kind, so the walk drops it here, and the Host refuses one again with
+ * `SYMLINK_UNSUPPORTED` at open. The second gate is the one that matters — a listing can
+ * change between the scan and the click — but hiding the row is still the kinder answer than
+ * offering a path that will fail.
  */
 
 import type { DirectoryListing } from '../../shared/contracts.ts'

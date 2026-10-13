@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { WorkbenchApiError } from '../src/client/model/api.ts'
 import type { SqlExecuteResult, SqlResultBlock } from '../src/shared/sql-protocol.ts'
+import { sqlBlock } from './sql-block-fixture.ts'
 import { SqlRuntime, type SqlDraftBridge } from '../src/client/sql/sql-runtime.ts'
 
 // The store package pulls zustand/immer, which are not installed for tests.
@@ -23,15 +24,7 @@ vi.mock('@deepseek-ai/dsh-client-store', () => ({
 }))
 
 function block(overrides: Partial<SqlResultBlock> = {}): SqlResultBlock {
-  return {
-    columns: [{ label: 'one', name: 'one' }],
-    rows: [[1]],
-    rowLimit: 1000,
-    truncated: false,
-    columnsDropped: 0,
-    valuesTruncated: 0,
-    ...overrides,
-  }
+  return sqlBlock([{ label: 'one', name: 'one' }], [[1]], overrides)
 }
 
 function notebookDraft(cells: Array<{ kind: string; source: string }>): string {
@@ -226,7 +219,9 @@ describe('SqlRuntime', () => {
     const finished = fixture.runtime.runAll('tab-1')
     await settle(fixture, [block()])
     await settle(fixture, [block({ columns: [], rows: [], error: { code: 'SQL_STATEMENT_FAILED', message: 'near "SELEKT": syntax error' } })])
-    await finished
+    // The outcome is what lets the panel say where the stretch ended rather than only that
+    // it ended: the caller knows how many ran and which cell stopped it.
+    await expect(finished).resolves.toEqual({ ran: 2, stoppedAt: 'sqlnb-1' })
 
     expect(fixture.api.sqlExecute).toHaveBeenCalledTimes(2)
     const state = fixture.runtime.state('tab-1')
