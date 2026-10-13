@@ -49,6 +49,7 @@
     "tests/sql-notebook-surface.spec.tsx",
     "tests/sql-notebook-create.spec.ts",
     "tests/sql-database-scan.spec.ts",
+    "tests/sql-runtime.spec.ts",
     "tests/editor-languages.spec.ts",
     "tests/rightbar-seat.spec.ts",
     "tests/native-rightbar-entry.spec.ts"
