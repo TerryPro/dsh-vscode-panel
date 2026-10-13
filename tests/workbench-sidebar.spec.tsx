@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/core/locales.ts'
 import { SIDEBAR_SHADOWED_ATTRIBUTE, WorkbenchSidebar, type WorkbenchSidebarProps } from '../src/client/shell/WorkbenchSidebar.tsx'
 
-vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => ({ sidebarMode: 'files' }) }))
+// Held in a box so one case can put the sidebar in another mode; `vi.hoisted` keeps it above the
+// mock factories, which run while this file's imports are being resolved.
+const workbench = vi.hoisted(() => ({ current: { sidebarMode: 'files' } as Record<string, unknown> }))
+
+vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbench.current }))
 vi.mock('../src/client/files/FileTree.tsx', () => ({
   FileTree: ({ workspaceId, workspacePath }: { workspaceId?: string; workspacePath?: string }) => (
     <div data-probe="file-tree" data-workspace={workspaceId} data-path={workspacePath} />
@@ -16,9 +20,13 @@ vi.mock('../src/client/terminal/TerminalPanel.tsx', () => ({ TerminalPanel: () =
 // Every panel is stubbed here because the spec is about Workspace binding, and the
 // real ones pull in the store package (which needs zustand, not installed for tests).
 vi.mock('../src/client/notebook/KernelPanel.tsx', () => ({ KernelPanel: () => <div data-probe="kernels" /> }))
+vi.mock('../src/client/sql/SqlPanel.tsx', () => ({ SqlPanel: () => <div data-probe="sql" /> }))
 vi.mock('../src/client/shell/WorkbenchRail.tsx', () => ({ WorkbenchRail: () => <div data-probe="rail" /> }))
 
-afterEach(() => { cleanup() })
+afterEach(() => {
+  cleanup()
+  workbench.current = { sidebarMode: 'files' }
+})
 
 const workspaces = [
   { workspaceId: 'workspace-recent', path: '/workspace/recent', sessionIds: ['session-recent'] },
@@ -62,6 +70,17 @@ describe('WorkbenchSidebar Workspace binding', () => {
     // Seat released back to sessions: the body unmounts and the marker goes with it.
     view.unmount()
     expect(document.documentElement.hasAttribute(SIDEBAR_SHADOWED_ATTRIBUTE)).toBe(false)
+  })
+
+  it('renders the SQL panel for the sql mode instead of the file tree', async () => {
+    workbench.current = { sidebarMode: 'sql' }
+    const controller = { setWorkspace: vi.fn() }
+    const view = renderSidebar(controller, {
+      'session-open': { updatedAt: 1, retainedBy: { mainView: 1 } },
+    })
+
+    await waitFor(() => { expect(view.container.querySelector('[data-probe="sql"]')).not.toBeNull() })
+    expect(view.container.querySelector('[data-probe="file-tree"]')).toBeNull()
   })
 })
 

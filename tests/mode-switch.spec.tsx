@@ -53,6 +53,7 @@ const t = (key: string): string => ({
   'mode.files': '文件',
   'mode.git': 'Git',
   'mode.terminal': '终端',
+  'mode.sql': 'SQL',
   'mode.settings': '设置',
   'mode.backToSession': '返回会话',
   'mode.bar': '工作台视图',
@@ -92,9 +93,9 @@ describe('工作台活动栏', () => {
     const dock = appRoot.firstElementChild
     expect(dock).not.toBeNull()
     expect(dock?.querySelector('[role="toolbar"]')).not.toBeNull()
-    // 5 views + editor + conversation + settings. The view count was 4 until the
-    // kernel manager panel joined the dock.
-    expect(dock?.querySelectorAll('button')).toHaveLength(8)
+    // 6 views + editor + conversation + settings. The view count was 4 until the
+    // kernel manager panel joined the dock, and 5 until the SQL notebook panel did.
+    expect(dock?.querySelectorAll('button')).toHaveLength(9)
     // Was previously dead inside the trailing comment above; icons are 18px in the dock.
     expect(dock?.querySelector('[aria-label="Git"] svg')?.getAttribute('width')).toBe('18')
 
