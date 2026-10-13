@@ -248,7 +248,13 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     void controller.refreshGitDecorations?.(targetWorkspace)
     setSelection({ path, kind: 'file' })
     await reloadDirectory(targetWorkspace, directory)
-    if (activeWorkspace.current === targetWorkspace) void controller.openFile(targetWorkspace, path)
+    if (activeWorkspace.current === targetWorkspace) {
+      // A notebook the reader just created opens on `:memory:` (the ticket's default): it runs
+      // without a first file pick, and an in-memory database is the safe place for the writes a
+      // fresh notebook wants. `openFile` resolves once the tab exists, which is what the connect
+      // needs — the connection is keyed by the notebook, so there is nothing to connect before it.
+      void controller.openFile(targetWorkspace, path).then(() => controller.connectNewSqlNotebook(targetWorkspace, path))
+    }
   }
 
   /**

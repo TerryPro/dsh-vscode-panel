@@ -110,7 +110,7 @@ describe('文件目录', () => {
         ],
       })) },
       refreshGitDecorations: vi.fn(() => Promise.resolve()),
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -191,7 +191,7 @@ describe('文件目录', () => {
         listDirectory: vi.fn(() => Promise.resolve({ path: '', truncated: false, entries: [] })),
       },
       consumeSidebarAction: vi.fn(),
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -221,7 +221,7 @@ describe('文件目录', () => {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(((_workspace: string, path: string) => Promise.resolve(listing(path)))) },
       consumeSidebarAction: vi.fn(),
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -251,7 +251,7 @@ describe('文件目录', () => {
         listDirectory: vi.fn(() => Promise.resolve(root)),
         createDirectory: vi.fn(() => Promise.resolve({ name: 'docs', path: 'docs', kind: 'directory' })),
       },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -292,7 +292,7 @@ describe('文件目录', () => {
         renameEntry: vi.fn(() => Promise.resolve({ from: 'README.md', path: 'GUIDE.md', name: 'GUIDE.md', kind: 'file' })),
         deleteEntry: vi.fn(() => Promise.resolve({ path: 'docs', kind: 'directory' })),
       },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
       closeWorkspaceEntries: vi.fn(),
     }
     const view = render(
@@ -344,7 +344,7 @@ describe('文件目录', () => {
         })),
         renameEntry: vi.fn(),
       },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
       closeWorkspaceEntries: vi.fn(),
     }
     const view = render(
@@ -371,7 +371,7 @@ describe('文件目录', () => {
     const controller = {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...notebookApi() },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -398,7 +398,7 @@ describe('文件目录', () => {
     const controller = {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...api },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -421,6 +421,33 @@ describe('文件目录', () => {
     // sees an unsaved notebook they did not write.
     expect(api.saved).toHaveLength(1)
     expect(parseSqlNotebook(api.saved[0]?.content ?? '').cells[1]?.source).toContain('sqlite_master')
+    // A notebook the reader just created opens on an in-memory database: it runs without a first
+    // file pick, and there is nothing on disk for it to damage. The connect is keyed by the
+    // notebook, so it has to wait for the tab that `openFile` creates.
+    await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb') })
+  })
+
+  it('不把已经有文件的笔记自动接到内存库', async () => {
+    // The default is for *new* notebooks only: an existing one has a database its author picked on
+    // purpose, and silently re-pointing it at `:memory:` would hide their data behind an empty one.
+    const api = notebookApi()
+    const root = {
+      path: '',
+      truncated: false,
+      entries: [{ name: 'query-9.sqlnb', path: 'query-9.sqlnb', kind: 'file' as const }],
+    }
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...api },
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+
+    fireEvent.click(await view.findByRole('treeitem', { name: 'query-9.sqlnb' }))
+    await waitFor(() => { expect(controller.openFile).toHaveBeenCalledWith('workspace-1', 'query-9.sqlnb') })
+    expect(controller.connectNewSqlNotebook).not.toHaveBeenCalled()
   })
 
   it('菜单新建的 SQL 笔记带一个空单元格', async () => {
@@ -428,7 +455,7 @@ describe('文件目录', () => {
     const controller = {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(() => Promise.resolve({ path: '', truncated: false, entries: [] })), ...api },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -455,7 +482,7 @@ describe('文件目录', () => {
     const controller = {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...api },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -472,7 +499,7 @@ describe('文件目录', () => {
     const controller = {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(() => Promise.resolve({ path: '', truncated: false, entries: [] })) },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -496,7 +523,7 @@ describe('文件目录', () => {
     const controller = {
       fileTreeExpanded: new Map<string, Set<string>>(),
       api: { listDirectory: vi.fn(() => Promise.resolve({ path: '', truncated: false, entries: [{ name: 'README.md', path: 'README.md', kind: 'file' as const }] })) },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -523,7 +550,7 @@ describe('文件目录', () => {
         })),
         revealPath: vi.fn(() => Promise.resolve({ path: 'README.md' })),
       },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
@@ -554,7 +581,7 @@ describe('文件目录', () => {
         })),
         revealPath: vi.fn(() => Promise.reject(new Error('当前系统没有可用的文件管理器。'))),
       },
-      openFile: vi.fn(),
+      openFile: vi.fn(() => Promise.resolve()), connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
     }
     const view = render(
       <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,

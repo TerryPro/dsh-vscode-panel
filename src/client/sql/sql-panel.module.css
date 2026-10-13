@@ -33,6 +33,121 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+.headerAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.headerAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.headerAction:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 10px 12px 16px 8px;
+}
+
+/* Which notebook this panel is about: the connection is keyed by it, so it is stated, not implied. */
+.notebookLine {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.select {
+  height: 24px;
+  max-width: 100%;
+  padding: 0 4px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.primaryButton {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.primaryButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.readout {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.problem {
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+/*
+ * The in-memory warning stays on screen for as long as the handle is `:memory:`, rather than being
+ * said once at connect time: the fact is true for the whole session, and a line that disappeared
+ * after a few seconds is one the reader can miss before the tables it describes matter.
+ */
+.memoryNote {
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.muted {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .panelEmpty {
   padding: 12px;
   font-size: 12px;

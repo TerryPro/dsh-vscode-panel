@@ -24,6 +24,7 @@ import type {
   TerminalBinding,
   TerminalStatus,
   WorkbenchEditorLayout,
+  WorkbenchFileTab,
   WorkbenchLogger,
   WorkbenchShellChoice,
   WorkbenchSidebarAction,
@@ -48,6 +49,7 @@ import { NotebookRuntime } from '../notebook/notebook-runtime.ts'
 import { KernelRegistry } from '../notebook/kernel-registry.ts'
 import { SqlRuntime } from '../sql/sql-runtime.ts'
 import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
+import { SQL_MEMORY_TARGET } from '../../shared/sql-protocol.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
 
 export * from './workbench-types.ts'
@@ -594,6 +596,23 @@ export class WorkbenchController {
   /** Switch one `.sqlnb` file tab between its cell surface and the file's JSON text. */
   setSqlNotebookMode(mode: SqlNotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
     this.edits.setSqlNotebookMode(mode, tabId)
+  }
+
+  /**
+   * Put a notebook the reader just created on an in-memory database.
+   *
+   * The ticket's default, and the reason it is not "connect every opened notebook": an existing
+   * notebook has a file the reader chose on purpose, while a fresh one has nothing to pick yet and
+   * `:memory:` is the safe place for the writes it will want (there is no file to damage). The tab
+   * is looked up by path because the create path writes the file and opens it, and the Host keys a
+   * connection by the notebook rather than by a tab id.
+   */
+  async connectNewSqlNotebook(workspaceId: string, path: string): Promise<void> {
+    const tab = this.store.getSnapshot().tabs.find(
+      (candidate): candidate is WorkbenchFileTab => candidate.kind === 'file' && candidate.path === path,
+    )
+    if (tab === undefined || !isSqlNotebookPath(tab.path)) return
+    await this.sqlRuntime.connect(tab.id, SQL_MEMORY_TARGET, 'writable')
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {

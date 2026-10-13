@@ -37,8 +37,8 @@ import {
 } from '../notebook/NotebookIcons.tsx'
 import css from './sql-notebook.module.css'
 import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.tsx'
-import { scanDatabases, type SqlDatabaseScan } from './sql-database-scan.ts'
 import { buildSqlNotebookOutline } from './sql-notebook-outline.ts'
+import { useDatabaseScan } from './use-database-scan.ts'
 import {
   applySqlNotebookEdit,
   cellIndexFromId,
@@ -180,8 +180,6 @@ export function SqlNotebookSurface({
   )
   // Why the last click did nothing, when the refusal came from the file rather than the Host.
   const [refusal, setRefusal] = useState<string | null>(null)
-  const [scan, setScan] = useState<SqlDatabaseScan | null>(null)
-  const [scanning, setScanning] = useState(false)
   const [pickPath, setPickPath] = useState<string>('')
   const [pickAccess, setPickAccess] = useState<SqlAccess>('read-only')
   const [confirmRunAll, setConfirmRunAll] = useState(false)
@@ -193,7 +191,6 @@ export function SqlNotebookSurface({
   const [folded, setFolded] = useState<Record<string, boolean>>({})
   const [dropTarget, setDropTarget] = useState<{ cellId: string; after: boolean } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
-  const scanWanted = useRef(false)
 
   useEffect(() => {
     runtime.bind(tabId, workspaceId, path)
@@ -213,25 +210,9 @@ export function SqlNotebookSurface({
   const memoryPicked = pickPath === SQL_MEMORY_TARGET
   const connectAccess: SqlAccess = memoryPicked ? 'writable' : pickAccess
 
-  // The workspace walk is what the picker lists; it happens once per mount and only on
-  // request afterwards, because the directory budget is the cost of being thorough.
-  const rescan = useCallback((): void => {
-    scanWanted.current = true
-    setScanning(true)
-    void scanDatabases({ list: listDirectory }).then((result) => {
-      if (!scanWanted.current) return
-      setScan(result)
-      setScanning(false)
-    }, () => {
-      if (!scanWanted.current) return
-      setScanning(false)
-    })
-  }, [listDirectory])
-
-  useEffect(() => {
-    rescan()
-    return () => { scanWanted.current = false }
-  }, [rescan])
+  // The workspace walk is what the picker lists. Both the notebook's toolbar and the sidebar panel
+  // list it, so the state around it lives in `useDatabaseScan` rather than in two copies here.
+  const { scan, scanning, rescan } = useDatabaseScan(listDirectory)
 
   // The "new handle" line is said once, not on every render of a long notebook.
   useEffect(() => {

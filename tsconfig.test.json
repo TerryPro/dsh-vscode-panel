@@ -49,6 +49,7 @@
     "tests/sql-notebook-surface.spec.tsx",
     "tests/sql-notebook-create.spec.ts",
     "tests/sql-database-scan.spec.ts",
+    "tests/sql-panel.spec.tsx",
     "tests/sql-runtime.spec.ts",
     "tests/sql-result.spec.ts",
     "tests/editor-languages.spec.ts",

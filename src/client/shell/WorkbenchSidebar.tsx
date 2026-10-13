@@ -61,7 +61,7 @@ export function WorkbenchSidebar({ wide, expandSidebar, useSessions, useWorkspac
         : state.sidebarMode === 'terminal'
           ? <TerminalPanel controller={controller} workspaceId={workspaceId} t={t} />
           : state.sidebarMode === 'sql'
-            ? <SqlPanel t={t} />
+            ? <SqlPanel controller={controller} workspaceId={workspaceId} t={t} />
             : state.sidebarMode === 'kernels'
               ? <KernelPanel controller={controller} workspaceId={workspaceId} t={t} />
               : <FileTree controller={controller} workspaceId={workspaceId} workspacePath={workspace?.path} t={t} />}
