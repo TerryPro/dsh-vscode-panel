@@ -480,7 +480,16 @@ if (host === undefined) {
     + ' SELECT v, (SELECT count(*) FROM n AS x WHERE x.v < n.v) AS c FROM n'
   await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb', path: 'sample.db' })
   const scanRequest = post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb', sql: heavyScan })
-  const stop = await post('/sqlnotebook/cancel', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb' })
+  // Wait for the run to actually be in flight instead of assuming the two requests arrive in the
+  // order they were sent: a cancel that lands before the execute started answers `false` and sets
+  // nothing (the flag is cleared when a run begins), so asking again is safe and makes this
+  // independent of socket timing. Measured the hard way — an earlier revision passed alone and
+  // failed in a full run, where the cancel's request reached the host first.
+  let stop = await post('/sqlnotebook/cancel', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb' })
+  for (let attempt = 0; stop.json?.cancelled === false && attempt < 40; attempt += 1) {
+    await new Promise(resolve => { setTimeout(resolve, 5) })
+    stop = await post('/sqlnotebook/cancel', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb' })
+  }
   const scanned = await scanRequest
   const scannedBlock = scanned.json?.blocks?.[0]
   const scanRows = scannedBlock?.rows?.length
