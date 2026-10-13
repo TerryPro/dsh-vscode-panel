@@ -418,3 +418,17 @@ export function applySqlNotebookEdit(text: string, edit: SqlNotebookEdit): strin
     }
   })
 }
+
+/**
+ * Append one SQL cell holding `source`, and return the new file text.
+ *
+ * Two edits rather than one, because the edit union inserts an empty cell and a cell's text is set
+ * by index. Both go through the same write-back path the surface uses, so a notebook this build
+ * cannot rewrite refuses here for exactly the reason it refuses there — the caller keeps the
+ * reader's bytes and says why instead of re-serializing what happened to parse.
+ */
+export function appendSqlCell(text: string, source: string): string {
+  const cells = parseSqlNotebook(text).cells
+  const withCell = applySqlNotebookEdit(text, { type: 'insertAfter', index: cells.length - 1, kind: 'sql' })
+  return applySqlNotebookEdit(withCell, { type: 'source', index: cells.length, source })
+}

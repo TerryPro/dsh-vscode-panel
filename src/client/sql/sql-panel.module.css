@@ -148,6 +148,101 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/*
+ * The schema tree: the connected database's tables, each expanding into its columns.
+ *
+ * Indentation and a guide rule rather than a fold arrow: the whole row is the disclosure control,
+ * and a column list that hangs off a rule is what makes "these belong to that table" readable
+ * without hovering anything.
+ */
+.schema {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.schemaHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.schemaNode {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tableRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.tableRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.tableRow[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+.tableName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tableKind {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.columnList {
+  margin: 0 0 2px 10px;
+  padding: 0 0 0 8px;
+  list-style: none;
+  border-inline-start: 1px solid var(--dsw-alias-border-l1);
+}
+
+.columnRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.columnName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.columnType {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.columnBadge {
+  padding: 0 4px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 4px;
+  font-size: 9px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .panelEmpty {
   padding: 12px;
   font-size: 12px;

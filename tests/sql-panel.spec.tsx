@@ -6,6 +6,7 @@ import { zh } from '../src/client/core/locales.ts'
 import type { WorkbenchFileTab } from '../src/client/model/controller.ts'
 import { WorkbenchApiError } from '../src/client/model/api.ts'
 import { SqlPanel } from '../src/client/sql/SqlPanel.tsx'
+import { parseSqlNotebook } from '../src/client/sql/sql-notebook-document.ts'
 import { SqlRuntime } from '../src/client/sql/sql-runtime.ts'
 
 // The store package pulls zustand/immer, which are not installed for tests.
@@ -43,14 +44,16 @@ function translate(key: string, values?: Record<string, unknown>): string {
   return text
 }
 
+const NOTEBOOK_DRAFT = JSON.stringify({ version: 1, cells: [{ kind: 'sql', source: 'SELECT 1' }] })
+
 function notebookTab(path: string): WorkbenchFileTab {
   return {
     id: `file:${path}`,
     kind: 'file',
     path,
-    file: { path, content: '{}', version: '1', size: 2, markdown: false },
+    file: { path, content: NOTEBOOK_DRAFT, version: '1', size: NOTEBOOK_DRAFT.length, markdown: false },
     image: null,
-    draft: '{}',
+    draft: NOTEBOOK_DRAFT,
     dirty: false,
     markdownMode: 'source',
     wrap: true,
@@ -70,10 +73,22 @@ function openNotebook(current: WorkbenchFileTab): void {
 interface Harness {
   view: ReturnType<typeof render>
   api: Record<string, ReturnType<typeof vi.fn>>
+  /** The schema routes the panel calls: tables and columns. */
+  schema: { sqlTables: ReturnType<typeof vi.fn>; sqlColumns: ReturnType<typeof vi.fn> }
   runtime: SqlRuntime
+  setDraft: ReturnType<typeof vi.fn>
+  /** Pick a database and press connect, the way a reader does. */
+  connect: (target?: string) => Promise<void>
 }
 
-function mount(options: { entries?: Array<{ name: string; path: string; kind: 'file' }>; refuse?: WorkbenchApiError } = {}): Harness {
+function mount(options: {
+  entries?: Array<{ name: string; path: string; kind: 'file' }>
+  refuse?: WorkbenchApiError
+  tables?: Array<{ name: string; kind: 'table' | 'view' }>
+  tablesTruncated?: boolean
+  tablesRefuse?: WorkbenchApiError
+  columns?: Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean }>
+} = {}): Harness {
   const api = {
     // The handle answers with the target it was asked for: a fake that always says `demo.db` would
     // make every "is this the memory database" assertion pass for the wrong reason.
@@ -84,7 +99,7 @@ function mount(options: { entries?: Array<{ name: string; path: string; kind: 'f
       walSidecarExpected: false,
       rowLimit: 1000,
     })),
-    sqlExecute: vi.fn(),
+    sqlExecute: vi.fn(() => Promise.resolve({ path: 'demo.db', blocks: [], elapsedMs: 1, executionCount: 1 })),
     sqlClose: vi.fn(() => Promise.resolve({ path: 'demo.db', closed: true, rolledBack: false })),
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
     sqlCancel: vi.fn(() => Promise.resolve({ cancelled: false })),
@@ -93,15 +108,28 @@ function mount(options: { entries?: Array<{ name: string; path: string; kind: 'f
     const refusal = options.refuse
     api.sqlOpen = vi.fn(() => Promise.reject(refusal))
   }
-  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => '{}' })
+  const schemaApi = {
+    sqlTables: vi.fn(() => options.tablesRefuse === undefined
+      ? Promise.resolve({ path: 'demo.db', tables: options.tables ?? [{ name: 'city', kind: 'table' as const }], truncated: options.tablesTruncated ?? false })
+      : Promise.reject(options.tablesRefuse)),
+    sqlColumns: vi.fn(() => Promise.resolve({
+      path: 'demo.db',
+      table: 'city',
+      columns: options.columns ?? [{ name: 'id', type: 'INTEGER', notNull: false, primaryKey: true }],
+    })),
+  }
+  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => NOTEBOOK_DRAFT })
   const entries = options.entries ?? [
     { name: 'demo.db', path: 'demo.db', kind: 'file' as const },
     { name: 'demo.db-wal', path: 'demo.db-wal', kind: 'file' as const },
     { name: 'archive.sqlite', path: 'archive.sqlite', kind: 'file' as const },
   ]
+  const setDraft = vi.fn()
   const controller = {
     sqlRuntime: runtime,
+    setDraft,
     api: {
+      ...schemaApi,
       listDirectory: vi.fn((_workspaceId: string, path: string) => Promise.resolve(
         path === '' ? { path: '', entries, truncated: false } : { path, entries: [], truncated: false },
       )),
@@ -114,8 +142,104 @@ function mount(options: { entries?: Array<{ name: string; path: string; kind: 'f
       t={translate}
     />,
   )
-  return { view, api, runtime }
+  /**
+   * Connect the way a reader does: pick the database, press connect, wait for the handle.
+   *
+   * The wait for `断开` is what makes the schema assertions about a real connection rather than
+   * about a click that has not come back yet.
+   */
+  async function connect(target = 'demo.db'): Promise<void> {
+    const select = await view.findByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
+    await waitFor(() => { expect(select.options.length).toBeGreaterThan(2) })
+    fireEvent.change(select, { target: { value: target } })
+    fireEvent.click(view.getByRole('button', { name: zh['sqlnotebook.connect'] }))
+    await waitFor(() => { expect(api.sqlOpen).toHaveBeenCalled() })
+    await waitFor(() => { expect(view.getByRole('button', { name: zh['sqlnotebook.disconnect'] })).toBeTruthy() })
+  }
+
+  return { view, api, schema: schemaApi, runtime, setDraft, connect }
 }
+
+describe('SqlPanel — 结构', () => {
+  it('lists the connected database’s tables and marks a view as one', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      tables: [
+        { name: 'city', kind: 'table' },
+        { name: 'city_summary', kind: 'view' },
+      ],
+    })
+    await harness.connect()
+
+    expect(await harness.view.findByRole('button', { name: /city\b/u })).toBeTruthy()
+    const view = harness.view.getByRole('button', { name: /city_summary/u })
+    // A view is listed beside tables but said to be one: the reader may read it and may not write
+    // to it, which is exactly the difference that matters at this point.
+    expect(view.textContent).toContain(zh['sqlnotebook.viewLabel'])
+  })
+
+  it('reads a table’s columns once, however often the row is opened and closed', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount()
+    await harness.connect()
+
+    const row = await harness.view.findByRole('button', { name: /city\b/u })
+    fireEvent.click(row)
+    expect(await harness.view.findByText('id')).toBeTruthy()
+    expect(harness.view.getByText('INTEGER')).toBeTruthy()
+    fireEvent.click(row)
+    expect(harness.view.queryByText('id')).toBeNull()
+    fireEvent.click(row)
+
+    // Lazy means once per table, not once per click: re-asking the Host for a schema that has not
+    // been told to change is a request per gesture.
+    await waitFor(() => { expect(harness.view.getByText('id')).toBeTruthy() })
+    expect(harness.view.container.querySelectorAll('li')).toHaveLength(1)
+  })
+
+  it('writes a SELECT * into a new cell when a table is double-clicked', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({ tables: [{ name: 'ci"ty', kind: 'table' }] })
+    await harness.connect()
+
+    fireEvent.doubleClick(await harness.view.findByRole('button', { name: /ci"ty/u }))
+
+    const written = harness.setDraft.mock.calls[0]?.[0] as string
+    // Read through the document layer rather than matching the raw text: the file is JSON, so every
+    // quote in the query is escaped in it, and a substring match would be about JSON escaping.
+    expect(parseSqlNotebook(written).cells.map(cell => cell.source)).toEqual(['SELECT 1', 'SELECT * FROM "ci""ty" LIMIT 1000'])
+    expect(harness.setDraft.mock.calls[0]?.[2]).toBe('file:query.sqlnb')
+  })
+
+  it('says a long table list was cut short instead of looking like the whole database', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({ tablesTruncated: true })
+    await harness.connect()
+
+    expect(await harness.view.findByText(zh['sqlnotebook.schemaTruncated'])).toBeTruthy()
+  })
+
+  it('reads the schema again after a run, without watching files', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount()
+    await harness.connect()
+    const afterConnect = harness.schema.sqlTables.mock.calls.length
+
+    // A run may have created or dropped a table, so the tree is stale the moment a cell finishes.
+    harness.runtime.runCell('file:query.sqlnb', 'sqlnb-0')
+    await waitFor(() => {
+      expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(afterConnect)
+    })
+  })
+
+  it('shows why the schema could not be read', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({ tablesRefuse: new WorkbenchApiError('SQL_NOT_CONNECTED', '该笔记还没有连接数据库。') })
+    await harness.connect()
+
+    expect((await harness.view.findByRole('alert')).textContent).toContain('该笔记还没有连接数据库。')
+  })
+})
 
 describe('SqlPanel — 连接', () => {
   it('says there is no notebook rather than describing a connection it cannot name', () => {
