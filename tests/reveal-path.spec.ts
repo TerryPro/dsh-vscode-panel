@@ -53,16 +53,34 @@ describe('revealCommandFor', () => {
 })
 
 /**
- * The real launcher, against a program that exists and one that does not.
+ * The launcher's options and its real behaviour against a program that exists and one that
+ * does not.
  *
- * The reveal route is the only place the workbench hands a path to a GUI program, and both
- * of its failure modes are invisible to an injected fake: a promise that never settles
- * leaves the browser's request hanging with no message at all, and a missing program has to
- * surface as a rejection rather than a silent success. Both are asserted on the actual
- * `child_process` behaviour here, with a command that starts and exits immediately so no
+ * The reveal route is the only place the workbench hands a path to a GUI program. The
+ * options it passes are asserted on an injected fake — that is the surface where
+ * `windowsHide` did its damage — while the two settle modes are asserted on the actual
+ * `child_process` behaviour, with a command that starts and exits immediately so no
  * file-manager window appears in anyone's session.
  */
 describe('createRevealLauncher', () => {
+  it('launches without windowsHide, which on Windows hides the file manager itself', () => {
+    // Regression: `windowsHide: true` came from CLI-child habit, but on Windows it is
+    // STARTF_USESHOWWINDOW with SW_HIDE, and that applies to a GUI program's window too.
+    // The spawn succeeded, the route answered 200, the log said "revealed" — and no
+    // Explorer window ever appeared. `RevealSpawnOptions` omits the flag so re-adding it
+    // is a compile error; this pins the runtime shape as well, on the exact options the
+    // real `spawn` would receive.
+    const calls: Array<{ file: string; args: string[]; options: Record<string, unknown> }> = []
+    const launcher = createRevealLauncher((file, args, options) => {
+      calls.push({ file, args, options: { ...options } })
+      return { once: () => {}, unref: () => {} }
+    })
+    void launcher.launch({ file: 'explorer.exe', args: ['/select,C:\\ws\\a.ts'] })
+    expect(calls).toEqual([
+      { file: 'explorer.exe', args: ['/select,C:\\ws\\a.ts'], options: { detached: true, stdio: 'ignore' } },
+    ])
+  })
+
   it('settles once the program has started, whatever it then exits with', async () => {
     // Explorer returns a non-zero code even when it opened the folder, which is why the
     // launcher answers off `spawn` rather than off the exit.

@@ -53,9 +53,28 @@ export interface RevealLauncher {
   launch(command: RevealCommand): Promise<void>
 }
 
+/** The one child-process call shape the launcher makes, kept narrow on purpose. */
+export interface RevealSpawnOptions {
+  detached: true
+  stdio: 'ignore'
+}
+
+/** A launched program, reduced to the three things the launcher uses. */
+export interface RevealChild {
+  once(event: 'error', listener: (error: Error) => void): void
+  once(event: 'spawn', listener: () => void): void
+  unref(): void
+}
+
+/** How the launcher starts a program. Injectable so its options can be asserted. */
+export type RevealSpawn = (
+  file: string,
+  args: string[],
+  options: RevealSpawnOptions,
+) => RevealChild
+
 /**
- * The launcher the Host uses: detached, so the file manager outlives this call, and with
- * its stdio ignored rather than piped.
+ * The launcher the Host uses: detached, with stdio ignored, and **no `windowsHide`**.
  *
  * Detached matters beyond process hygiene. Explorer exits with a non-zero code even when
  * it opened the folder correctly, so a launcher that waited for the exit would report
@@ -63,17 +82,20 @@ export interface RevealLauncher {
  * program was found and started. `stdio: 'ignore'` keeps that true for every platform: a
  * file manager that inherits our pipes would hold the call open for as long as its window
  * is up.
+ *
+ * `windowsHide: true` is the one option that must not come back, and it is absent from
+ * `RevealSpawnOptions` so adding it is a compile error rather than a passing test. It is the
+ * usual choice for a CLI child because it suppresses that child's *console*, but Windows
+ * implements it as `STARTF_USESHOWWINDOW` with `SW_HIDE`, which applies to a GUI program's
+ * window too: the spawn succeeded, the route answered 200, the log said the entry was
+ * revealed, and no Explorer window ever appeared. That window is the entire feature.
  */
-export function createRevealLauncher(): RevealLauncher {
+export function createRevealLauncher(spawnCommand: RevealSpawn = spawn): RevealLauncher {
   return {
     launch: (command) => new Promise<void>((resolveRun, rejectRun) => {
-      let child: ReturnType<typeof spawn>
+      let child: RevealChild
       try {
-        child = spawn(command.file, command.args, {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
-        })
+        child = spawnCommand(command.file, command.args, { detached: true, stdio: 'ignore' })
       } catch (error: unknown) {
         rejectRun(toError(error))
         return
