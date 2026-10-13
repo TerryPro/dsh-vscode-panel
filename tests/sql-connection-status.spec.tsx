@@ -48,7 +48,11 @@ function mount(): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: R
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
     sqlCancel: vi.fn(() => Promise.resolve({ cancelled: false })),
   }
-  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => NOTEBOOK_DRAFT })
+  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, {
+    getDraft: () => NOTEBOOK_DRAFT,
+    setDraft: vi.fn(),
+    save: vi.fn(),
+  })
   runtime.bind('tab-1', 'workspace-1', 'query.sqlnb')
   // `SqlConnectionStatus` renders nothing until a tab is bound, which the call above does.
   const view = render(<SqlConnectionStatus runtime={runtime} tabId="tab-1" t={t as never} />)

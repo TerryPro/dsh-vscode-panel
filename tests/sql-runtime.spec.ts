@@ -3,6 +3,7 @@ import { WorkbenchApiError } from '../src/client/model/api.ts'
 import type { SqlExecuteResult, SqlResultBlock } from '../src/shared/sql-protocol.ts'
 import { sqlBlock } from './sql-block-fixture.ts'
 import { SqlRuntime, type SqlDraftBridge } from '../src/client/sql/sql-runtime.ts'
+import { parseSqlNotebook } from '../src/client/sql/sql-notebook-document.ts'
 
 // The store package pulls zustand/immer, which are not installed for tests.
 vi.mock('@deepseek-ai/dsh-client-store', () => ({
@@ -58,6 +59,8 @@ function held(count: number): Held {
 interface Fixture {
   runtime: SqlRuntime
   drafts: string[]
+  /** Every draft the runtime handed to the save path, in order. */
+  saves: string[]
   api: {
     sqlOpen: ReturnType<typeof vi.fn>
     sqlExecute: ReturnType<typeof vi.fn>
@@ -69,10 +72,22 @@ interface Fixture {
   request: () => Held
 }
 
-function createRuntime(cells: Array<{ kind: string; source: string }>): Fixture {
-  const draft = notebookDraft(cells)
+/**
+ * A runtime bound to one notebook.
+ *
+ * `draft` is the file's text as the tab already holds it when the runtime binds — which is the real
+ * order (`bind` runs after the tab is open, so the document is there to hydrate from). Passing it
+ * here rather than assigning `fixture.drafts[0]` afterwards matters: hydration happens inside
+ * `bind`, so a test that swapped the text later would be testing a runtime that never saw the file.
+ */
+function createRuntime(cells: Array<{ kind: string; source: string }>, draft = notebookDraft(cells)): Fixture {
   const drafts = [draft]
-  const bridge: SqlDraftBridge = { getDraft: () => drafts[0] ?? '' }
+  const saves: string[] = []
+  const bridge: SqlDraftBridge = {
+    getDraft: () => drafts[0] ?? '',
+    setDraft: (_tabId, text) => { drafts[0] = text },
+    save: () => { saves.push(drafts[0] ?? '') },
+  }
   const inFlight: Held[] = []
   let issued = 0
   const api = {
@@ -96,7 +111,7 @@ function createRuntime(cells: Array<{ kind: string; source: string }>): Fixture 
     if (next === undefined) throw new Error('expected a request on the wire')
     return next
   }
-  return { runtime, drafts, api, request }
+  return { runtime, drafts, saves, api, request }
 }
 
 /** Let the runtime's outstanding request finish, then run its continuation. */
@@ -112,10 +127,12 @@ async function connect(fixture: Fixture, access: 'read-only' | 'writable' = 'rea
 }
 
 describe('SqlRuntime', () => {
-  it('runs a cell, shows the count the Host returned, and leaves the file text untouched', async () => {
+  it('runs a cell, shows the count the Host returned, and records the result in the file', async () => {
     const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
-    const draftBefore = fixture.drafts[0]
     await connect(fixture)
+    // Connecting records the database in the file and saves it, which is its own case below. This
+    // one is about the run, so the save log starts after the connection is on disk.
+    fixture.saves.length = 0
 
     fixture.runtime.runCell('tab-1', 'sqlnb-0')
     await settle(fixture, [block()])
@@ -125,9 +142,184 @@ describe('SqlRuntime', () => {
     expect(run?.executionCount).toBe(1)
     expect(run?.elapsedMs).toBe(12)
     expect(run?.blocks).toHaveLength(1)
-    // A run must not make the tab dirty, and the guarantee is structural: the bridge this
-    // runtime is handed can read the draft and nothing else (ADR 0003).
-    expect(fixture.drafts[0]).toBe(draftBefore)
+    /**
+     * The decision ADR 0007 made in place of ADR 0003's opposite rule: a run's results belong in
+     * the notebook, so a settled run rewrites the draft and hands it to the save path. Asserting on
+     * the parsed document rather than on a substring keeps this about the file's *meaning* — the
+     * shape of the JSON is the document layer's business, not this test's.
+     */
+    const written = parseSqlNotebook(fixture.drafts[0] ?? '')
+    expect(written.cells[0]?.blocks).toHaveLength(1)
+    expect(written.cells[0]?.blocks[0]?.rows).toEqual([[1]])
+    expect(written.cells[0]?.executionCount).toBe(1)
+    expect(written.cells[0]?.elapsedMs).toBe(12)
+    expect(fixture.saves).toHaveLength(1)
+  })
+
+  it('records which database the notebook is about when it connects', async () => {
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+
+    expect(parseSqlNotebook(fixture.drafts[0] ?? '').connection).toEqual({ path: 'demo.db', access: 'read-only' })
+    // On disk, not merely in the draft: "the notebook remembers its database" has to survive a
+    // reload, and a draft nobody saved does not.
+    expect(fixture.saves).toHaveLength(1)
+  })
+
+  it('records the tier the Host granted rather than the one that was asked for', async () => {
+    // A writable request against an occupied file comes back read-only. Recording the request would
+    // make the next open ask for a tier this connection never had, and refuse for it.
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    fixture.api.sqlOpen.mockImplementationOnce(() => Promise.resolve({
+      path: 'demo.db', access: 'read-only' as const, sqliteVersion: '3.46.0', walSidecarExpected: false, rowLimit: 1000,
+    }))
+
+    await fixture.runtime.connect('tab-1', 'demo.db', 'writable')
+
+    expect(parseSqlNotebook(fixture.drafts[0] ?? '').connection?.access).toBe('read-only')
+  })
+
+  it('does not rewrite the file for a replay of what it already records', async () => {
+    // The auto-connect replays the file's own record on every open. Recording it again would mark
+    // every reopened notebook dirty for a value that is already in it.
+    const draft = JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    })
+    const fixture = createRuntime([], draft)
+
+    await fixture.runtime.autoConnect('tab-1')
+
+    expect(fixture.runtime.state('tab-1').connection?.path).toBe('demo.db')
+    expect(fixture.drafts[0]).toBe(draft)
+    expect(fixture.saves).toEqual([])
+  })
+
+  it('reconnects to the database the file records, without being asked', async () => {
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }], JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'writable' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    }))
+
+    await fixture.runtime.autoConnect('tab-1')
+
+    expect(fixture.api.sqlOpen).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1', notebook: 'query-1.sqlnb', path: 'demo.db', access: 'writable',
+    })
+    expect(fixture.runtime.state('tab-1').connection?.path).toBe('demo.db')
+  })
+
+  /**
+   * The reported bug: opening a notebook that has results showed a blank cell.
+   *
+   * The file's results are restored when the tab binds, and the auto-connect then lands — which is
+   * what wiped them: the open path treated "this is a different connection than the one before" as
+   * "drop what is on screen", and on open there is never a connection before, so that was always
+   * true. The reader saw the notebook connect successfully and every recorded table vanish.
+   */
+  it('keeps the file’s recorded results across the automatic connect', async () => {
+    const fixture = createRuntime([], JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{
+        kind: 'sql',
+        source: 'SELECT 1',
+        execution_count: 2,
+        elapsed_ms: 12,
+        results: [{
+          columns: [{ label: 'who', name: 'who' }],
+          rows: [['Tokyo']],
+          rowLimit: 1000,
+          truncated: false,
+          columnsDropped: 0,
+          valuesTruncated: 0,
+        }],
+      }],
+    }))
+
+    await fixture.runtime.autoConnect('tab-1')
+
+    const restored = fixture.runtime.state('tab-1').cells['sqlnb-0']
+    expect(fixture.runtime.state('tab-1').connection?.path).toBe('demo.db')
+    expect(restored?.blocks).toHaveLength(1)
+    expect(restored?.blocks[0]?.rows).toEqual([['Tokyo']])
+    expect(restored?.executionCount).toBe(2)
+    expect(restored?.elapsedMs).toBe(12)
+  })
+
+  it('leaves a notebook with no recorded database unconnected rather than guessing one', async () => {
+    // `:memory:` would be a plausible default and the wrong one: a notebook that never named a
+    // database must not have one chosen for it, or its first query would run against an empty
+    // database and answer "no such table" as though the reader had done something wrong.
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+
+    await fixture.runtime.autoConnect('tab-1')
+
+    expect(fixture.api.sqlOpen).not.toHaveBeenCalled()
+    expect(fixture.runtime.state('tab-1').connection).toBeNull()
+  })
+
+  it('shows a refused auto-connect as a refusal instead of falling back', async () => {
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    fixture.drafts[0] = JSON.stringify({
+      version: 2,
+      connection: { path: 'gone.db', access: 'read-only' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    })
+    fixture.api.sqlOpen.mockImplementationOnce(() => Promise.reject(
+      new WorkbenchApiError('SQL_DATABASE_UNAVAILABLE', 'that file is gone'),
+    ))
+
+    await fixture.runtime.autoConnect('tab-1')
+
+    expect(fixture.runtime.state('tab-1').connection).toBeNull()
+    expect(fixture.runtime.state('tab-1').connectionProblem?.code).toBe('SQL_DATABASE_UNAVAILABLE')
+  })
+
+  it('drops the recorded results of a run that failed, so a stale answer cannot come back', async () => {
+    /**
+     * The failure this guards is invisible on screen: the tab shows the error, but the file would
+     * still hold the previous run's table, and reopening the notebook would show that table as the
+     * answer to a statement that never succeeded. A wrong answer that looks like data is worse than
+     * no answer, so the record goes with the failure.
+     */
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    await settle(fixture, [block()])
+    expect(parseSqlNotebook(fixture.drafts[0] ?? '').cells[0]?.blocks).toHaveLength(1)
+
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    fixture.request().reject(new WorkbenchApiError('SQL_PATH_UNAVAILABLE', 'the file is gone'))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fixture.runtime.state('tab-1').cells['sqlnb-0']?.status).toBe('error')
+    const written = parseSqlNotebook(fixture.drafts[0] ?? '')
+    expect(written.cells[0]?.blocks).toEqual([])
+    expect(written.cells[0]?.executionCount).toBeNull()
+  })
+
+  it('keeps the recorded results of a cancelled run out of the file, and the old ones too', async () => {
+    // A cancel is the reader saying the answer is not wanted, so what the file keeps must not be the
+    // stopped run's partial rows. The previous answer is not kept either: the cell now shows
+    // "cancelled", and restoring an older table under that word would contradict the row above it.
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    await settle(fixture, [block()])
+
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    const handle = fixture.request()
+    fixture.runtime.cancel('tab-1')
+    handle.resolve([block({ rows: [['stale']] })], 7)
+    await handle.promise
+    await Promise.resolve()
+
+    expect(fixture.runtime.state('tab-1').cells['sqlnb-0']?.status).toBe('cancelled')
+    expect(parseSqlNotebook(fixture.drafts[0] ?? '').cells[0]?.blocks).toEqual([])
   })
 
   it('refuses to run without a connection instead of asking the Host', async () => {
@@ -312,17 +504,23 @@ describe('SqlRuntime', () => {
     expect(run?.executionCount).toBeNull()
   })
 
-  it('clearing outputs drops what is on screen without touching the file or the Host', async () => {
+  it('clearing outputs drops what is on screen, in the file, and leaves the Host alone', async () => {
     const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
-    const draftBefore = fixture.drafts[0]
     await connect(fixture)
     fixture.runtime.runCell('tab-1', 'sqlnb-0')
     await settle(fixture, [block()])
+    // The connection and the run each saved once; this case counts the clear's own save.
+    fixture.saves.length = 0
 
     fixture.runtime.clearOutputs('tab-1')
 
     expect(fixture.runtime.state('tab-1').cells).toEqual({})
-    expect(fixture.drafts[0]).toBe(draftBefore)
+    /**
+     * The file is cleared too (ADR 0007): leaving the blocks behind would bring every one of them
+     * back on the next open, which is the opposite of what "clear outputs" means.
+     */
+    expect(parseSqlNotebook(fixture.drafts[0] ?? '').cells[0]?.blocks).toEqual([])
+    expect(fixture.saves).toHaveLength(1)
     expect(fixture.api.sqlExecute).toHaveBeenCalledTimes(1)
   })
 
@@ -373,6 +571,31 @@ describe('SqlRuntime', () => {
     expect(refused.connectionProblem?.code).toBe('SQL_WRITE_OCCUPIED')
   })
 
+  /**
+   * Switching database is a *new session*, and the results on screen were answers from the old one.
+   *
+   * They are also still in the file, so the screen goes back to the file's record rather than to
+   * blank: whatever the notebook recorded is what the next open would show, and a reader who
+   * switches away and back must see the same notebook both times.
+   */
+  it('goes back to the file’s record when the notebook switches database', async () => {
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    await settle(fixture, [block({ rows: [['from demo']] })])
+    expect(fixture.runtime.state('tab-1').cells['sqlnb-0']?.blocks).toHaveLength(1)
+
+    // The run rewrote the draft, so the file now records the result the same way a reload would see it.
+    expect(parseSqlNotebook(fixture.drafts[0] ?? '').cells[0]?.blocks).toHaveLength(1)
+
+    await fixture.runtime.disconnect('tab-1')
+    await fixture.runtime.connect('tab-1', 'other.db', 'read-only')
+
+    const run = fixture.runtime.state('tab-1').cells['sqlnb-0']
+    // Still what the file says — the switch did not invent or destroy a result.
+    expect(run?.blocks[0]?.rows).toEqual([['from demo']])
+  })
+
   it('disconnecting closes the handle and says whether a transaction was rolled back', async () => {
     const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
     await connect(fixture)
@@ -384,7 +607,28 @@ describe('SqlRuntime', () => {
     expect(fixture.api.sqlClose).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
     const state = fixture.runtime.state('tab-1')
     expect(state.connection).toBeNull()
+    // Nothing was ever run, so the file records nothing and the screen says nothing. This is the
+    // file's record being shown, not the screen being wiped — see the next case for the difference.
     expect(state.cells).toEqual({})
+  })
+
+  it('keeps showing recorded results after a disconnect, because the file still holds them', async () => {
+    /**
+     * Disconnecting releases a handle; it does not delete results. They are in the notebook
+     * (ADR 0007), so blanking the screen would say the tables were lost while the bytes holding them
+     * were never touched — and a reload would bring them straight back, which is the giveaway that
+     * the screen, not the file, was wrong.
+     */
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    await settle(fixture, [block({ rows: [['Tokyo']] })])
+
+    await fixture.runtime.disconnect('tab-1')
+
+    const run = fixture.runtime.state('tab-1').cells['sqlnb-0']
+    expect(run?.blocks[0]?.rows).toEqual([['Tokyo']])
+    expect(run?.status).toBe('done')
   })
 
   it('a disconnect while a cell runs stops the queue rather than pretending the run ended', async () => {
@@ -398,6 +642,8 @@ describe('SqlRuntime', () => {
 
     await fixture.runtime.disconnect('tab-1')
 
+    // Neither run ever landed, so the file holds no results for either — which is exactly why the
+    // screen shows none. A run that had landed earlier would still be on screen.
     expect(fixture.runtime.state('tab-1').cells).toEqual({})
     expect(fixture.runtime.busy('tab-1')).toBe(false)
     // The first request is still on the wire; its answer must not resurrect a run on a tab

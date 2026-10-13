@@ -9,7 +9,11 @@ import {
   isSqlNotebookPath,
   parseSqlNotebook,
   serializeSqlNotebook,
+  writeSqlCellResults,
+  writeSqlNotebookConnection,
 } from '../src/client/sql/sql-notebook-document.ts'
+import type { SqlResultBlock, SqlRow } from '../src/shared/sql-protocol.ts'
+import { sqlBlock } from './sql-block-fixture.ts'
 
 /**
  * The `.sqlnb` document rules, asserted on the pure functions that own them.
@@ -229,8 +233,188 @@ describe('applySqlNotebookEdit', () => {
   })
 })
 
-describe('skeletons', () => {
-  it('creates a new notebook as one version and one empty SQL cell', () => {
+/**
+ * Version 2 (ADR 0007): the file also carries the connection and each cell's last results.
+ *
+ * These cases are about the two directions that matter — a v1 file must stay usable, and a v2 file
+ * must round-trip its results exactly enough that reopening a notebook shows what the run produced.
+ */
+describe('结果与连接记进文件', () => {
+  const block = (overrides: Partial<SqlResultBlock> = {}): SqlResultBlock =>
+    sqlBlock([{ label: 'id', name: 'id', type: 'INTEGER' }, { label: 'who', name: 'who' }], [[7, 'Tokyo']], overrides)
+
+  it('writes one cell’s results and the prompt number, and reads them back', () => {
+    const written = writeSqlCellResults(doc([{ kind: 'sql', source: 'SELECT 1' }]), 0, [block()], 3, 42)
+
+    expect(written).not.toBeNull()
+    const parsed = parseSqlNotebook(written ?? '')
+    expect(parsed.cells[0]?.blocks).toHaveLength(1)
+    expect(parsed.cells[0]?.blocks[0]?.rows).toEqual([[7, 'Tokyo']])
+    expect(parsed.cells[0]?.blocks[0]?.columns).toEqual([
+      { label: 'id', name: 'id', type: 'INTEGER' },
+      { label: 'who', name: 'who' },
+    ])
+    expect(parsed.cells[0]?.executionCount).toBe(3)
+    expect(parsed.cells[0]?.elapsedMs).toBe(42)
+  })
+
+  it('keeps every value shape a result can carry, including NULL and a BLOB envelope', () => {
+    // The file is the only copy of a result once the tab closes, so a value this build can show must
+    // survive the round trip: a NULL that came back as the text `null` would be a lie about data.
+    const rows: SqlRow[] = [[null, ''], [12, 'NULL'], [3.5, { base64: 'eA==', byteLength: 12288, truncated: true }]]
+    const written = writeSqlCellResults(doc([{ kind: 'sql', source: 'SELECT 1' }]), 0, [block({ rows })], 1, 1)
+
+    expect(parseSqlNotebook(written ?? '').cells[0]?.blocks[0]?.rows).toEqual(rows)
+  })
+
+  it('keeps the cap facts a block has to admit', () => {
+    const stored = block({ truncated: true, rowLimit: 1000, columnsDropped: 7, valuesTruncated: 3, stoppedByDeadline: true })
+    const written = writeSqlCellResults(doc([{ kind: 'sql', source: 'SELECT 1' }]), 0, [stored], 1, 1)
+
+    expect(parseSqlNotebook(written ?? '').cells[0]?.blocks[0]).toEqual(stored)
+  })
+
+  it('keeps a failed statement’s error and a write’s row count', () => {
+    const failed = block({ columns: [], rows: [], error: { code: 'SQL_STATEMENT_FAILED', message: 'no such table: nope' } })
+    const changed = block({ columns: [], rows: [], changes: 5 })
+    const written = writeSqlCellResults(doc([{ kind: 'sql', source: 'x' }]), 0, [failed, changed], 1, 1)
+
+    const blocks = parseSqlNotebook(written ?? '').cells[0]?.blocks ?? []
+    expect(blocks[0]?.error?.message).toBe('no such table: nope')
+    expect(blocks[1]?.changes).toBe(5)
+  })
+
+  it('drops the results and the prompt number together when they are cleared', () => {
+    const withResults = writeSqlCellResults(doc([{ kind: 'sql', source: 'SELECT 1' }]), 0, [block()], 3, 42)
+    const cleared = writeSqlCellResults(withResults ?? '', 0, [], null, null)
+
+    // The keys are gone from the tree, not merely empty: a cell that never ran must not carry
+    // `execution_count: null` in every diff.
+    expect(cleared).not.toContain('results')
+    expect(cleared).not.toContain('execution_count')
+    expect(cleared).not.toContain('elapsed_ms')
+    expect(parseSqlNotebook(cleared ?? '').cells[0]?.blocks).toEqual([])
+  })
+
+  it('reports no change when the results are already what the file holds', () => {
+    // The runtime writes back after every run, so an unchanged write that returned new text would
+    // mark a saved notebook dirty for a query that answered the same thing twice.
+    const once = writeSqlCellResults(doc([{ kind: 'sql', source: 'SELECT 1' }]), 0, [block()], 1, 1)
+    expect(writeSqlCellResults(once ?? '', 0, [block()], 1, 1)).toBeNull()
+  })
+
+  it('refuses to record a result in a file this build must not rewrite, keeping its bytes', () => {
+    // ADR 0003's rule still holds for writes it applies to: a newer-than-us file is never rewritten,
+    // and a failed record must not take the reader's bytes with it.
+    expect(writeSqlCellResults(doc([{ kind: 'sql', source: '' }], 99), 0, [block()], 1, 1)).toBeNull()
+    expect(writeSqlCellResults('{half a file', 0, [block()], 1, 1)).toBeNull()
+  })
+
+  it('records the connection, and reads it back with the default tier when it names none', () => {
+    const written = writeSqlNotebookConnection(doc([{ kind: 'sql', source: '' }]), { path: 'demo.db', access: 'writable' })
+    expect(parseSqlNotebook(written ?? '').connection).toEqual({ path: 'demo.db', access: 'writable' })
+
+    const vague = JSON.stringify({ version: 2, connection: { path: 'demo.db' }, cells: [] })
+    // A record with no tier takes the requirement's default rather than being carried into an open
+    // request as `undefined`.
+    expect(parseSqlNotebook(vague).connection).toEqual({ path: 'demo.db', access: 'read-only' })
+  })
+
+  it('treats a nonsense connection record as no record rather than as a broken file', () => {
+    // The record is an optimisation for reopening. Punishing a hand-edited field by hiding the
+    // reader's cells would be the wrong trade, and connecting to `undefined` would be worse.
+    for (const connection of [7, 'demo.db', {}, { path: '' }, { path: 9 }, []]) {
+      const parsed = parseSqlNotebook(JSON.stringify({ version: 2, connection, cells: [{ kind: 'sql', source: 'SELECT 1' }] }))
+      expect(parsed.connection, `connection ${JSON.stringify(connection)}`).toBeNull()
+      expect(parsed.readOnly).toBe(false)
+      expect(parsed.warning).toBeNull()
+      expect(parsed.cells[0]?.source).toBe('SELECT 1')
+    }
+  })
+
+  it('drops a stored block whose shape is wrong instead of rendering a half table', () => {
+    // Header and rows coming from different writes is the one failure a viewer must never show: it
+    // looks like data. A block that cannot be read whole is dropped, which the reader can see.
+    const parsed = parseSqlNotebook(JSON.stringify({
+      version: 2,
+      cells: [{
+        kind: 'sql',
+        source: 'SELECT 1',
+        results: [
+          { columns: [{ label: 'a' }], rows: [['ok']], rowLimit: 10, truncated: false, columnsDropped: 0, valuesTruncated: 0 },
+          { columns: 'not a list', rows: [], rowLimit: 10, truncated: false, columnsDropped: 0, valuesTruncated: 0 },
+          { columns: [{ label: 'a' }], rows: [['a', 'b', 'c']], rowLimit: 10, truncated: false, columnsDropped: 0, valuesTruncated: 0 },
+          { columns: [{ label: 'a' }], rows: [[{ nope: true }]], rowLimit: 10, truncated: false, columnsDropped: 0, valuesTruncated: 0 },
+        ],
+      }],
+    }))
+
+    expect(parsed.cells[0]?.blocks).toHaveLength(2)
+    expect(parsed.cells[0]?.blocks[0]?.rows).toEqual([['ok']])
+    // A short row is a Host bug rather than a NULL, and the file keeps it as it arrived.
+    expect(parsed.cells[0]?.blocks[1]?.rows).toEqual([['a', 'b', 'c']])
+  })
+
+  it('reads a version 1 file, and upgrades it on the first write', () => {
+    // Every notebook written before ADR 0007 is a version 1 file. Refusing them would strand the
+    // reader's existing notebooks; silently rewriting them on open would dirty them for nothing. The
+    // upgrade happens on the first write that needs a v2 field.
+    const v1 = doc([{ kind: 'sql', source: 'SELECT 1' }], 1)
+    const parsed = parseSqlNotebook(v1)
+    expect(parsed.readOnly).toBe(false)
+    expect(parsed.warning).toBeNull()
+    expect(parsed.connection).toBeNull()
+    expect(parsed.cells[0]?.blocks).toEqual([])
+
+    const upgraded = writeSqlCellResults(v1, 0, [block()], 1, 1)
+    expect(JSON.parse(upgraded ?? '{}').version).toBe(2)
+    expect(parseSqlNotebook(upgraded ?? '').cells[0]?.blocks).toHaveLength(1)
+  })
+
+  it('keeps a version 1 file untouched by a plain source edit until a v2 field is written', () => {
+    // A reader typing in an old notebook must not see a version bump in the diff for an edit that
+    // has nothing to do with results. The bump is the write path's, and this is what it costs.
+    const written = applySqlNotebookEdit(doc([{ kind: 'sql', source: '' }], 1), { type: 'source', index: 0, source: 'SELECT 2' })
+    expect(JSON.parse(written).version).toBe(2)
+    expect(parseSqlNotebook(written).cells[0]?.source).toBe('SELECT 2')
+  })
+
+  it('drops a cell’s stored results when its kind stops being sql', () => {
+    // A table under a text cell describes a query the cell no longer holds, and the run button for
+    // it is gone. Keeping the blocks would show an answer to something the reader cannot re-run.
+    const withResults = writeSqlCellResults(doc([{ kind: 'sql', source: 'SELECT 1' }]), 0, [block()], 1, 1)
+    const retyped = applySqlNotebookEdit(withResults ?? '', { type: 'kind', index: 0, kind: 'markdown' })
+
+    expect(parseSqlNotebook(retyped).cells[0]?.blocks).toEqual([])
+  })
+
+  it('clears every cell’s results at once', () => {
+    const two = doc([{ kind: 'sql', source: 'a' }, { kind: 'sql', source: 'b' }])
+    const first = writeSqlCellResults(two, 0, [block()], 1, 1)
+    const both = writeSqlCellResults(first ?? '', 1, [block()], 2, 2)
+
+    const cleared = applySqlNotebookEdit(both ?? '', { type: 'clearResults' })
+    expect(parseSqlNotebook(cleared).cells.map(cell => cell.blocks)).toEqual([[], []])
+  })
+
+  it('preserves unknown document and cell keys alongside the new fields', () => {
+    // The round trip's original promise has to survive the format change: a field this build does
+    // not know is someone else's, and writing results must not drop it.
+    const source = JSON.stringify({
+      version: 2,
+      extra: 7,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{ kind: 'sql', source: 'SELECT 1', mine: true }],
+    }, null, 2)
+    const written = writeSqlCellResults(source, 0, [block()], 1, 1) ?? ''
+
+    expect(written).toContain('"extra": 7')
+    expect(written).toContain('"mine": true')
+    expect(written).toContain('"demo.db"')
+  })
+})
+
+describe('skeletons', () => {  it('creates a new notebook as one version and one empty SQL cell', () => {
     const parsed = parseSqlNotebook(createSqlNotebookSkeleton())
     expect(parsed.readOnly).toBe(false)
     expect(parsed.warning).toBeNull()

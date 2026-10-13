@@ -2,10 +2,11 @@
  * The `.sqlnb` cell surface: cells, their results, and the connection they run on.
  *
  * Like `NotebookSurface` and `CsvTable`, this renders the file tab's draft and writes its
- * edits back as file text. What differs, and is the reason the SQL notebook is its own
- * surface rather than a mode of the notebook one (ADR 0002): a result never enters the file,
- * so running a cell leaves the tab clean, and the only writer of the draft is an edit the
- * reader made. `SqlRuntime` is handed a bridge that cannot write, so that stays true by type.
+ * edits back as file text. Where it differs from what ADR 0002 first described is the file's
+ * contents: a cell's results are recorded in the document when a run settles, and the database the
+ * notebook is about is recorded when it connects (ADR 0007, replacing ADR 0003's "source only").
+ * The reader's own edits go through the same path, which is why "the draft is the file text" still
+ * holds for every writer.
  *
  * Nothing here reaches a kernel. The connection is the Host's in-process SQLite handle keyed
  * by this notebook's path; it is not in the kernel registry, has no event stream, and is not
@@ -66,7 +67,7 @@ export interface SqlNotebookLabels {
   deleteCell: string
   moveUp: string
   moveDown: string
-  /** Fold the row to its header strip, and back. View state, never in the file. */
+  /** Fold the row to its header strip, and back. View state; the results it hides are in the file. */
   collapseCell: string
   expandCell: string
   /** The outline panel's heading, and what it says when there is nothing to list. */
@@ -87,6 +88,13 @@ export interface SqlNotebookLabels {
   invalidJson: string
   missingCells: string
   unsupportedVersion: string
+  /**
+   * Said when results cannot be recorded because the file is not one this build rewrites.
+   *
+   * The alternative is silence, and silence here is the expensive kind: a reader who runs a query in
+   * a notebook that keeps nothing would close the tab believing the answer is in the file.
+   */
+  resultsUnrecorded: string
   addFirstCell: string
   // --- running ---------------------------------------------------------------------------
   runCell: string
@@ -195,7 +203,28 @@ export function SqlNotebookSurface({
 
   useEffect(() => {
     runtime.bind(tabId, workspaceId, path)
+    // Reopening a notebook connects to the database its file records (ADR 0007), so the reader
+    // lands on a working notebook instead of on "not connected" for a database they already chose.
+    // A file with no record is left alone, and a refused one keeps its refusal on screen.
+    void runtime.autoConnect(tabId)
   }, [runtime, tabId, workspaceId, path])
+
+  /**
+   * Seed the pickers from what the file records.
+   *
+   * The auto-connect acts on the record, but the pickers are what the reader sees afterwards: when
+   * that open is refused — the database moved, or another notebook holds it writable — the controls
+   * must already name the database the notebook is about, so reconnecting is one click rather than
+   * finding the file again in the list.
+   *
+   * Keyed on the path so a switch to another notebook re-seeds rather than keeping the last one's
+   * choice, and deliberately not on the draft: re-seeding while the reader is mid-selection would
+   * pull the row out from under them.
+   */
+  useEffect(() => {
+    setPickPath(document.connection?.path ?? '')
+    setPickAccess(document.connection?.access ?? 'read-only')
+  }, [path, document.connection?.path, document.connection?.access])
 
   const subscribe = useCallback((notify: () => void) => runtime.subscribe(tabId, notify), [runtime, tabId])
   const snapshot = useCallback(() => runtime.peek(tabId), [runtime, tabId])
@@ -584,6 +613,11 @@ export function SqlNotebookSurface({
           {refusal !== null && <div className={css.noticeError} role="alert">{refusal}</div>}
           {document.readOnly && document.warning !== null && (
             <div className={css.notice} role="status">{warningMessage(document, labels)}</div>
+          )}
+          {document.readOnly && (
+            // Shown for every unreadable file, not only for an unknown version: whatever the reason,
+            // the consequence the reader needs is the same one — this run will not be kept.
+            <div className={css.notice} role="status">{labels.resultsUnrecorded}</div>
           )}
           {!document.readOnly && document.degradedIndexes.length > 0 && (
             <div className={css.notice} role="status">{labels.degradedNotice}</div>

@@ -46,14 +46,14 @@ function translate(key: string, values?: Record<string, unknown>): string {
 
 const NOTEBOOK_DRAFT = JSON.stringify({ version: 1, cells: [{ kind: 'sql', source: 'SELECT 1' }] })
 
-function notebookTab(path: string): WorkbenchFileTab {
+function notebookTab(path: string, draft = NOTEBOOK_DRAFT): WorkbenchFileTab {
   return {
     id: `file:${path}`,
     kind: 'file',
     path,
-    file: { path, content: NOTEBOOK_DRAFT, version: '1', size: NOTEBOOK_DRAFT.length, markdown: false },
+    file: { path, content: draft, version: '1', size: draft.length, markdown: false },
     image: null,
-    draft: NOTEBOOK_DRAFT,
+    draft,
     dirty: false,
     markdownMode: 'source',
     wrap: true,
@@ -121,7 +121,22 @@ function mount(options: {
       columns: options.columns ?? [{ name: 'id', type: 'INTEGER', notNull: false, primaryKey: true }],
     })),
   }
-  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => NOTEBOOK_DRAFT })
+  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, {
+    /**
+     * The open tab's draft, not a constant.
+     *
+     * The panel and the runtime both serve whatever notebook is on screen, so a fixture that hands
+     * the runtime a different file from the one rendered would let them disagree — and would make the
+     * auto-connect read a record the panel never showed. `workbench.current` is the same snapshot the
+     * panel itself reads.
+     */
+    getDraft: () => {
+      const tabs = (workbench.current['tabs'] ?? []) as Array<{ kind?: string; draft?: string }>
+      return tabs.find(tab => tab.kind === 'file')?.draft ?? NOTEBOOK_DRAFT
+    },
+    setDraft: vi.fn(),
+    save: vi.fn(),
+  })
   const entries = options.entries ?? [
     { name: 'demo.db', path: 'demo.db', kind: 'file' as const },
     { name: 'demo.db-wal', path: 'demo.db-wal', kind: 'file' as const },
@@ -222,6 +237,30 @@ describe('SqlPanel — 结构', () => {
     await harness.connect()
 
     expect(await harness.view.findByText(zh['sqlnotebook.schemaTruncated'])).toBeTruthy()
+  })
+
+  /**
+   * The panel is often the only SQL surface on screen, so it is the one that reopens a notebook's
+   * connection when the editor is showing something else (ADR 0007).
+   */
+  it('reconnects to the database the notebook file records, without the reader asking', async () => {
+    const draft = JSON.stringify({
+      version: 2,
+      connection: { path: 'archive.sqlite', access: 'writable' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    })
+    openNotebook(notebookTab('query.sqlnb', draft))
+    const harness = mount()
+
+    await waitFor(() => { expect(harness.api.sqlOpen).toHaveBeenCalled() })
+    expect(harness.api.sqlOpen).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1', notebook: 'query.sqlnb', path: 'archive.sqlite', access: 'writable',
+    })
+    // The picker names it too, which is what the reader sees if that open is later refused.
+    await waitFor(() => {
+      const select = harness.view.getByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
+      expect(select.value).toBe('archive.sqlite')
+    })
   })
 
   it('reads the schema again after a run, without watching files', async () => {

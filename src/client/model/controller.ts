@@ -103,9 +103,12 @@ export class WorkbenchController {
    * SQL notebook connections and run states, scoped per tab.
    *
    * Separate from `notebookRuntime` on purpose (ADR 0002): a SQL notebook has no kernel,
-   * no event stream and no registry entry, and its results are never folded back into the
-   * draft. It is kept out of the shared store for the same reason the notebook runtime is -
-   * a query's rows must not make every tab in the workbench clone.
+   * no event stream and no registry entry. Its results do reach the file (ADR 0007), which is
+   * where this differs from the notebook only in *when* — a run folds its blocks into the draft
+   * the moment its request returns, rather than on a completion frame.
+   *
+   * It is kept out of the shared store for the same reason the notebook runtime is - a query's
+   * rows must not make every tab in the workbench clone.
    */
   readonly sqlRuntime: SqlRuntime
 
@@ -124,11 +127,14 @@ export class WorkbenchController {
       getDraft: tabId => this.notebookDraft(tabId),
       setDraft: (tabId, text) => { this.edits.setDraft(text, 'input', tabId) },
     })
-    // The bridge has no writer. Running a SQL cell must not dirty a tab, and the strongest
-    // guarantee that no future method does it by accident is that this object cannot ask for
-    // a draft write at all.
+    // The SQL runtime writes results back into the file (ADR 0007), so it is handed a writer as
+    // well as a reader, and the save that follows. What it still cannot do is choose *when* a save
+    // is allowed: the ordinary save path refuses one while an external change is unresolved, so a
+    // query can never overwrite bytes the reader has not looked at yet.
     this.sqlRuntime = new SqlRuntime(api, logger, {
       getDraft: tabId => this.notebookDraft(tabId),
+      setDraft: (tabId, text) => { this.edits.setDraft(text, 'input', tabId) },
+      save: (tabId) => { void this.save(tabId) },
     })
   }
 

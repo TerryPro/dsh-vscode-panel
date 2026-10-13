@@ -235,7 +235,15 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     setResult(null)
     let path: string | null
     try {
-      path = await createSqlNotebook({ api: controller.api, workspaceId: targetWorkspace, directory, seed })
+      path = await createSqlNotebook({
+        api: controller.api,
+        workspaceId: targetWorkspace,
+        directory,
+        seed,
+        // Recorded in the file so reopening this notebook connects again, rather than asking the
+        // reader to pick the database they just double-clicked (ADR 0007).
+        ...(connectTo === undefined ? {} : { database: connectTo }),
+      })
     } catch (reason: unknown) {
       if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
       return

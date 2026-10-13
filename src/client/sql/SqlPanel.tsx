@@ -17,7 +17,7 @@ import { SQL_MEMORY_TARGET, type SqlAccess, type SqlColumnEntry, type SqlTablesR
 import type { WorkbenchController, WorkbenchFileTab, WorkbenchState } from '../model/controller.ts'
 import { messageOf } from '../model/tab-model.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import { appendSqlCell } from './sql-notebook-document.ts'
+import { appendSqlCell, parseSqlNotebook } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
 import { connectionReadout } from './sql-connection-readout.ts'
 import { selectAllFrom } from './sql-schema-tree.ts'
@@ -45,6 +45,10 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   useEffect(() => {
     if (workspaceId === undefined || tabId === null || notebookPath === null) return
     controller.sqlRuntime.bind(tabId, workspaceId, notebookPath)
+    // This panel is often the only SQL surface on screen — the editor may be showing a `.ts` — so it
+    // is the one that reopens the notebook's connection when the surface is not mounted. The runtime
+    // makes the call idempotent, so both mounting is not two connections.
+    void controller.sqlRuntime.autoConnect(tabId)
   }, [controller, notebookPath, tabId, workspaceId])
 
   const subscribe = useCallback(
@@ -78,6 +82,24 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
    */
   const connection = runState?.connection ?? null
   const connectedPath = connection?.path ?? null
+
+  /**
+   * Seed the pickers from the file's own record, so the panel names the database the notebook is
+   * about even when the auto-connect was refused. A notebook with no record leaves the controls
+   * empty, which is what "pick one" looks like.
+   *
+   * The draft is read inside the effect rather than derived per render. The tab object is rebuilt on
+   * every store change — including a keystroke in another pane — and results now live in the file,
+   * so re-parsing the whole document on each one would make this panel the slowest thing in the
+   * workbench. These three dependencies are the moments the record can differ: a different notebook,
+   * or a connection that put the notebook on another database or tier.
+   */
+  useEffect(() => {
+    const record = notebook === null ? null : parseSqlNotebook(notebook.draft).connection
+    setPickPath(record?.path ?? '')
+    setPickAccess(record?.access ?? 'read-only')
+  }, [notebookPath, connectedPath, connection?.access])
+
   const [tables, setTables] = useState<SqlTablesResult | null>(null)
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
   const [openTable, setOpenTable] = useState<string | null>(null)

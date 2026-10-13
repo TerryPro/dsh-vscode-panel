@@ -7,10 +7,10 @@
  * tab gets its own snapshot store and only its surface subscribes.
  *
  * Three things this class deliberately cannot do:
- * - **write the file.** It is handed a bridge that can read the draft and nothing else, so
- *   "running a cell never marks the tab dirty" (ADR 0003) is a type-level fact here rather
- *   than a rule every method has to remember. The notebook folds outputs into the draft on
- *   `cell_completed`; the two formats diverge exactly there.
+ * - **retry or invent an answer.** Where the notebook runtime folds outputs into the draft on
+ *   `cell_completed`, this one folds a settled run's blocks into the draft right here (ADR 0007).
+ *   The two formats now agree that a result belongs in the file; what differs is the trigger, since
+ *   a SQL statement has an answer the moment its request returns.
  * - **interrupt a statement outright.** It asks the Host to stop, and the Host can only honour
  *   that where its row loop yields. A query whose whole cost sits in the first row — an
  *   aggregate, a write — runs on whatever the reader asks for, and the next cell still waits for
@@ -19,18 +19,45 @@
  *   show nothing for what is in flight"; the panel has to say so rather than promise an interrupt.
  * - **own the `In[n]` number.** The Host counts executions per connection and returns the
  *   number with the result, so a page that re-arms a handle inside the grace window keeps
- *   its reader's numbering instead of restarting at one.
+ *   its reader's numbering instead of restarting at one. The number is also written to the file,
+ *   so a reopened notebook shows the prompt its results actually ran under rather than a blank one.
  */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { WorkbenchApi } from '../model/api.ts'
 import type { SqlAccess, SqlExecuteResult, SqlResultBlock } from '../../shared/sql-protocol.ts'
-import { cellIndexFromId, parseSqlNotebook, rowAfterEdit, sqlCellId, type SqlNotebookCellModel, type SqlNotebookEdit } from './sql-notebook-document.ts'
+import {
+  applySqlNotebookEdit,
+  cellIndexFromId,
+  parseSqlNotebook,
+  rowAfterEdit,
+  sqlCellId,
+  writeSqlCellResults,
+  writeSqlNotebookConnection,
+  type SqlNotebookCellModel,
+  type SqlNotebookConnectionRecord,
+  type SqlNotebookEdit,
+} from './sql-notebook-document.ts'
 
-/** The draft access this runtime needs. There is no writer in it, on purpose. */
+/**
+ * The draft access this runtime needs.
+ *
+ * `setDraft` is what records a settled run's results in the file (ADR 0007). It writes the tab's
+ * draft, which marks the tab dirty exactly as a typed edit does — running a cell now changes the
+ * file, which is the decision ADR 0007 made in place of ADR 0003's opposite rule.
+ *
+ * `save` is the other half of that decision: "the result is in the notebook" means it is on disk,
+ * not merely in a draft the reader has to remember to save. It is a request, not a guarantee — a
+ * save is refused while an external change is unresolved, and the draft then stays dirty with the
+ * banner the ordinary editor shows, which is better than overwriting someone else's bytes.
+ */
 export interface SqlDraftBridge {
   /** Current draft text for the tab, or `''` when it is no longer open. */
   getDraft(tabId: string): string
+  /** Write the draft for a tab, as the reader's own editing would. */
+  setDraft(tabId: string, text: string): void
+  /** Take a tab's draft to disk, if the save path accepts it. */
+  save(tabId: string): void
 }
 
 export interface SqlRuntimeLogger {
@@ -85,10 +112,20 @@ export interface SqlNotebookState {
 }
 
 interface TabRuntime {
+  /** The workbench tab this runtime belongs to, which is what a draft write is addressed to. */
+  tabId: string
   store: SnapshotStore<SqlNotebookState>
   workspaceId: string
   /** Workspace-relative path of the `.sqlnb`, which is the identity the Host keys by. */
   notebook: string
+  /**
+   * Whether the file's own connection record has already been acted on.
+   *
+   * The auto-connect happens once per binding (ADR 0007). Without this the effect that mounts the
+   * surface would retry on every render, and a database that is genuinely unreachable — a file the
+   * reader deleted — would be hammered instead of reported.
+   */
+  autoConnectTried: boolean
   /** Cell ids waiting their turn, in the order they were asked for. */
   queue: string[]
   /** The cell whose request is outstanding, or null when the connection is free. */
@@ -169,9 +206,13 @@ export class SqlRuntime {
     if (existing !== undefined && existing.workspaceId === workspaceId && existing.notebook === notebook) return
     if (existing !== undefined) this.releaseToGrace(existing)
     this.tabs.set(tabId, {
+      tabId,
       store: createSnapshotStore(initialSqlState()),
       workspaceId,
       notebook,
+      // A rebind to the same notebook is a page reload or a reopened tab, so the record is read
+      // again: the file may have been edited (or produced results) in between.
+      autoConnectTried: false,
       queue: [],
       inflight: null,
       stretch: [],
@@ -180,7 +221,42 @@ export class SqlRuntime {
       stretchActive: false,
       idleWaiters: [],
     })
+    this.hydrate(tabId)
     this.wakePending(tabId)
+  }
+
+  /**
+   * Load the results the file holds into the tab's state.
+   *
+   * A notebook reopened hours later must show the answers it recorded, not a blank column the
+   * reader has to re-run to see (ADR 0007). These arrive as `done` runs with no connection behind
+   * them: the file is the only thing that knows about them, and a run marked `running` would claim
+   * a query that is not on any handle. A cell the file recorded no results for gets no entry at
+   * all, so the row looks exactly as it did before it was ever run.
+   *
+   * Called when a tab binds, and when a connection closes. Both are moments where what is on screen
+   * has to become the file's own record again: on open so the reader sees their results, and on
+   * disconnect because the file keeps them — clearing the screen there would say the results were
+   * lost while the bytes that hold them were never touched. Hydrating on *every* render is the one
+   * thing this must not become, since it would resurrect a block the reader just cleared.
+   */
+  private hydrate(tabId: string): void {
+    const tab = this.tabs.get(tabId)
+    if (tab === undefined) return
+    const restored: Record<string, SqlCellRun> = {}
+    for (const cell of parseSqlNotebook(this.bridge.getDraft(tabId)).cells) {
+      if (cell.blocks.length === 0 && cell.executionCount === null) continue
+      restored[cell.id] = {
+        status: 'done',
+        executionCount: cell.executionCount,
+        elapsedMs: cell.elapsedMs,
+        blocks: cell.blocks,
+        failure: null,
+      }
+    }
+    // Assigned even when empty: this is the file's record, and a notebook whose file holds no
+    // results has an empty one. Merging instead would keep the runs of a session that just ended.
+    tab.store.update(state => { state.cells = restored })
   }
 
   /** The live state of a tab, or an empty one when nothing is bound. Never creates a tab. */
@@ -229,8 +305,12 @@ export class SqlRuntime {
    * The tier is what the reader asked for; what the panel shows afterwards is the Host's
    * answer, because a writable request refused as occupied has to read as read-only rather
    * than as the tier nobody granted.
+   *
+   * A successful open is recorded in the file (ADR 0007), so this notebook is about that database
+   * from now on. `record` is false for the auto-connect replaying what the file already says, which
+   * would otherwise rewrite the draft on every open for a value that is already in it.
    */
-  async connect(tabId: string, path: string, access: SqlAccess): Promise<boolean> {
+  async connect(tabId: string, path: string, access: SqlAccess, record = true): Promise<boolean> {
     const tab = this.tabs.get(tabId)
     if (tab === undefined) return false
     const before = tab.store.getSnapshot().connection
@@ -240,9 +320,16 @@ export class SqlRuntime {
     })
     try {
       const opened = await this.api.sqlOpen({ workspaceId: tab.workspaceId, notebook: tab.notebook, path, access })
-      // A handle for a different file or tier means the reader is starting a new session, and
-      // the results of the old one belong to a connection that no longer exists.
-      const changed = before === null || before.path !== opened.path || before.access !== opened.access
+      /**
+       * A *switch* — there was a handle, and it was for another database or tier — is a new session,
+       * so work still queued belongs to the old one and must not run against this handle.
+       *
+       * Written as `before !== null && …` rather than the other way round because the first connect
+       * is not a switch. It used to read as one (`before === null || …`), and that made opening a
+       * notebook wipe the results `hydrate` had just restored from the file: the reader saw the
+       * connection succeed and every recorded table disappear (ADR 0007).
+       */
+      const switched = before !== null && (before.path !== opened.path || before.access !== opened.access)
       tab.store.update(state => {
         state.connecting = false
         state.connection = {
@@ -253,12 +340,20 @@ export class SqlRuntime {
           walSidecarExpected: opened.walSidecarExpected,
         }
         state.freshConnection = true
-        if (changed) {
-          state.cells = {}
-          state.connectionProblem = null
-        }
+        /**
+         * `state.cells` is deliberately left alone.
+         *
+         * What is on screen is the file's recorded results plus whatever run state is live, and a
+         * connect is not an edit to either. Results change when a run settles, when a run fails or is
+         * cancelled, and when the reader clears them — never because a handle opened (ADR 0007).
+         */
+        state.connectionProblem = null
       })
-      if (changed) this.dropWork(tab, 'reconnecting to another file or tier')
+      if (switched) this.dropWork(tab, 'reconnecting to another file or tier')
+      // What is written is the *Host's* answer, not the request: a writable request that came back
+      // read-only (an occupied file) must not be recorded as writable, or the next open would ask
+      // for a tier this connection never had.
+      if (record) this.recordConnection(tab, { path: opened.path, access: opened.access })
       return true
     } catch (error: unknown) {
       const failure = failureOf(error)
@@ -269,6 +364,58 @@ export class SqlRuntime {
       this.logger.warn(`workbench-layout: sql notebook connect refused (${failure.code})`)
       return false
     }
+  }
+
+  /**
+   * Connect to what the file records, once per binding.
+   *
+   * This is what makes reopening a notebook land on its database instead of on "not connected". A
+   * file with no record is left alone: a notebook that never named a database must not have one
+   * guessed for it, and `:memory:` is a decision rather than a default.
+   *
+   * A record for a database the Host refuses (the file was deleted, or another notebook holds it
+   * writable) leaves the normal refusal on screen — the reader gets the picker and a reason, which
+   * is more useful than a silent fallback to `:memory:` that would quietly run their queries
+   * against an empty database.
+   */
+  async autoConnect(tabId: string): Promise<boolean> {
+    const tab = this.tabs.get(tabId)
+    if (tab === undefined || tab.autoConnectTried) return false
+    tab.autoConnectTried = true
+    if (tab.store.getSnapshot().connection !== null) return false
+    const document = parseSqlNotebook(this.bridge.getDraft(tabId))
+    // A document this build does not understand is not acted on at all: its `connection` field may
+    // mean something else in that version, and opening a database on a guess is the one mistake
+    // here that touches something outside the notebook.
+    if (document.readOnly) return false
+    const record = document.connection
+    if (record === null) return false
+    return this.connect(tabId, record.path, record.access, false)
+  }
+
+  /** Record which database this notebook is about. A file this build cannot rewrite keeps its bytes. */
+  private recordConnection(tab: TabRuntime, connection: SqlNotebookConnectionRecord | null): void {
+    const draft = this.bridge.getDraft(tab.tabId)
+    if (draft === '') return
+    try {
+      const next = writeSqlNotebookConnection(draft, connection)
+      if (next !== null) this.writeDraft(tab, next)
+    } catch (error: unknown) {
+      // The connection is live either way; only the record failed. Worth a line, never a refusal.
+      this.logger.warn(`workbench-layout: could not record the SQL connection: ${failureOf(error).code}`)
+    }
+  }
+
+  /**
+   * Write a new draft and take it to disk.
+   *
+   * The two steps are one method so no future caller can do half of it: a result that reached the
+   * draft but not the file is the "I ran it and it wasn't there tomorrow" bug this decision exists
+   * to prevent.
+   */
+  private writeDraft(tab: TabRuntime, text: string): void {
+    this.bridge.setDraft(tab.tabId, text)
+    this.bridge.save(tab.tabId)
   }
 
   /** Mark the "connection established" notice as shown. */
@@ -293,8 +440,16 @@ export class SqlRuntime {
       state.connection = null
       state.connectionProblem = null
       state.freshConnection = false
-      state.cells = {}
     })
+    /**
+     * Back to the file's record.
+     *
+     * Disconnecting releases the handle; it does not delete the results, which live in the notebook
+     * (ADR 0007). Blanking the screen here would tell the reader their tables were lost while the
+     * bytes holding them were never touched — and the file's copy is exactly what the next open
+     * would show, so the two would disagree until a reload.
+     */
+    this.hydrate(tabId)
     if (connection === null) return { closed: false, rolledBack: false }
     try {
       const outcome = await this.api.sqlClose(tab.workspaceId, tab.notebook)
@@ -413,6 +568,16 @@ export class SqlRuntime {
         if (running !== undefined) state.cells[outstanding] = { ...running, status: 'cancelled' }
       }
     })
+    /**
+     * The cancelled cells' records go too.
+     *
+     * A cell showing "cancelled" must not have a table under it in the file: on the next open the
+     * row would claim an answer for a run the reader stopped. That covers both the stopped run,
+     * whose partial rows are discarded on purpose, and whatever the cell held before it — the word
+     * on screen and the file have to say the same thing.
+     */
+    if (outstanding !== null) this.recordRun(tab, outstanding, null)
+    for (const id of queued) this.recordRun(tab, id, null)
     this.notifyIdle(tab)
     if (outstanding === null) return
     void this.api.sqlCancel(tab.workspaceId, tab.notebook).then(outcome => {
@@ -425,12 +590,15 @@ export class SqlRuntime {
   }
 
   /**
-   * Drop what runs have put on screen.
+   * Drop what runs have put on screen, and in the file.
    *
    * Cells that are queued or running keep their state — clearing a run in progress would
    * strand its answer against an entry that no longer exists, and the reader asked to clear
-   * *outputs*, not to lose a query already on the wire. Nothing here touches the file:
-   * results were never in it.
+   * *outputs*, not to lose a query already on the wire.
+   *
+   * The file is cleared too (ADR 0007): a "clear outputs" that left the blocks in the file would
+   * bring them all back on the next open, which is the opposite of what the gesture means. Like
+   * every other write, it can be refused — a file this build must not rewrite keeps its bytes.
    */
   clearOutputs(tabId: string, cellId?: string): void {
     const tab = this.tabs.get(tabId)
@@ -442,6 +610,34 @@ export class SqlRuntime {
         delete state.cells[id]
       }
     })
+    this.clearRecordedResults(tab, cellId)
+  }
+
+  /**
+   * Remove the recorded results from the file text.
+   *
+   * One cell at a time, or all of them: the two gestures the surface offers. A cell whose row the
+   * reader has since deleted simply has no index and is skipped, which is correct — there is
+   * nothing left to clear.
+   */
+  private clearRecordedResults(tab: TabRuntime, cellId?: string): void {
+    const draft = this.bridge.getDraft(tab.tabId)
+    if (draft === '') return
+    try {
+      if (cellId === undefined) {
+        const next = applySqlNotebookEdit(draft, { type: 'clearResults' })
+        if (next !== draft) this.writeDraft(tab, next)
+        return
+      }
+      const index = cellIndexFromId(cellId)
+      if (index === null) return
+      const cells = parseSqlNotebook(draft).cells
+      if (cells[index]?.id !== cellId) return
+      const next = writeSqlCellResults(draft, index, [], null, null)
+      if (next !== null) this.writeDraft(tab, next)
+    } catch (error: unknown) {
+      this.logger.warn(`workbench-layout: could not clear recorded SQL results: ${failureOf(error).code}`)
+    }
   }
 
   /**
@@ -541,11 +737,20 @@ export class SqlRuntime {
     try {
       result = await this.api.sqlExecute(tab.workspaceId, tab.notebook, source)
     } catch (error: unknown) {
-      this.settleCurrentRun(tab, run => {
+      const settled = this.settleCurrentRun(tab, run => {
         const failure = failureOf(error)
         run.status = 'error'
         run.failure = failure
       })
+      /**
+       * A run that failed at the request level records that failure — which means dropping whatever
+       * the file still holds for this cell.
+       *
+       * Without this the previous run's blocks would survive in the file and be restored on the next
+       * open as though they answered the statement that has just failed: a table of results for a
+       * query that did not run is the one wrong answer a reader cannot detect.
+       */
+      if (settled) this.recordRun(tab, cellId, null)
       this.afterCommit(tab)
       tab.inflight = null
       this.notifyIdle(tab)
@@ -555,19 +760,57 @@ export class SqlRuntime {
 
     // A cancelled or disconnected tab has no place to put this answer. The request was allowed
     // to finish on the Host; only its result is dropped, which is the honest half.
-    this.settleCurrentRun(tab, run => {
-      const failing = result.blocks.find(block => block.error !== undefined)?.error
+    const failing = result.blocks.find(block => block.error !== undefined)?.error
+    const settled = this.settleCurrentRun(tab, run => {
       run.blocks = result.blocks
       run.elapsedMs = result.elapsedMs
       run.executionCount = result.executionCount
       run.status = failing === undefined ? 'done' : 'error'
       run.failure = failing === undefined ? null : { code: failing.code, message: failing.message }
     })
+    // Only a run that actually landed is recorded: a cancelled cell's blocks were dropped on
+    // purpose, and writing them would put an answer in the file that the screen refuses to show.
+    if (settled) this.recordRun(tab, cellId, result)
 
     this.afterCommit(tab)
     tab.inflight = null
     this.notifyIdle(tab)
     void this.drain(tabId)
+  }
+
+  /**
+   * Write one settled run's results into the file text, or clear the cell's record.
+   *
+   * The draft is re-read rather than assumed: the reader may have edited (or deleted) this cell
+   * while the query ran, and the row's index is resolved from the cell id it is still keyed by
+   * rather than from the position it occupied at dispatch. A row that no longer exists — or one
+   * that moved — is resolved by the derivation `remapCellRuns` uses, so the answer lands on the
+   * cell it belongs to.
+   *
+   * `result === null` is a run that produced nothing to keep — a request-level failure, whose cell
+   * must not keep showing the previous answer. The prompt number and timing go with the blocks,
+   * because a recorded `In[n]` with no result would claim a run whose answer is missing.
+   *
+   * Nothing here throws at the caller: recording is the second half of a run that already
+   * happened, and a file this build will not rewrite must not turn a good answer into an error.
+   */
+  private recordRun(tab: TabRuntime, cellId: string, result: SqlExecuteResult | null): void {
+    const index = cellIndexFromId(cellId)
+    if (index === null) return
+    const draft = this.bridge.getDraft(tab.tabId)
+    if (draft === '') return
+    // A structural edit may have renamed this row after dispatch, so the index is verified and not
+    // trusted: writing a result onto the neighbour's row is the failure this guards.
+    const cell = parseSqlNotebook(draft).cells[index]
+    if (cell === undefined || cell.id !== cellId || cell.kind !== 'sql') return
+    try {
+      const next = result === null
+        ? writeSqlCellResults(draft, index, [], null, null)
+        : writeSqlCellResults(draft, index, result.blocks, result.executionCount, result.elapsedMs)
+      if (next !== null) this.writeDraft(tab, next)
+    } catch (error: unknown) {
+      this.logger.warn(`workbench-layout: could not record SQL result: ${failureOf(error).code}`)
+    }
   }
 
   /**
@@ -607,15 +850,21 @@ export class SqlRuntime {
    * occupy at dispatch. Two things still clear the way back — the tab stopped owning the
    * connection (`dropWork` nulls the id), or the reader cancelled, which leaves the run marked
    * `cancelled` and this write steps around it.
+   *
+   * Returns whether the answer was actually taken, which is what tells the caller the file may be
+   * updated too: a dropped answer must not reach the draft.
    */
-  private settleCurrentRun(tab: TabRuntime, apply: (run: SqlCellRun) => void): void {
+  private settleCurrentRun(tab: TabRuntime, apply: (run: SqlCellRun) => void): boolean {
     const cellId = tab.inflight
-    if (cellId === null) return
+    if (cellId === null) return false
+    let settled = false
     tab.store.update(state => {
       const run = state.cells[cellId]
       if (run === undefined || run.status !== 'running') return
       apply(run)
+      settled = true
     })
+    return settled
   }
 
   /**

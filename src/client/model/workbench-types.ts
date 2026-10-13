@@ -23,10 +23,11 @@ export type NotebookViewMode = 'notebook' | 'source'
 /**
  * How a `.sqlnb` file is shown: the SQL notebook's own cell surface, or its JSON text.
  *
- * A separate type from `NotebookViewMode` even though both are two-state, because the two
- * formats diverge on what the surface writes back: running a Jupyter cell stores its
- * output in the file, running a SQL cell must not (ADR 0003). One type per format keeps
- * that difference from being collapsed by a shared union.
+ * A separate type from `NotebookViewMode` even though both are two-state. The two formats now agree
+ * that a run's results belong in the file (ADR 0007, which replaced ADR 0003's opposite rule for
+ * SQL), but they are still different documents with different fields, different runtimes and
+ * different actions on the status bar; one type per format keeps those from being collapsed by a
+ * shared union.
  */
 export type SqlNotebookViewMode = 'notebook' | 'source'
 export type GitView = 'changes' | 'graph'

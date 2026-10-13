@@ -82,6 +82,7 @@ const labels: SqlNotebookLabels = {
   invalidJson: zh['sqlnotebook.invalidJson'],
   missingCells: zh['sqlnotebook.missingCells'],
   unsupportedVersion: zh['sqlnotebook.unsupportedVersion'],
+  resultsUnrecorded: zh['sqlnotebook.resultsUnrecorded'],
   addFirstCell: zh['sqlnotebook.addFirstCell'],
   runCell: zh['sqlnotebook.runCell'],
   runAll: zh['sqlnotebook.runAll'],
@@ -158,6 +159,8 @@ interface Harness {
   }
   /** Pick the first database the scan offered and press connect. */
   connect: () => Promise<void>
+  /** The draft the tab holds — what a save would write, and what a reopen would read. */
+  box: { current: string }
 }
 
 function open(draft: string, options: {
@@ -176,6 +179,14 @@ function open(draft: string, options: {
   // The draft the surface and the runtime both read: an edit writes it before it repaints, so a
   // queued cell sees the text that is in its cell when its turn comes.
   const box = { current: draft }
+  /**
+   * How the runtime's own write reaches the rendered surface.
+   *
+   * The real tab owns the draft, so a write from the runtime repaints exactly as typing does. The
+   * fixture has to model that, or a test could assert "the result is in the file" while the screen
+   * still shows the pre-run document.
+   */
+  let setDraftIntoHost: (text: string) => void = () => undefined
   const api = {
     sqlOpen: vi.fn(() => Promise.resolve({
       path: 'demo.db', access: 'read-only' as const, sqliteVersion: '3.46.0', walSidecarExpected: false, rowLimit: 1000,
@@ -190,7 +201,17 @@ function open(draft: string, options: {
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
     sqlCancel: vi.fn(() => Promise.resolve({ cancelled: true })),
   }
-  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => box.current })
+  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, {
+    getDraft: () => box.current,
+    /**
+     * A run records its results in the file (ADR 0007), so this write goes through the same
+     * `onEdit` the reader's own typing uses — not straight into `box`. Routing it around the
+     * callback would make every "what did the run write" assertion here pass without the surface
+     * ever being told, which is exactly the shape of test this fixture must not become.
+     */
+    setDraft: (_tabId, text) => { box.current = text; onEdit(text); setDraftIntoHost(text) },
+    save: onSave,
+  })
   const root: DirectoryListing = { path: '', entries: options.entries ?? [{ name: 'demo.db', path: 'demo.db', kind: 'file' }], truncated: false }
   const listDirectory = vi.fn((path: string) => Promise.resolve(path === '' ? root : { path, entries: [], truncated: false }))
   /**
@@ -202,6 +223,9 @@ function open(draft: string, options: {
    */
   function SurfaceHost() {
     const [text, setText] = useState(draft)
+    // A runtime write repaints the surface the way a typed edit does, so the two writers of the
+    // draft are one path here as they are in the real tab.
+    setDraftIntoHost = setText
     return (
       <SqlNotebookSurface
         tabId="file:query.sqlnb"
@@ -231,7 +255,7 @@ function open(draft: string, options: {
     fireEvent.click(view.getByRole('button', { name: labels.connect }))
     await waitFor(() => { expect(api.sqlOpen).toHaveBeenCalled() })
   }
-  return { view, onEdit, onSave, api, connect }
+  return { view, onEdit, onSave, api, connect, box }
 }
 
 describe('SqlNotebookSurface 文档层', () => {
@@ -283,18 +307,114 @@ describe('SqlNotebookSurface 文档层', () => {
 
   it('shows a file whose version it does not know as read-only, and says which one', () => {
     const { view, onEdit } = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }], SQLNB_VERSION + 1))
-    expect(view.getByRole('status')?.textContent).toContain(labels.unsupportedVersion)
+    // By text rather than by `getByRole('status')`: an unreadable file shows two notices (why it
+    // cannot be read, and that its results will not be kept), and asserting on the exact sentence is
+    // what this case is actually about.
+    expect(view.getByText(labels.unsupportedVersion)).toBeTruthy()
     expect(view.queryByRole('textbox')).toBeNull()
     expect(view.getByText('SELECT 1')).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: labels.deleteCell }))
     expect(onEdit).not.toHaveBeenCalled()
   })
 
+  it('says up front that a notebook it cannot rewrite will not keep its results', () => {
+    // The consequence a reader has to know before they run anything: with this file, the answer stays
+    // on screen and nothing goes to disk. Silence here is discovered as lost work.
+    const { view } = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }], SQLNB_VERSION + 1))
+    expect(view.getByText(labels.resultsUnrecorded)).toBeTruthy()
+  })
+
+  it('does not claim results are unrecorded for a file it can rewrite', () => {
+    const { view } = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    expect(view.queryByText(labels.resultsUnrecorded)).toBeNull()
+  })
+
   it('points at the source view when the file is not valid JSON', () => {
     const { view } = open('{"version": 1, "cells": [')
-    expect(view.getByRole('status')?.textContent).toContain(labels.invalidJson)
+    // Two places, deliberately: the banner above the cells and the empty state that stands in for the
+    // cells this file has none of. Both send the reader to the same fix, so both are asserted.
+    expect(view.getAllByText(labels.invalidJson).length).toBeGreaterThan(0)
     expect(view.queryByRole('textbox')).toBeNull()
     expect((view.getByRole('button', { name: labels.addSqlCell }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  /**
+   * Reopening a notebook (ADR 0007): the file remembers the database and the results, so the reader
+   * lands on a notebook that is already connected and already shows what it ran.
+   */
+  it('connects on open to the database the file records, without the reader picking one', async () => {
+    const draft = JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    })
+    const harness = open(draft)
+
+    await waitFor(() => { expect(harness.api.sqlOpen).toHaveBeenCalled() })
+    expect(harness.api.sqlOpen).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1', notebook: 'query.sqlnb', path: 'demo.db', access: 'read-only',
+    })
+    // The run button is live, which is the reader-visible half: a notebook that reconnects must be
+    // immediately runnable rather than merely labelled.
+    await waitFor(() => {
+      expect((harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLButtonElement).disabled).toBe(false)
+    })
+  })
+
+  /**
+   * The reported bug, on the surface the reader actually uses: a notebook whose file records both a
+   * database and results must show the tables *after* the automatic connect lands, not only before
+   * it. The original version of this case asserted synchronously, which sampled the render between
+   * hydration and the connect — the one instant where the bug was invisible.
+   *
+   * The fixture is the shape a real session writes (three cells, `connection` last, ascending
+   * `execution_count` per cell), because that is the file the reader reported opening.
+   */
+  it('still shows the recorded results after the automatic connect lands', async () => {
+    const result = (columns: string[], rows: Array<Array<string | number>>) => ({
+      columns: columns.map(label => ({ label, name: label, type: label === 'id' ? 'INTEGER' : 'TEXT' })),
+      rows,
+      rowLimit: 1000,
+      truncated: false,
+      columnsDropped: 0,
+      valuesTruncated: 0,
+    })
+    const draft = JSON.stringify({
+      version: 2,
+      cells: [
+        { kind: 'sql', source: 'SELECT * from city', execution_count: 1, elapsed_ms: 0, results: [result(['id', 'name'], [[1, 'Tokyo'], [2, 'Osaka']])] },
+        { kind: 'sql', source: 'select * from country', execution_count: 2, elapsed_ms: 0, results: [result(['name'], [['Japan']])] },
+        { kind: 'sql', source: 'SELECT name FROM sqlite_master', execution_count: 3, elapsed_ms: 1, results: [result(['name'], [['city']])] },
+      ],
+      connection: { path: 'demo.db', access: 'read-only' },
+    })
+    const harness = open(draft)
+
+    await waitFor(() => { expect(harness.api.sqlOpen).toHaveBeenCalled() })
+    // The connection is live and the reader can run again, and every recorded cell still shows its
+    // own rows and its own prompt number.
+    await waitFor(() => {
+      expect((harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLButtonElement).disabled).toBe(false)
+    })
+    expect(harness.view.getByText('Tokyo')).toBeTruthy()
+    expect(harness.view.getByText('Osaka')).toBeTruthy()
+    expect(harness.view.getByText('Japan')).toBeTruthy()
+    expect(harness.view.getByText('city')).toBeTruthy()
+    expect(harness.view.getByText('In[1]')).toBeTruthy()
+    expect(harness.view.getByText('In[3]')).toBeTruthy()
+    expect(harness.view.getByText(labels.elapsed(1))).toBeTruthy()
+  })
+
+  it('opens a file that records no database without connecting anything', async () => {
+    // A notebook created from nothing has no database to return to, and `:memory:` must not be
+    // guessed for it: its first query would then run against an empty database.
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+
+    await new Promise(resolve => { setTimeout(resolve, 0) })
+
+    expect(harness.api.sqlOpen).not.toHaveBeenCalled()
+    expect(harness.view.getByText(labels.notConnected)).toBeTruthy()
+    expect((harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('shows a cell of an unknown kind as read-only text and names it', () => {
@@ -315,7 +435,7 @@ describe('SqlNotebookSurface 文档层', () => {
     const onEdit = vi.fn()
     const runtime = new SqlRuntime({
       sqlOpen: vi.fn(), sqlExecute: vi.fn(), sqlClose: vi.fn(), sqlAbandon: vi.fn(),
-    } as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => draft })
+    } as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => draft, setDraft: vi.fn(), save: vi.fn() })
     const view = render(
       <SqlNotebookSurface
         tabId="file:query.sqlnb"
@@ -426,8 +546,15 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(harness.view.getByText('INTEGER')).toBeTruthy()
     expect(harness.view.getByText('In[1]')).toBeTruthy()
     expect(harness.view.getByText(labels.elapsed(42))).toBeTruthy()
-    // Running must not dirty the tab: the draft was never written.
-    expect(harness.onEdit).not.toHaveBeenCalled()
+    /**
+     * A settled run is recorded in the file (ADR 0007): the draft the tab holds now carries the
+     * result and the prompt number, and the notebook is saved. This is the assertion that would
+     * have been `not.toHaveBeenCalled()` under ADR 0003 — the behaviour flipped, so the test did.
+     */
+    const written = parseSqlNotebook(harness.box.current)
+    expect(written.cells[0]?.blocks[0]?.rows).toEqual([[7, 'Tokyo']])
+    expect(written.cells[0]?.executionCount).toBe(1)
+    expect(harness.onSave).toHaveBeenCalled()
   })
 
   it('keeps NULL, the empty string and the text NULL three different things', async () => {
@@ -550,16 +677,19 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(harness.api.sqlExecute).toHaveBeenLastCalledWith('workspace-1', 'query.sqlnb', 'SELECT 2')
   })
 
-  it('clears what a run put on screen without touching the file', async () => {
+  it('clears what a run put on screen and in the file', async () => {
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
     await harness.connect()
     fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
     await harness.view.findByText('In[1]')
+    expect(parseSqlNotebook(harness.box.current).cells[0]?.blocks).toHaveLength(1)
 
     fireEvent.click(harness.view.getByRole('button', { name: labels.clearAllOutputs }))
 
     await waitFor(() => { expect(harness.view.queryByText('In[1]')).toBeNull() })
-    expect(harness.onEdit).not.toHaveBeenCalled()
+    // The file is cleared with the screen: blocks left behind would come back on the next open,
+    // which is the opposite of what this button means (ADR 0007).
+    expect(parseSqlNotebook(harness.box.current).cells[0]?.blocks).toEqual([])
   })
 
   it('offers cancel while a run is outstanding and drops the answer that arrives after it', async () => {

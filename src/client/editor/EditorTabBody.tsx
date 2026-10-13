@@ -286,6 +286,7 @@ export function EditorTabBody({
     invalidJson: t('sqlnotebook.invalidJson'),
     missingCells: t('sqlnotebook.missingCells'),
     unsupportedVersion: t('sqlnotebook.unsupportedVersion'),
+    resultsUnrecorded: t('sqlnotebook.resultsUnrecorded'),
     addFirstCell: t('sqlnotebook.addFirstCell'),
     runCell: t('sqlnotebook.runCell'),
     runAll: t('sqlnotebook.runAll'),

@@ -13,6 +13,7 @@
 
 import { WorkbenchApiError, type WorkbenchApi } from '../model/api.ts'
 import { childWorkspacePath } from '../../shared/path-policy.ts'
+import { SQL_ACCESS_DEFAULT } from '../../shared/sql-protocol.ts'
 import { createSqlNotebookForDatabase, createSqlNotebookSkeleton } from './sql-notebook-document.ts'
 
 /** The stem a tree-created notebook takes; only the counter differs between creations. */
@@ -41,8 +42,20 @@ export async function createSqlNotebook(args: {
   /** Workspace-relative directory the notebook is created in; '' is the workspace root. */
   directory: string
   seed: SqlNotebookSeed
+  /**
+   * The database this notebook is about, recorded in the file (ADR 0007).
+   *
+   * Absent for a notebook created from nothing. Present for one created beside a database, so
+   * reopening it connects again instead of asking the reader to pick the file they just
+   * double-clicked.
+   */
+  database?: string
 }): Promise<string | null> {
-  const content = args.seed === 'database' ? createSqlNotebookForDatabase(undefined) : createSqlNotebookSkeleton()
+  const content = args.seed === 'database'
+    ? createSqlNotebookForDatabase(undefined, args.database)
+    : createSqlNotebookSkeleton(
+      args.database === undefined ? undefined : { path: args.database, access: SQL_ACCESS_DEFAULT },
+    )
   for (let attempt = 1; attempt <= SQL_NOTEBOOK_NAME_ATTEMPTS; attempt += 1) {
     const path = childWorkspacePath(args.directory, `${SQL_NOTEBOOK_STEM}-${attempt}.sqlnb`)
     try {
