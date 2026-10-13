@@ -127,6 +127,18 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     if (connectedPath !== null) loadSchema()
   }, [connectedPath, executed, loadSchema])
 
+  // A rail action is consumed once, by id: the request is a store write, so the effect that handles
+  // it runs again on every unrelated store change and must not re-read the schema each time.
+  const handledAction = useRef(0)
+  useEffect(() => {
+    const request = state.sidebarAction
+    if (request === undefined || request.action !== 'sql.refreshSchema') return
+    if (handledAction.current === request.id) return
+    handledAction.current = request.id
+    controller.consumeSidebarAction(request.id)
+    if (connectedPath !== null) loadSchema()
+  }, [connectedPath, controller, loadSchema, state.sidebarAction])
+
   const toggleTable = useCallback((name: string): void => {
     if (openTable === name) {
       setOpenTable(null)

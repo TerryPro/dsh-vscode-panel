@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { zh } from '../src/client/core/locales.ts'
@@ -77,6 +77,7 @@ interface Harness {
   schema: { sqlTables: ReturnType<typeof vi.fn>; sqlColumns: ReturnType<typeof vi.fn> }
   runtime: SqlRuntime
   setDraft: ReturnType<typeof vi.fn>
+  consumeSidebarAction: ReturnType<typeof vi.fn>
   /** Pick a database and press connect, the way a reader does. */
   connect: (target?: string) => Promise<void>
 }
@@ -125,9 +126,11 @@ function mount(options: {
     { name: 'archive.sqlite', path: 'archive.sqlite', kind: 'file' as const },
   ]
   const setDraft = vi.fn()
+  const consumeSidebarAction = vi.fn()
   const controller = {
     sqlRuntime: runtime,
     setDraft,
+    consumeSidebarAction,
     api: {
       ...schemaApi,
       listDirectory: vi.fn((_workspaceId: string, path: string) => Promise.resolve(
@@ -157,7 +160,7 @@ function mount(options: {
     await waitFor(() => { expect(view.getByRole('button', { name: zh['sqlnotebook.disconnect'] })).toBeTruthy() })
   }
 
-  return { view, api, schema: schemaApi, runtime, setDraft, connect }
+  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction }
 }
 
 describe('SqlPanel — 结构', () => {
@@ -230,6 +233,25 @@ describe('SqlPanel — 结构', () => {
     await waitFor(() => {
       expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(afterConnect)
     })
+  })
+
+  it('re-reads the schema when the collapsed rail asks for it', async () => {
+    // The rail can only request the re-read — the panel owns the tree and its requests — so the
+    // request is a store write this component consumes, once, by id.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount()
+    await harness.connect()
+    const afterConnect = harness.schema.sqlTables.mock.calls.length
+
+    workbench.current = {
+      ...workbench.current,
+      sidebarAction: { id: 7, action: 'sql.refreshSchema', workspaceId: 'workspace-1' },
+    }
+    // Any runtime update re-renders the panel, which is when it reads the store again.
+    act(() => { harness.runtime.clearConnectionNotice('file:query.sqlnb') })
+
+    await waitFor(() => { expect(harness.consumeSidebarAction).toHaveBeenCalledWith(7) })
+    expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(afterConnect)
   })
 
   it('shows why the schema could not be read', async () => {

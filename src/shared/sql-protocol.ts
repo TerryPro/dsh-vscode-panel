@@ -244,6 +244,16 @@ export interface SqlCancelResult {
   cancelled: boolean
 }
 
+/**
+ * The code a driver failure gets when the SQLite message named the database's own path.
+ *
+ * Declared apart from the other SQL codes because two sides read it: the Host mints it in
+ * `classifySqlFailure`, and the panel turns it into "reconnect" rather than showing text that
+ * embeds an absolute path. A file renamed or deleted underneath a connection lands here, and this
+ * is the only signal there is — nothing watches the file by design.
+ */
+export const SQL_PATH_UNAVAILABLE_CODE = 'SQL_PATH_UNAVAILABLE'
+
 /** First schema level. */
 export interface SqlTreeEntry {
   name: string

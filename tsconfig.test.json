@@ -51,6 +51,7 @@
     "tests/sql-database-scan.spec.ts",
     "tests/sql-panel.spec.tsx",
     "tests/sql-schema-tree.spec.ts",
+    "tests/sql-connection-status.spec.tsx",
     "tests/sql-runtime.spec.ts",
     "tests/sql-result.spec.ts",
     "tests/editor-languages.spec.ts",

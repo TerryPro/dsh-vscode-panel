@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zh } from '../src/client/core/locales.ts'
 import { WorkbenchRail } from '../src/client/shell/WorkbenchRail.tsx'
@@ -12,6 +12,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconFolderCloseMedium: () => <span data-icon="official-folder" />,
   IconListPenOutlineMedium: () => <span data-icon="changes" />,
   IconPlusOutlineMedium: ({ className }: { className?: string }) => <span data-icon="plus" className={className} />,
+  IconRefreshOutlineMedium: () => <span data-icon="refresh" />,
   Tooltip: ({ children }: { children: React.ReactNode }) => children,
 }))
 
@@ -68,6 +69,28 @@ describe('模式化收起栏快捷操作', () => {
     fireEvent.click(view.getByRole('button', { name: '终端 2' }))
     expect(controller.selectTab).toHaveBeenCalledWith('terminal:2')
   })
+
+  it('为 SQL 模式给出三个快捷动作：打开笔记、刷新结构、新建笔记', async () => {
+    const notebook = { id: 'file:query.sqlnb', kind: 'file' as const, path: 'query.sqlnb' }
+    workbench.current = { ...state('files'), sidebarMode: 'sql', activeTabId: notebook.id, tabs: [notebook] }
+    const controller = controllerFixture()
+    const expandSidebar = vi.fn()
+    const view = renderRail(controller, expandSidebar)
+
+    expect(view.getAllByRole('button')).toHaveLength(3)
+    fireEvent.click(view.getByRole('button', { name: '打开当前 SQL 笔记' }))
+    expect(controller.selectTab).toHaveBeenCalledWith('file:query.sqlnb')
+
+    // The panel owns the schema; the collapsed rail can only ask it to re-read.
+    fireEvent.click(view.getByRole('button', { name: '刷新结构' }))
+    expect(controller.requestSidebarAction).toHaveBeenCalledWith('sql.refreshSchema', 'workspace-1')
+    expect(expandSidebar).toHaveBeenCalledOnce()
+
+    // The same three steps the file tree takes when it makes one.
+    fireEvent.click(view.getByRole('button', { name: '新建 SQL 笔记' }))
+    await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb') })
+    expect(controller.openFile).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
+  })
 })
 
 function renderRail(controller: ReturnType<typeof controllerFixture>, expandSidebar: () => void) {
@@ -101,6 +124,14 @@ function controllerFixture() {
     openTerminal: vi.fn(),
     selectTab: vi.fn(),
     terminalBinding: vi.fn(() => 'ready' as const),
+    openFile: vi.fn(() => Promise.resolve()),
+    connectNewSqlNotebook: vi.fn(() => Promise.resolve()),
+    // The create pair the rail shares with the file tree: an empty file, a version to save against.
+    api: {
+      createFile: vi.fn(() => Promise.resolve({ name: 'query-1.sqlnb', path: 'query-1.sqlnb', kind: 'file' as const, size: 0 })),
+      readFile: vi.fn(() => Promise.resolve({ path: 'query-1.sqlnb', content: '', version: 'v1', size: 0 })),
+      saveFile: vi.fn(() => Promise.resolve({ version: 'v2' })),
+    },
   }
 }
 

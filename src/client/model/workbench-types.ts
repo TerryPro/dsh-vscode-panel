@@ -59,6 +59,11 @@ export type WorkbenchSidebarAction =
   | 'files.newFile'
   | 'files.newDirectory'
   | 'files.reveal'
+  /**
+   * Re-read the connected database's tables. The SQL panel owns the schema and its requests, so the
+   * collapsed rail asks for the re-read instead of performing one the panel would not see.
+   */
+  | 'sql.refreshSchema'
 
 export interface WorkbenchSidebarActionRequest {
   id: number

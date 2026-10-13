@@ -3,6 +3,7 @@
 import {
   IconListPenOutlineMedium,
   IconPlusOutlineMedium,
+  IconRefreshOutlineMedium,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -10,6 +11,9 @@ import { IconCommitGraphOutline16 } from '../git/CommitGraphIcon.tsx'
 import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
 import type { TerminalDot } from '../model/controller.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from '../files/CreateEntryIcons.tsx'
+import { IconSqlOutline16 } from '../sql/SqlIcon.tsx'
+import { activeSqlNotebook } from '../sql/SqlPanel.tsx'
+import { createSqlNotebook } from '../sql/sql-notebook-create.ts'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { terminalDot } from '../terminal/terminal-dot.ts'
 import { terminalName } from '../terminal/terminal-name.ts'
@@ -28,6 +32,21 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
   const requestAndExpand = (action: 'files.newFile' | 'files.newDirectory'): void => {
     controller.requestSidebarAction(action, workspaceId)
     expandSidebar()
+  }
+
+  /**
+   * Create a notebook from the collapsed rail.
+   *
+   * The same three steps the file tree takes — write the file, open it, then connect it to
+   * `:memory:` — because the rail is that entry with the panel folded away, not a second one.
+   */
+  const createNotebookAndOpen = async (): Promise<void> => {
+    if (workspaceId === undefined) return
+    const target = workspaceId
+    const path = await createSqlNotebook({ api: controller.api, workspaceId: target, directory: '', seed: 'empty' })
+    if (path === null) return
+    await controller.openFile(target, path)
+    await controller.connectNewSqlNotebook(target, path)
   }
 
   if (state.sidebarMode === 'files') {
@@ -86,6 +105,43 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
             </RailButton>
           )
         })}
+      </RailActions>
+    )
+  }
+
+  if (state.sidebarMode === 'sql') {
+    // The three things a reader can do with the SQL panel folded away. The middle one asks the
+    // panel to re-read rather than reading anything itself: the tree and its requests belong to the
+    // panel, and a request that goes through the store is one the panel consumes when it is mounted.
+    const notebook = activeSqlNotebook(state)
+    return (
+      <RailActions label={t('mode.sql')}>
+        <RailButton
+          label={t('sqlnotebook.railOpenNotebook')}
+          disabled={notebook === null}
+          onClick={() => {
+            if (notebook !== null) controller.selectTab(notebook.id)
+          }}
+        >
+          <IconSqlOutline16 size={18} />
+        </RailButton>
+        <RailButton
+          label={t('sqlnotebook.refreshSchema')}
+          disabled={notebook === null}
+          onClick={() => {
+            controller.requestSidebarAction('sql.refreshSchema', workspaceId)
+            expandSidebar()
+          }}
+        >
+          <IconRefreshOutlineMedium size={18} />
+        </RailButton>
+        <RailButton
+          label={t('sqlnotebook.railNewNotebook')}
+          disabled={workspaceId === undefined}
+          onClick={() => { void createNotebookAndOpen() }}
+        >
+          <IconFileAddOutline16 size={18} />
+        </RailButton>
       </RailActions>
     )
   }

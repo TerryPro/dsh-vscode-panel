@@ -28,6 +28,7 @@ import { NotebookSurface, type NotebookLabels } from '../notebook/NotebookSurfac
 import { NotebookKernelStatus } from '../notebook/NotebookKernelStatus.tsx'
 import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../sql/SqlNotebookSurface.tsx'
+import { SqlConnectionStatus } from '../sql/SqlConnectionStatus.tsx'
 import type { SqlResultLabels } from '../sql/SqlResultBlockView.tsx'
 import type { DirectoryListing } from '../../shared/contracts.ts'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
@@ -447,6 +448,23 @@ export function EditorTabBody({
       />
     )
     : null
+  /**
+   * What the status strip says this tab is attached to: the kernel chip for a notebook, the
+   * connection readout for a SQL notebook. Built here rather than inside either surface because the
+   * strip outlives both views — the chip is also what makes the attachment visible in source view.
+   */
+  const attachment = isNotebookTab
+    ? (
+      <NotebookKernelStatus
+        runtime={controller.notebookRuntime}
+        tabId={tab.id}
+        t={t}
+        hideChip={notebookMode === 'notebook'}
+      />
+    )
+    : isSqlNotebookTab
+      ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} />
+      : null
   return (
     <div className={css.editorFileArea}>
       <div className={css.editorFileBody}>
@@ -566,16 +584,7 @@ export function EditorTabBody({
         content={tab.draft}
         t={t}
         showPosition={showEditor}
-        kernel={isNotebookTab
-          ? (
-            <NotebookKernelStatus
-              runtime={controller.notebookRuntime}
-              tabId={tab.id}
-              t={t}
-              hideChip={notebookMode === 'notebook'}
-            />
-          )
-          : undefined}
+        {...(attachment === null ? {} : { attachment })}
         actions={(
           <>
             {tab.file.markdown && (

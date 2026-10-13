@@ -714,8 +714,15 @@ function controllerFake() {
     setSidebarMode: vi.fn(),
     requestSidebarAction: vi.fn(() => 1),
     // Whether closing a SQL notebook would give up a query is the runtime's to know; the shell
-    // only asks, so the fake answers the question instead of modelling the queue.
-    sqlRuntime: { busy: vi.fn(() => false), cancel: vi.fn(), forget: vi.fn() },
+    // only asks, so the fake answers the question instead of modelling the queue. The status strip's
+    // readout subscribes to the same runtime, so it needs the two calls that subscription makes.
+    sqlRuntime: {
+      busy: vi.fn(() => false),
+      cancel: vi.fn(),
+      forget: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+      peek: vi.fn(() => null),
+    },
   }
 }
 

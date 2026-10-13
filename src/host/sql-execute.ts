@@ -22,7 +22,7 @@
 import type { DriverValue } from './sql-values.ts'
 import { shapeColumns, shapeRow, shapeValue } from './sql-values.ts'
 import type { SqlColumn, SqlResultBlock, SqlRow, SqlStatementError } from '../shared/sql-protocol.ts'
-import { SQL_LIMITS } from '../shared/sql-protocol.ts'
+import { SQL_LIMITS, SQL_PATH_UNAVAILABLE_CODE } from '../shared/sql-protocol.ts'
 
 /** The driver's view of one prepared statement, narrowed to what this loop uses. */
 export interface ExecutableStatement {
@@ -118,7 +118,7 @@ export function classifySqlFailure(error: unknown, absolutePath?: string): SqlSt
     /[\\/]Users[\\/]/u.test(line) ||
     /[\\/]home[\\/]/u.test(line)
   if (namesPath) {
-    return { code: 'SQL_PATH_UNAVAILABLE', message: '数据库文件当前不可访问，请检查文件是否仍在原位置。' }
+    return { code: SQL_PATH_UNAVAILABLE_CODE, message: '数据库文件当前不可访问，请检查文件是否仍在原位置。' }
   }
   if (/not authorized|authorization denied/iu.test(line)) {
     return { code: 'SQL_AUTHORIZATION_DENIED', message: line }
