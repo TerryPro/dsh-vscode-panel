@@ -106,8 +106,6 @@ export interface SqlNotebookState {
   /** Why the last connect attempt was refused. Kept beside a live connection on purpose: a
    * refused re-open does not drop the handle the notebook already had. */
   connectionProblem: SqlRunFailure | null
-  /** True right after a handle was made, until the panel has shown the "new connection" line. */
-  freshConnection: boolean
   cells: Record<string, SqlCellRun>
 }
 
@@ -155,7 +153,7 @@ export interface SqlRunAllOutcome {
 }
 
 function initialSqlState(): SqlNotebookState {
-  return { connection: null, connecting: false, connectionProblem: null, freshConnection: false, cells: {} }
+  return { connection: null, connecting: false, connectionProblem: null, cells: {} }
 }
 
 function emptyRun(status: SqlCellStatus): SqlCellRun {
@@ -339,7 +337,6 @@ export class SqlRuntime {
           rowLimit: opened.rowLimit,
           walSidecarExpected: opened.walSidecarExpected,
         }
-        state.freshConnection = true
         /**
          * `state.cells` is deliberately left alone.
          *
@@ -418,13 +415,6 @@ export class SqlRuntime {
     this.bridge.save(tab.tabId)
   }
 
-  /** Mark the "connection established" notice as shown. */
-  clearConnectionNotice(tabId: string): void {
-    const tab = this.tabs.get(tabId)
-    if (tab === undefined) return
-    tab.store.update(state => { state.freshConnection = false })
-  }
-
   /**
    * Close the connection now, and report whether a transaction was rolled back on the way out.
    *
@@ -439,7 +429,6 @@ export class SqlRuntime {
     tab.store.update(state => {
       state.connection = null
       state.connectionProblem = null
-      state.freshConnection = false
     })
     /**
      * Back to the file's record.

@@ -109,8 +109,6 @@ const labels: SqlNotebookLabels = {
   writableTier: zh['sqlnotebook.writableTier'],
   tierLocked: zh['sqlnotebook.tierLocked'],
   rescan: zh['sqlnotebook.rescan'],
-  scanTruncated: zh['sqlnotebook.scanTruncated'],
-  scratchNotice: zh['sqlnotebook.scratchNotice'],
   runAllStopped: (index, remaining) => zh['sqlnotebook.runAllStopped']
     .replace('{index}', String(index)).replace('{remaining}', String(remaining)),
   disconnectedRolledBack: zh['sqlnotebook.disconnectedRolledBack'],

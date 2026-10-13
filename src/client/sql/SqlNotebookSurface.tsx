@@ -127,9 +127,6 @@ export interface SqlNotebookLabels {
   /** Why the tier cannot be changed while a handle is open. */
   tierLocked: string
   rescan: string
-  scanTruncated: string
-  /** Said once per new handle: what a session-scoped connection does not carry over. */
-  scratchNotice: string
   /** A Run All that stopped mid-stretch has to say where, and how many it left. */
   runAllStopped: (index: number, remaining: number) => string
   /** The Host rolls an open transaction back when a handle closes; that is worth saying. */
@@ -243,13 +240,6 @@ export function SqlNotebookSurface({
   // The workspace walk is what the picker lists. Both the notebook's toolbar and the sidebar panel
   // list it, so the state around it lives in `useDatabaseScan` rather than in two copies here.
   const { scan, scanning, rescan } = useDatabaseScan(listDirectory)
-
-  // The "new handle" line is said once, not on every render of a long notebook.
-  useEffect(() => {
-    if (runState?.freshConnection !== true) return
-    const timer = setTimeout(() => { runtime.clearConnectionNotice(tabId) }, 6_000)
-    return () => { clearTimeout(timer) }
-  }, [runState?.freshConnection, runtime, tabId])
 
   /**
    * Apply one edit to the file text, or refuse it out loud.
@@ -596,17 +586,11 @@ export function SqlNotebookSurface({
               : connectionReadout(connection, { readOnly: labels.readOnlyTier, writable: labels.writableTier })}
         </span>
       </div>
-      {runState?.freshConnection === true && (
-        <div className={css.notice} role="status">{labels.scratchNotice}</div>
-      )}
       {news !== null && (
         <div className={css.notice} role="status">{news}</div>
       )}
       {runState?.connectionProblem !== null && runState?.connectionProblem !== undefined && (
         <div className={css.noticeError} role="alert">{refusalText(runState.connectionProblem, labels)}</div>
-      )}
-      {scan?.truncated === true && (
-        <div className={css.notice} role="status">{labels.scanTruncated}</div>
       )}
       <div className={css.body}>
         <div className={css.cells}>

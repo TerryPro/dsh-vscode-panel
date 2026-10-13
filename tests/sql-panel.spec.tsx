@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { zh } from '../src/client/core/locales.ts'
@@ -80,6 +80,8 @@ interface Harness {
   consumeSidebarAction: ReturnType<typeof vi.fn>
   /** Pick a database and press connect, the way a reader does. */
   connect: (target?: string) => Promise<void>
+  /** Re-render the panel, which is what a workbench store write does in the real app. */
+  rerender: () => void
 }
 
 function mount(options: {
@@ -155,13 +157,29 @@ function mount(options: {
       )),
     },
   }
-  const view = render(
+  /**
+   * A fresh element each call.
+   *
+   * React bails out when it is handed the element it already rendered, so a re-render that is
+   * supposed to make the component read the store again has to build the element every time.
+   */
+  const panel = () => (
     <SqlPanel
       controller={controller as never}
       workspaceId="workspace-1"
       t={translate}
-    />,
+    />
   )
+  const view = render(panel())
+  /**
+   * Force the re-render a real store write would cause.
+   *
+   * `useWorkbench` is mocked to a plain object here, so writing `workbench.current` notifies no
+   * one; the real panel re-renders because it subscribes to the workbench store. A test that needs
+   * "and then the panel reads the store again" says so with this, rather than borrowing an
+   * unrelated runtime call to trigger a render.
+   */
+  const rerender = (): void => { view.rerender(panel()) }
   /**
    * Connect the way a reader does: pick the database, press connect, wait for the handle.
    *
@@ -177,7 +195,7 @@ function mount(options: {
     await waitFor(() => { expect(view.getByRole('button', { name: zh['sqlnotebook.disconnect'] })).toBeTruthy() })
   }
 
-  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction }
+  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, rerender }
 }
 
 describe('SqlPanel — 结构', () => {
@@ -288,8 +306,9 @@ describe('SqlPanel — 结构', () => {
       ...workbench.current,
       sidebarAction: { id: 7, action: 'sql.refreshSchema', workspaceId: 'workspace-1' },
     }
-    // Any runtime update re-renders the panel, which is when it reads the store again.
-    act(() => { harness.runtime.clearConnectionNotice('file:query.sqlnb') })
+    // The store write above is what the rail performs; the panel reads it on its next render.
+    // `rerender` is already act-wrapped inside the library, so no extra act() here.
+    harness.rerender()
 
     await waitFor(() => { expect(harness.consumeSidebarAction).toHaveBeenCalledWith(7) })
     expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(afterConnect)

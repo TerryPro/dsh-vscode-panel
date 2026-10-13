@@ -552,14 +552,10 @@ describe('SqlRuntime', () => {
     expect(connected.connection).toEqual({
       path: 'demo.db', access: 'read-only', sqliteVersion: '3.46.0', rowLimit: 1000, walSidecarExpected: false,
     })
-    expect(connected.freshConnection).toBe(true)
     expect(connected.connecting).toBe(false)
     expect(fixture.api.sqlOpen).toHaveBeenCalledWith({
       workspaceId: 'workspace-1', notebook: 'query-1.sqlnb', path: 'demo.db', access: 'writable',
     })
-
-    fixture.runtime.clearConnectionNotice('tab-1')
-    expect(fixture.runtime.state('tab-1').freshConnection).toBe(false)
 
     fixture.api.sqlOpen.mockImplementationOnce(() => Promise.reject(
       new WorkbenchApiError('SQL_WRITE_OCCUPIED', '这个库文件已被别的连接占着，不能开可写档。'),
@@ -599,7 +595,6 @@ describe('SqlRuntime', () => {
   it('disconnecting closes the handle and says whether a transaction was rolled back', async () => {
     const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
     await connect(fixture)
-    fixture.runtime.clearConnectionNotice('tab-1')
 
     const outcome = await fixture.runtime.disconnect('tab-1')
 

@@ -313,8 +313,6 @@ export function EditorTabBody({
     writableTier: t('sqlnotebook.writableTier'),
     tierLocked: t('sqlnotebook.tierLocked'),
     rescan: t('sqlnotebook.rescan'),
-    scanTruncated: t('sqlnotebook.scanTruncated'),
-    scratchNotice: t('sqlnotebook.scratchNotice'),
     runAllStopped: (index, remaining) => t('sqlnotebook.runAllStopped', { index: String(index), remaining: String(remaining) }),
     disconnectedRolledBack: t('sqlnotebook.disconnectedRolledBack'),
     runAllNotice: count => t('sqlnotebook.runAllNotice', { count: String(count) }),
