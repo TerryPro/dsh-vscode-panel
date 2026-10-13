@@ -9,5 +9,6 @@
 ## Consequences
 
 - 单元格视图是共用资产：改它要同时想清楚两个宿主（真内核 / SQL 后端）会不会一起坏。
+- **实现注（A5 口径核对）**：实际落地的是“共用视觉语言与净化”，不是共用组件——`SqlNotebookSurface` 是独立的一份单元格列表，共用的是图标（`NotebookIcons`）、`MarkdownOutline`、`extractMarkdownOutline`、`sanitizeKernelHtml` 与结果表格的 CSS 词汇。原因：`NotebookSurface` 1476 行、配 1650 行 spec，且与内核运行时耦合，改它属于另一个已定下的取舍（A2 时选的是不碰）。代价是拖拽/折叠/键盘导航各有一份实现；若日后要合，合成点是在“单元格列表 + 每格一块视图状态”这层，不在运行时。
 - 三个既有门禁与本模块无关，不要因为"看着像"就顺手接上：`language === 'python'` 的判定、argv 里没有已知 launcher 时静默换成 ipykernel、"每个笔记本一个内核子进程"的回收模型。
 - 按 [GLOSSARY.md](../../GLOSSARY.md)：笔记本与 SQL 笔记是两个概念，共用单元格这一视觉语言，但文案键与 `language` 判定不许混用。
