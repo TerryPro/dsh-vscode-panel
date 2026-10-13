@@ -5,6 +5,12 @@
  * same body/scroll split — because switching between the three must not look like switching
  * products. The header carries `data-dsh-workbench-panel-header`, which is what hands the divider
  * tracks over to the shell's layout modules; nothing here re-derives them.
+ *
+ * That handover includes the line itself, so this header must not declare a bottom border: the
+ * shell paints the rule on an overlay spanning the column's full width and aligned to the middle
+ * column's tab bar. A border here is a *second* line — clipped 8px short of the column edge by
+ * `.regionArea` and quantised onto its own device row — which reads as a stray extra rule just
+ * under the title.
  */
 
 .panelBody {
@@ -24,7 +30,6 @@
   gap: 6px;
   min-height: 34px;
   padding: 2px 12px 7px 8px;
-  border-block-end: 1px solid var(--dsw-alias-border-l1);
   color: var(--dsw-alias-label-secondary);
 }
 

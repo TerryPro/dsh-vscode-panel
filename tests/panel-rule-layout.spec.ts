@@ -144,12 +144,44 @@ describe('侧栏面板分隔线实测', () => {
       'src/client/files/FileTree.tsx': PANEL_HEADER_ATTRIBUTE,
       'src/client/git/GitRepositoryToolbar.tsx': PANEL_HEADER_ATTRIBUTE,
       'src/client/terminal/TerminalPanel.tsx': PANEL_HEADER_ATTRIBUTE,
+      'src/client/notebook/KernelPanel.tsx': PANEL_HEADER_ATTRIBUTE,
+      'src/client/sql/SqlPanel.tsx': PANEL_HEADER_ATTRIBUTE,
       'src/client/editor/EditorPane.tsx': PANEL_RULE_ANCHOR_ATTRIBUTE,
       'src/client/git/GitPanel.tsx': PANEL_RULE_SECTION_ATTRIBUTE,
     } as const
     for (const [path, attribute] of Object.entries(marked)) {
       const source = readFileSync(resolve(process.cwd(), path), 'utf8')
       expect(source, `${path} must carry [${attribute}]`).toContain(`${attribute}=""`)
+    }
+  })
+
+  /**
+   * The reported bug: the SQL panel's header declared its own `border-block-end`
+   * while the layout was also painting the measured rule, so two lines landed just
+   * under the title — the panel's own, clipped 8px short of the column edge by
+   * `.regionArea`, next to the full-width overlay.
+   *
+   * Marking a header hands the line over to the overlay, so the marked panels'
+   * stylesheets must carry no bottom border at all: this is a property of the
+   * handover, not of any one panel, which is why every marked stylesheet is read.
+   */
+  it('leaves the header rule to the overlay it hands the line over to', () => {
+    const headers = [
+      ['src/client/files/files.module.css', 'panelHeader'],
+      ['src/client/git/git.module.css', 'panelHeader'],
+      ['src/client/terminal/terminal.module.css', 'panelHeader'],
+      ['src/client/notebook/kernel-panel.module.css', 'panelHeader'],
+      ['src/client/sql/sql-panel.module.css', 'panelHeader'],
+    ] as const
+    for (const [path, selector] of headers) {
+      const stylesheet = readFileSync(resolve(process.cwd(), path), 'utf8')
+      const block = (stylesheet.match(
+        new RegExp(`\\.${selector} \\{[\\s\\S]*?\\n\\}`, 'u'),
+      ) ?? [])[0]
+      expect(block, `${path} must declare .${selector}`).toBeDefined()
+      expect(block, `${path} .${selector} must not draw its own rule`).not.toMatch(
+        /border(?:-block-end|-bottom)?:/u,
+      )
     }
   })
 

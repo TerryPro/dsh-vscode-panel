@@ -23,7 +23,6 @@
   gap: 6px;
   height: 34px;
   padding: 0 8px 0 12px;
-  border-block-end: 1px solid var(--dsw-alias-border-l1);
 }
 
 .panelTitle {
