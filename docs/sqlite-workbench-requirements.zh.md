@@ -76,7 +76,7 @@
 | `worker_threads` 在该 Electron runtime 上可用（require/import 都行），主线程全程正常打点；但 `terminate()` **不是取消**——实测它等 5221ms 才返回 ≈ 查询自己跑完的时间；terminate 之后不留锁、未提交数据消失、`integrity_check ok`。 | 二期 worker 的可行性前提，也是「取消在二期也不会变强」的依据 |
 | 客户端这一半从不接触 Jupyter 线协议（ZMTP / 签名密钥 / channel 名只存在于宿主 4 个文件里）；宿主有 `KernelSessionHandle` 接口与 `createSession` 注入缝。 | 复用单元格视图的代价只是三个 Jupyter 专有语义 |
 | `sanitizeKernelHtml` 的属性白名单**不含 `class` / `style`**，允许标签**不含 `button` / `input`**。 | 分页、耗时、截断、取消这些控件**一律由客户端渲染在结果块外围**，宿主不得写进结果 HTML |
-| 净化器允许标签含 `table/thead/tbody/tr/th/td/caption/small/code/em`，表格样式已在 `notebook.module.css:569-578`。 | 结果走 `text/html` 时客户端零新增渲染代码 |
+| 净化器允许标签含 `table/thead/tbody/tr/th/td/caption/small/code/em`，表格样式已在 `notebook.module.css:569-578`。 | ~~结果走 `text/html` 时客户端零新增渲染代码~~ **A3 改为客户端从 `SqlResultBlock` 渲染**：契约里已经带着列标签/真名/声明类型/BLOB 字节数与三个截断计数，宿主再拼一遍等于把归一化规则印第二份，还会让最坏 64MB 一块的载荷翻倍；代价是本文那句「零新增渲染代码」不成立（`sql-result.ts` + `SqlResultBlockView.tsx`） |
 | `.db` 第 15 字节必为 NUL，DSH `readText` 采样命中 → 今天打开 `.db` 得到的是 **400 / `FS_NOT_TEXT`**（>2MB 才先撞 413）。 | 旧文案不动，只把入口做对（N0-P0-8） |
 | `@codemirror/lang-sql` 已是依赖（`editor-languages.ts:12`），`.sql` 早已识别；识别表里没有 `db`/`sqlite`。 | SQL 高亮零成本；扩展名要新增 |
 | `db.function()` 注册的 UDF 里 `throw` **能**中止语句，但它要求 SQL 真去调用你的函数。 | 不做，因为那等于改写用户 SQL |
@@ -102,7 +102,7 @@
 | 结果表示 | 行以数组返回，列名与列序取自 `columns()` | ADR 0005 |
 | 执行语义 | 连接会话级持久；一格多语句逐条执行、各出结果块、失败停在当前条、**不隐式包事务**；同笔记串行排队；`In[n]` 会话内计数不落盘 | 本文 |
 | 闸门 | 行上限默认 1000（`setting` + 面板临时覆盖、不写回）；列 64 / 单值 1000 字符 / 树表 100 / 连接 16 / 时长 15s 全为常量 | 本文，形状照 `src/index.ts` 的 `gitGraphPageSize` 与 `src/host/git-backend.ts:192-202` 的 `pageSize+1` + `truncated`/`nextOffset` |
-| 连接生命周期 | 一笔记一连接，关标签即断（有格在跑时**拦住关闭**）；断开/关标签前自动 `ROLLBACK` 并告知；客户端断开给 **60s 宽限期**，期内接回原句柄，过期须手动重连、**不自动重开**；切工作区释放该工作区全部连接 | 本文 |
+| 连接生命周期 | 一笔记一连接，关标签即断（有格在跑时**拦住关闭**）；断开/关标签前自动 `ROLLBACK` 并告知（**实现注**：真正关连接的路径是「断开」按钮，同步在那里报回滚；关标签走 `abandon`、手柄进宽限期，那一刻没有回滚可报，要在这里也告知得先改宽限期的语义）；客户端断开给 **60s 宽限期**，期内接回原句柄，过期须手动重连、**不自动重开**；切工作区释放该工作区全部连接 | 本文 |
 | 占用 | 同一库文件只要有任何活动连接（含正在分页、含宽限期内）就**拒绝切可写档**；只读连接不限数量 | `GLOSSARY.md` 的「占用」 |
 | 跨页面 | 同一 `.sqlnb` 在两页打开**共用一份连接**（临时表彼此可见），但**结果各回各家** | 本文 |
 | 上限实现 | 不改写用户 SQL；靠惰性迭代取 N+1 即停。分页只在语句含 `ORDER BY` 时提供，重跑同一段语句只换 offset（实测：同文本查询同进程/跨连接一致，但那是计划序，换投影列就变序） | 本文 |
@@ -117,10 +117,10 @@
 | 里程碑 | 内容 | 人日 | 依赖 |
 | --- | --- | --- | --- |
 | **A0** | 把 §3 的实测事实固化成常驻场景（探针 + spec），改动落地前它们必须为**红**。特别是：分块让出确实把同期路由拉回毫秒级、大整数不归一化就整条请求失败、重复列名不转数组就丢值、authorizer 拒绝集逐条命中 | 0.5–1 | — |
-| **A1** | 宿主 `/sqlnotebook/open·execute·close·tables·columns` 一组 POST：连接生命周期（含宽限期、占用判定、上限 16）、`readOnly` + authorizer 拒绝集 + `allowExtension: false`、`readBigInts` + `setReturnArrays`、归一化（大整数→字符串、BLOB→base64+上限、NULL）、`temp_store=2`、分块取行 + 块间让出 + 15s 时长上限 | 1.5–2 | A0 |
+| **A1** | 宿主 `/sqlnotebook/open·execute·close·tables·columns` 一组 POST：连接生命周期（含宽限期、占用判定、上限 16）、`readOnly` + authorizer 拒绝集 + `allowExtension: false`、`readBigInts` + `setReturnArrays`、归一化（大整数→字符串、BLOB→base64+上限、NULL）、`temp_store=2`、分块取行 + 块间让出 + 15s 时长上限。**A3 又加了一条 `/cancel`**（本行原只列五个）：工单要求「取消 = 停当前格」而 A1 没给任何中断手段，于是在行循环已有的块边界检查点上补了一个 per-notebook 取消标记 | 1.5–2 | A0 |
 | **A2** | `.sqlnb` 解析与写回（新文件，`parse` **永不抛**、未知格类型降级只读原始格、版号不认识整文件只读、绝不自动重写）+ 扩展名接入（文件树、打开链路、`workbench-types.ts` 的 mode 字段、`EditorTabBody` 分派、`editor-languages` 识别 `sqlnb` 为 SQL）+ 三条入口（新建菜单、双击 `.db` 自动建 `query-<n>.sqlnb`、右键） | 1–1.5 | A1 |
 | **A3** | 客户端接线：复用单元格视图跑在 `/sqlnotebook` 上（**不进**内核 registry / SSE）、`In[n]` 会话内计数、运行/清空不标脏、取消（含队列清空）、耗时、错误块 + 行首标记、markdown 格只渲染、快捷键沿用 | 1–1.5 | A1 A2 |
-| **A4** | 侧栏面板 + 窄栏快捷条 + 状态条读数 + schema 树（懒加载、上限 100 与截断提示、表名需自己校验后拼进 SQL——实测表值函数不能传参）、`-wal`/`-shm` 在侧栏列表过滤、库文件消失时专用错误码提示重连 | 1–1.5 | A1 |
+| **A4** | 侧栏面板 + 窄栏快捷条 + 状态条读数 + schema 树（懒加载、上限 100 与截断提示、表名需自己校验后拼进 SQL——实测表值函数不能传参）、`-wal`/`-shm` 在侧栏列表过滤、库文件消失时专用错误码提示重连。**实现注**：内存库「随笔记关闭而消失」做成面板上的常驻行，不是建连接与首次建表各提示一次——这条事实整个会话里都成立，一闪而过的提示容易在它描述的表出现前就消失；自动连接的目标由入口决定（带库的两个入口连那个库，从零建的才接 `:memory:`），因为双击 `.db` 那份的首格就是列这个库的表 | 1–1.5 | A1 |
 | **A5** | README 中英同步（只写能力面与「零安装」一句，不写 Node 版本细节）；本文与 5 篇 ADR、`GLOSSARY.md` 的口径核对 | 0.5 | A1–A4 |
 | 一期合计 | | **5.5–8** | |
 

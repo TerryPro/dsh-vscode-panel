@@ -106,6 +106,25 @@ A fifth sidebar mode lists every kernel this Workspace is running.
 - **Reclaims unattended kernels.** Closing a notebook tab deliberately leaves its kernel running so reopening finds the variables still there — which also means such a kernel is unreachable from anywhere else until the unattended timer fires. The panel is that anywhere else: it can stop a kernel no page is watching, without a token, because nothing can still be waiting on it.
 - **Cannot touch a live notebook.** The list never carries a kernel token, and a kernel with a page attached cannot be reclaimed from here at all; the row says to stop it from its own notebook instead. Every destructive kernel action still requires the token of the notebook that opened it, so this panel cannot interrupt, execute in, or read the output of a notebook it merely can see. A kernel that only just became unattended is also refused briefly, because a reloading page looks identical to a closed tab for a moment.
 
+### SQL notebooks: querying a database in a `.sqlnb`
+
+A second notebook format, for querying the databases in the workspace. It borrows the `.ipynb` cell surface's visual grammar and nothing else: there is no kernel, no Python, and nothing to install.
+
+- **Zero setup.** SQLite runs inside the Host's own process, so a `.sqlnb` needs no interpreter, no driver, and no `pip` — the only thing between you and a query is a database file. The Host opens it, fences it with an authorizer, and streams rows back.
+- **Three ways in.** New SQL notebook from the file tree makes an empty one; double-clicking a `.db`, `.sqlite`, or `.sqlite3` file makes one beside it whose first cell already lists that database's tables and connects to that file; Open in a SQL notebook does the same from the context menu. A notebook made from nothing connects to an in-memory database, so it runs without picking a file first.
+- **Cells.** One row per cell, with its kind (SQL or text; a kind a newer format wrote is shown as read-only text rather than run as SQL), its `In[n]` number, its elapsed time, and its result blocks. Run one cell, run all cells in file order (the stretch stops at the first failure and says which cell stopped it), cancel, and clear outputs. Dragging a row's header reorders it, folding hides a row's body and results, and the outline lists the text cells' headings.
+- **Results.** One table per statement in the cell, declared types on the second header row, `BLOB · 1.2 KB` for binary values, and three cases that never look alike: NULL shows as `∅`, the empty string as `·`, and the four-letter text `NULL` as itself. Rows past the cap are reported rather than silently dropped, and a block that hit the cap reserves the paging slot it will need.
+- **The connection belongs to the notebook.** One notebook holds one connection, and two tabs on the same notebook share its temporary tables. The sidebar lists the workspace's databases (their `-wal`/`-shm` sidecars are not databases and are not listed), shows the connected one's tables, views, and columns on demand, and writes a `SELECT *` for a table into a new cell when you double-click it.
+- **Read-only by default.** A connection is read-only unless you explicitly pick the writable tier, and only one connection may hold a file writable at a time — a second notebook asking for that file is refused with its own reason instead of sharing a handle, where one notebook's write would surprise the other.
+- **The status bar reports it**, in both the cell view and the source view, so which database a notebook is on stays visible even while the file is being read as raw JSON.
+- **Shortcuts match the `.ipynb` notebook's:** `Ctrl/Cmd+Enter` and `Shift+Enter` run the focused cell, `Ctrl+Alt+Enter` runs it and opens a fresh one below, `Ctrl+Shift+Alt+Enter` runs all, and `Ctrl/Cmd+S` saves.
+
+Three boundaries are worth knowing before relying on it:
+
+- **No interrupt.** Cancel stops the cells that have not started and makes a query that is taking rows stop at its next chunk, but a statement whose whole cost lands in its first row — an aggregate, a write — runs to its end. The button says exactly that.
+- **WAL sidecar files.** Opening a WAL database read-only creates `-wal` and `-shm` beside it on the first statement, and closing the connection does not remove them; only a clean close of its last writable connection does. They are accepted rather than worked around, because the alternative is to read a stale snapshot without saying so.
+- **One database per statement.** `ATTACH` is refused in both tiers, so a query cannot reach a file the notebook is not connected to.
+
 ### Git workspace
 
 - View staged and unstaged changes as a list or directory tree.
