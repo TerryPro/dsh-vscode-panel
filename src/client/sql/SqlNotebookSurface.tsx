@@ -39,7 +39,10 @@ import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.t
 import { scanDatabases, type SqlDatabaseScan } from './sql-database-scan.ts'
 import {
   applySqlNotebookEdit,
+  cellIndexFromId,
   parseSqlNotebook,
+  rowAfterEdit,
+  sqlCellId,
   SqlNotebookEditError,
   type SqlNotebookCellKind,
   type SqlNotebookCellModel,
@@ -243,17 +246,31 @@ export function SqlNotebookSurface({
       return false
     }
   }, [draft, labels, onEdit])
-
   /**
-   * Move a row, and move what the screen shows for it.
+   * Apply one edit, and rename everything the screen keeps per row when the edit moved rows.
    *
-   * The two halves have to happen together or not at all: cell ids name positions, so a move
-   * that renamed the rows without renaming the runs would leave a finished query's table under
-   * the neighbour that slid into its slot, and a queued cell would run the wrong text.
+   * The file's text is the only thing an edit rewrites, so a run, a fold and a rendered Markdown
+   * cell all sit on row numbers the edit has just changed. Without the rename the table of the row
+   * above lands under the row below, a cell still waiting its turn runs its neighbour's text, and a
+   * folded row unfolds into somebody else's cell.
    */
-  const moveCell = useCallback((from: number, to: number): void => {
-    if (!applyEdit({ type: 'move', from, to })) return
-    runtime.moveCellRuns(tabId, from, to)
+  const editDocument = useCallback((edit: SqlNotebookEdit): void => {
+    if (!applyEdit(edit)) return
+    if (!isStructuralEdit(edit)) return
+    runtime.remapCellRuns(tabId, edit)
+    const renamed = (previous: Record<string, boolean>): Record<string, boolean> => {
+      const next: Record<string, boolean> = {}
+      for (const [id, value] of Object.entries(previous)) {
+        const index = cellIndexFromId(id)
+        if (index === null) continue
+        const target = rowAfterEdit(edit, index)
+        if (target === null) continue
+        next[sqlCellId(target)] = value
+      }
+      return next
+    }
+    setFolded(renamed)
+    setRendered(renamed)
   }, [applyEdit, runtime, tabId])
 
   const run = useCallback((cellId: string): void => {
@@ -313,14 +330,14 @@ export function SqlNotebookSurface({
     if (event.altKey && event.key === 'Enter') {
       event.preventDefault()
       run(cellId)
-      applyEdit({ type: 'insertAfter', index: document.cells.findIndex(cell => cell.id === cellId), kind: 'sql' })
+      editDocument({ type: 'insertAfter', index: document.cells.findIndex(cell => cell.id === cellId), kind: 'sql' })
       return
     }
     if (event.key === 'Enter') {
       event.preventDefault()
       run(cellId)
     }
-  }, [applyEdit, document.cells, run])
+  }, [applyEdit, document.cells, editDocument, run])
 
   /**
    * The gap between rows that a pointer at `clientY` is aiming at.
@@ -396,7 +413,7 @@ export function SqlNotebookSurface({
     const gapIndex = gap.after ? target + 1 : target
     const finalIndex = gapIndex > from ? gapIndex - 1 : gapIndex
     if (finalIndex === from) return
-    moveCell(from, finalIndex)
+    editDocument({ type: 'move', from, to: finalIndex })
   }
 
   const onCellDragEnd = (): void => {
@@ -425,10 +442,10 @@ export function SqlNotebookSurface({
           <IconSave16 />
         </button>
         <span className={css.toolbarDivider} aria-hidden="true" />
-        <button type="button" className={css.toolbarAction} aria-label={labels.addSqlCell} title={labels.addSqlCell} disabled={!canStructure} onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
+        <button type="button" className={css.toolbarAction} aria-label={labels.addSqlCell} title={labels.addSqlCell} disabled={!canStructure} onClick={() => { editDocument({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
           <IconAddCode16 />
         </button>
-        <button type="button" className={css.toolbarAction} aria-label={labels.addMarkdownCell} title={labels.addMarkdownCell} disabled={!canStructure} onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'markdown' }) }}>
+        <button type="button" className={css.toolbarAction} aria-label={labels.addMarkdownCell} title={labels.addMarkdownCell} disabled={!canStructure} onClick={() => { editDocument({ type: 'insertAfter', index: appendIndex, kind: 'markdown' }) }}>
           <IconAddMarkdown16 />
         </button>
         <span className={css.toolbarDivider} aria-hidden="true" />
@@ -569,10 +586,10 @@ export function SqlNotebookSurface({
             run={runState?.cells[cell.id] ?? null}
             rendered={rendered[cell.id] === true}
             canRun={connection !== null}
-            onEdit={applyEdit}
-            onMove={moveCell}
+            onEdit={editDocument}
+            onMove={(from, to) => { editDocument({ type: 'move', from, to }) }}
             folded={folded[cell.id] === true}
-            onFoldChange={(show) => { setFolded(previous => ({ ...previous, [cell.id]: !show })) }}
+            onFoldChange={(next) => { setFolded(previous => ({ ...previous, [cell.id]: next })) }}
             onDragStart={event => { onCellDragStart(cell.id, event) }}
             onDragOver={onCellDragOver}
             onDrop={onCellDrop}
@@ -582,7 +599,7 @@ export function SqlNotebookSurface({
             onRun={() => { run(cell.id) }}
             onCancel={() => { runtime.cancel(tabId) }}
             onClear={() => { runtime.clearOutputs(tabId, cell.id) }}
-            onRenderChange={(show) => { setRendered(previous => ({ ...previous, [cell.id]: show })) }}
+            onRenderedChange={(rendered) => { setRendered(previous => ({ ...previous, [cell.id]: rendered })) }}
             labels={labels}
             resultLabels={resultLabels}
             markdownLabels={markdownLabels}
@@ -592,7 +609,7 @@ export function SqlNotebookSurface({
           <div className={css.empty}>
             <span className={css.emptyText}>{emptyMessage(document, labels)}</span>
             {canStructure && (
-              <button type="button" className={css.emptyAction} onClick={() => { applyEdit({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
+              <button type="button" className={css.emptyAction} onClick={() => { editDocument({ type: 'insertAfter', index: appendIndex, kind: 'sql' }) }}>
                 {labels.addFirstCell}
               </button>
             )}
@@ -635,7 +652,7 @@ function SqlNotebookCell({
   onRun,
   onCancel,
   onClear,
-  onRenderChange,
+  onRenderedChange,
   labels,
   resultLabels,
   markdownLabels,
@@ -655,7 +672,8 @@ function SqlNotebookCell({
   dropAfter: boolean
   onEdit: (edit: SqlNotebookEdit) => void
   onMove: (from: number, to: number) => void
-  onFoldChange: (show: boolean) => void
+  /** The fold state to move to, not the state it is in: the cell owns neither half of it. */
+  onFoldChange: (folded: boolean) => void
   onDragStart: (event: ReactDragEvent<HTMLDivElement>) => void
   onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void
   onDrop: (event: ReactDragEvent<HTMLDivElement>) => void
@@ -663,7 +681,8 @@ function SqlNotebookCell({
   onRun: () => void
   onCancel: () => void
   onClear: () => void
-  onRenderChange: (show: boolean) => void
+  /** Whether this text cell shows its rendered form; `false` shows the editor. */
+  onRenderedChange: (rendered: boolean) => void
   labels: SqlNotebookLabels
   resultLabels: SqlResultLabels
   markdownLabels: MarkdownLabels
@@ -762,7 +781,7 @@ function SqlNotebookCell({
           aria-label={folded ? labels.expandCell : labels.collapseCell}
           title={folded ? labels.expandCell : labels.collapseCell}
           aria-expanded={!folded}
-          onClick={() => { onFoldChange(folded) }}
+          onClick={() => { onFoldChange(!folded) }}
         >
           <IconFold16 expanded={!folded} />
         </button>
@@ -788,7 +807,7 @@ function SqlNotebookCell({
               className={css.cellAction}
               aria-label={showEditor ? labels.renderMarkdown : labels.editMarkdown}
               title={showEditor ? labels.renderMarkdown : labels.editMarkdown}
-              onClick={() => { onRenderChange(showEditor) }}
+              onClick={() => { onRenderedChange(!rendered) }}
             >
               {showEditor ? <IconRenderCell16 /> : <IconEditCell16 />}
             </button>
@@ -837,7 +856,7 @@ function SqlNotebookCell({
                   onChange={source => { onEdit({ type: 'source', index, source }) }}
                 />
               ) : (
-                <div className={css.renderedMarkdown} onDoubleClick={() => { onRenderChange(false) }} title={labels.editMarkdown}>
+                <div className={css.renderedMarkdown} onDoubleClick={() => { onRenderedChange(false) }} title={labels.editMarkdown}>
                   <MarkdownText text={cell.source} labels={markdownLabels} />
                 </div>
               )
@@ -891,6 +910,16 @@ function carriesOurCell(dataTransfer: DataTransfer): boolean {
  */
 function grammarPath(path: string, kind: SqlNotebookCellKind): string {
   return kind === 'markdown' ? `${path}.md` : path
+}
+
+/**
+ * Whether this edit renames rows.
+ *
+ * Only the three that change the row list do. Typing in a cell or re-typing its kind rewrites that
+ * one cell, and walking every run and fold on a keystroke would be work for nothing.
+ */
+function isStructuralEdit(edit: SqlNotebookEdit): boolean {
+  return edit.type === 'insertAfter' || edit.type === 'remove' || edit.type === 'move'
 }
 
 function kindLabel(kind: SqlNotebookCellKind, labels: SqlNotebookLabels): string {

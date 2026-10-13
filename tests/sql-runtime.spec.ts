@@ -464,7 +464,7 @@ describe('SqlRuntime', () => {
     fixture.runtime.runCell('tab-1', 'sqlnb-0')
     await settle(fixture, [block()])
 
-    fixture.runtime.moveCellRuns('tab-1', 0, 2)
+    fixture.runtime.remapCellRuns('tab-1', { type: 'move', from: 0, to: 2 })
 
     const cells = fixture.runtime.state('tab-1').cells
     expect(Object.keys(cells)).toEqual(['sqlnb-2'])
@@ -484,7 +484,7 @@ describe('SqlRuntime', () => {
     fixture.runtime.runCell('tab-1', 'sqlnb-1')
 
     // The reader drags row 1 above row 0, and the file now reads [SELECT 2, SELECT 1].
-    fixture.runtime.moveCellRuns('tab-1', 1, 0)
+    fixture.runtime.remapCellRuns('tab-1', { type: 'move', from: 1, to: 0 })
     fixture.drafts[0] = notebookDraft([
       { kind: 'sql', source: 'SELECT 2' },
       { kind: 'sql', source: 'SELECT 1' },
@@ -495,5 +495,62 @@ describe('SqlRuntime', () => {
     expect(fixture.runtime.state('tab-1').cells['sqlnb-1']?.blocks).toHaveLength(1)
     // And what goes next is the cell that was queued, by its own text rather than its old row.
     expect(fixture.api.sqlExecute).toHaveBeenLastCalledWith('workspace-1', 'query-1.sqlnb', 'SELECT 2')
+  })
+
+  it('pushes a finished run down when a cell is inserted above it', async () => {
+    // Insertion shifts rows exactly as a move does, and the run has to go with the cell: the new
+    // empty row must not open on top of the previous query's table.
+    const fixture = createRuntime([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-1')
+    await settle(fixture, [block()])
+
+    fixture.runtime.remapCellRuns('tab-1', { type: 'insertAfter', index: 0, kind: 'sql' })
+
+    const cells = fixture.runtime.state('tab-1').cells
+    expect(Object.keys(cells)).toEqual(['sqlnb-2'])
+    expect(cells['sqlnb-2']?.blocks).toHaveLength(1)
+  })
+
+  it('drops the run of a deleted row instead of handing it to the row that takes its number', async () => {
+    const fixture = createRuntime([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    await settle(fixture, [block()])
+    fixture.runtime.runCell('tab-1', 'sqlnb-1')
+    await settle(fixture, [block()])
+
+    fixture.runtime.remapCellRuns('tab-1', { type: 'remove', index: 0 })
+
+    const cells = fixture.runtime.state('tab-1').cells
+    // Only the surviving cell's answer is left, and it is that cell's: the number 0 now belongs to
+    // the row that was second.
+    expect(Object.keys(cells)).toEqual(['sqlnb-0'])
+    expect(cells['sqlnb-0']?.executionCount).toBe(2)
+  })
+
+  it('keeps an outstanding request on the connection when its row is deleted, and writes nothing back', async () => {
+    // Two things at once: the connection must stay busy until the answer arrives (a second
+    // statement on one handle would corrupt both), and the answer must not land on the row that
+    // inherited the number.
+    const fixture = createRuntime([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+
+    fixture.runtime.remapCellRuns('tab-1', { type: 'remove', index: 0 })
+    expect(fixture.runtime.busy('tab-1')).toBe(true)
+
+    await settle(fixture, [block()])
+    expect(fixture.runtime.state('tab-1').cells['sqlnb-0']).toBeUndefined()
+    expect(fixture.runtime.busy('tab-1')).toBe(false)
   })
 })

@@ -332,7 +332,6 @@ export function EditorTabBody({
     pager: t('sqlnotebook.pager'),
     previousPage: t('sqlnotebook.previousPage'),
     nextPage: t('sqlnotebook.nextPage'),
-    pageOf: limit => t('sqlnotebook.pageOf', { limit: String(limit) }),
     pagerUnavailable: t('sqlnotebook.pagerUnavailable'),
   }), [t])
   // Stable across renders so the surface can keep it in an effect dependency: a fresh closure

@@ -131,14 +131,56 @@ function detectFormat(text: string): SqlNotebookFormat {
 /**
  * The only id rule, shared by the render model and every caller that holds a cell.
  *
- * Ids exist so the view can keep pointing at "the cell that is running" while the
- * text around it changes. Deriving them from position is enough within one editing
- * session and keeps the file free of a field that would dirty every diff. Because
- * there is exactly one derivation, an insert or a move cannot leave a running cell's
- * result rendered under the wrong row.
+ * Ids exist so the view can keep pointing at "the cell that is running" while the text around it
+ * changes, and they are derived from position so the file carries no field that would dirty every
+ * diff. The cost is the other side of the same coin: a structural edit *renames* the rows it
+ * shifts, so anything keyed by one of these ids — a run, a fold, a rendered Markdown cell — has to
+ * follow that rename or it slides onto its neighbour. `rowAfterEdit` below is the one derivation of
+ * that rename, and every holder of per-row state goes through it.
  */
 export function sqlCellId(index: number): string {
   return `sqlnb-${index}`
+}
+
+/** The row a cell id names, or null for an id this derivation never produces. */
+export function cellIndexFromId(id: string): number | null {
+  if (!id.startsWith('sqlnb-')) return null
+  const rest = id.slice('sqlnb-'.length)
+  const index = Number(rest)
+  return Number.isInteger(index) && index >= 0 && String(index) === rest ? index : null
+}
+
+/**
+ * Where a row lands after one `move`, whose `to` is the position the cell *ends up* at.
+ *
+ * Same splice the document performs: lift the row out, then insert at `to`. Positions above the
+ * lifted row keep their number, positions below lose one, and everything at or after the insertion
+ * point gains one back.
+ */
+export function indexAfterMove(index: number, from: number, to: number): number {
+  if (index === from) return to
+  const shifted = index > from ? index - 1 : index
+  return shifted >= to ? shifted + 1 : shifted
+}
+
+/**
+ * How one edit renames the rows it did not touch, and whether it removed the row asked about.
+ *
+ * An edit rewrites the file's text and nothing else, so every row number after the edit point moves
+ * by exactly one; a removal also ends a row. `null` means the row is gone and whatever was keyed by
+ * it goes with it — keeping it would hand a result to whichever neighbour inherited the number.
+ */
+export function rowAfterEdit(edit: SqlNotebookEdit, index: number): number | null {
+  switch (edit.type) {
+    case 'insertAfter':
+      return index > edit.index ? index + 1 : index
+    case 'remove':
+      return index === edit.index ? null : index > edit.index ? index - 1 : index
+    case 'move':
+      return indexAfterMove(index, edit.from, edit.to)
+    default:
+      return index
+  }
 }
 
 function readCellKind(value: unknown): { kind: SqlNotebookCellKind; degraded: boolean } {

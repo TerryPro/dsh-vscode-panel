@@ -131,7 +131,6 @@ const resultLabels: SqlResultLabels = {
   pager: zh['sqlnotebook.pager'],
   previousPage: zh['sqlnotebook.previousPage'],
   nextPage: zh['sqlnotebook.nextPage'],
-  pageOf: limit => zh['sqlnotebook.pageOf'].replace('{limit}', String(limit)),
   pagerUnavailable: zh['sqlnotebook.pagerUnavailable'],
 }
 
@@ -463,10 +462,11 @@ describe('SqlNotebookSurface 连接与执行', () => {
     fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
 
     // The slot is there so the second page lands in place rather than pushing the table around
-    // later, and it says how far the rows it shows go. Both arrows are dark because there is no
-    // way to fetch the next page yet; an enabled one would promise rows this build cannot get.
+    // later. Its caption says what it is and nothing about a page size: paging needs an offset the
+    // Host does not take yet, so both arrows are dark and a claim like "1000 rows per page" is not
+    // made anywhere.
     const group = await harness.view.findByRole('group', { name: resultLabels.pager })
-    expect(group.textContent).toContain(resultLabels.pageOf(1000))
+    expect(group.textContent).toContain(resultLabels.pager)
     const previous = harness.view.getByRole('button', { name: resultLabels.previousPage }) as HTMLButtonElement
     const next = harness.view.getByRole('button', { name: resultLabels.nextPage }) as HTMLButtonElement
     expect(previous.disabled).toBe(true)
@@ -816,5 +816,59 @@ describe('SqlNotebookSurface 拖拽与折叠', () => {
 
     expect(rowOf(harness.view.container, 'sqlnb-1').querySelector('table')).not.toBeNull()
     expect(rowOf(harness.view.container, 'sqlnb-0').querySelector('table')).toBeNull()
+  })
+
+  it('moves a finished result with its row when a cell is inserted above it', async () => {
+    const harness = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[1] as HTMLElement)
+    await harness.view.findByText('In[1]')
+
+    // An insert shifts rows exactly as a move does, so the executed cell becomes row 2. A new empty
+    // row must not open on top of the table.
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.insertSqlBelow })[0] as HTMLElement)
+    await waitFor(() => { expect(rowOf(harness.view.container, 'sqlnb-2').querySelector('table')).not.toBeNull() })
+
+    expect(rowOf(harness.view.container, 'sqlnb-0').querySelector('table')).toBeNull()
+    expect(rowOf(harness.view.container, 'sqlnb-1').querySelector('table')).toBeNull()
+  })
+
+  it('drops a deleted row’s result instead of leaving it on the row that takes its number', async () => {
+    const harness = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+    await harness.view.findByText('In[1]')
+
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.deleteCell })[0] as HTMLElement)
+
+    await waitFor(() => {
+      const surviving = harness.view.getByRole('textbox', { name: 'sqlnb-0 sql' }) as HTMLTextAreaElement
+      expect(surviving.value).toBe('SELECT 2')
+    })
+    expect(rowOf(harness.view.container, 'sqlnb-0').querySelector('table')).toBeNull()
+  })
+
+  it('folds the cell rather than the row number when a folded cell moves', async () => {
+    const { view } = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    fireEvent.click(view.getAllByRole('button', { name: labels.collapseCell })[0] as HTMLElement)
+    expect(view.getAllByRole('button', { name: labels.expandCell })).toHaveLength(1)
+    expect(rowOf(view.container, 'sqlnb-0').querySelector('textarea')).toBeNull()
+
+    fireEvent.click(view.getAllByRole('button', { name: labels.moveDown })[0] as HTMLElement)
+
+    // A fold is view state per cell, and the cell just changed rows: leaving it behind would fold
+    // whichever neighbour slid into the number — the reader's own cell would spring open.
+    await waitFor(() => { expect(rowOf(view.container, 'sqlnb-0').querySelector('textarea')).not.toBeNull() })
+    expect(rowOf(view.container, 'sqlnb-1').querySelector('textarea')).toBeNull()
+    expect(view.getAllByRole('button', { name: labels.expandCell })).toHaveLength(1)
   })
 })

@@ -25,7 +25,7 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { WorkbenchApi } from '../model/api.ts'
 import type { SqlAccess, SqlExecuteResult, SqlResultBlock } from '../../shared/sql-protocol.ts'
-import { parseSqlNotebook, type SqlNotebookCellModel } from './sql-notebook-document.ts'
+import { cellIndexFromId, parseSqlNotebook, rowAfterEdit, sqlCellId, type SqlNotebookCellModel, type SqlNotebookEdit } from './sql-notebook-document.ts'
 
 /** The draft access this runtime needs. There is no writer in it, on purpose. */
 export interface SqlDraftBridge {
@@ -126,24 +126,17 @@ function emptyRun(status: SqlCellStatus): SqlCellRun {
 }
 
 /**
- * Where a row lands after one `move` edit, whose `to` is the position the cell *ends up* at.
+ * Where a row lands after one edit, applied to every id this runtime holds.
  *
- * Same splice the document layer performs: lift the row out, then insert at `to`. Positions
- * above the lifted row keep their number, positions below lose one, and everything at or after
- * the insertion point gains one back.
+ * Ids come from position (`sqlnb-<index>`), so any edit that shifts rows renames them. `null` means
+ * the row is gone and its run goes with it rather than being inherited by the row that takes the
+ * number.
  */
-function indexAfterMove(index: number, from: number, to: number): number {
-  if (index === from) return to
-  const shifted = index > from ? index - 1 : index
-  return shifted >= to ? shifted + 1 : shifted
-}
-
-/** The row a cell id names, or null for an id this derivation never produces. */
-function cellIndexInId(id: string): number | null {
-  if (!id.startsWith('sqlnb-')) return null
-  const rest = id.slice('sqlnb-'.length)
-  const index = Number(rest)
-  return Number.isInteger(index) && index >= 0 && String(index) === rest ? index : null
+function idAfterEdit(edit: SqlNotebookEdit, id: string): string | null {
+  const index = cellIndexFromId(id)
+  if (index === null) return null
+  const next = rowAfterEdit(edit, index)
+  return next === null ? null : sqlCellId(next)
 }
 
 /** A run refused before a request: the code says which gate, the panel says it in words. */
@@ -356,34 +349,34 @@ export class SqlRuntime {
   }
 
   /**
-   * Follow the runs this notebook is showing through a cell that changed row.
+   * Rename the runs this notebook is showing after a structural edit.
    *
-   * Ids come from position (`sqlnb-<index>`), so a move renames every cell it shifts. Without
-   * this, the result of a query that finished would be painted under the neighbour that slid
-   * into its row, and — worse — a cell still queued would go and run whatever text now sits
-   * at its old position. Re-keying the ids by the same splice the document applied is what
-   * keeps "this cell's answer" attached to the cell rather than to the row number.
+   * Ids come from position, so an edit renames every row it shifts and ends the row it removes.
+   * Without this, a finished query's table would be painted under the neighbour that slid into its
+   * row, and — worse — a cell still queued would go and run whatever text now sits at its old
+   * position. Everything the screen keeps per row goes through the same derivation, which is why
+   * the edit itself is the argument: one rename, not one per kind of state.
    */
-  moveCellRuns(tabId: string, from: number, to: number): void {
+  remapCellRuns(tabId: string, edit: SqlNotebookEdit): void {
     const tab = this.tabs.get(tabId)
-    if (tab === undefined || from === to) return
-    const remap = (id: string): string | null => {
-      const index = cellIndexInId(id)
-      if (index === null) return null
-      return `sqlnb-${indexAfterMove(index, from, to)}`
-    }
-    const mappedIds = (ids: string[]): string[] => ids.map(id => remap(id) ?? id)
-    tab.queue = mappedIds(tab.queue)
-    tab.stretch = mappedIds(tab.stretch)
-    if (tab.inflight !== null) tab.inflight = remap(tab.inflight) ?? tab.inflight
-    if (tab.stoppedAt !== null) tab.stoppedAt = remap(tab.stoppedAt) ?? tab.stoppedAt
+    if (tab === undefined) return
+    const kept = (ids: string[]): string[] =>
+      ids.map(id => idAfterEdit(edit, id)).filter((id): id is string => id !== null)
+    tab.queue = kept(tab.queue)
+    tab.stretch = kept(tab.stretch)
+    // An outstanding request keeps the connection until it answers, even when its row was removed:
+    // starting the next cell now would put two statements on one handle. Its old id cannot write
+    // anything back either — the row that inherits the number is not the one that is running.
+    if (tab.inflight !== null) tab.inflight = idAfterEdit(edit, tab.inflight) ?? tab.inflight
+    if (tab.stoppedAt !== null) tab.stoppedAt = idAfterEdit(edit, tab.stoppedAt) ?? tab.stoppedAt
     tab.store.update(state => {
       const next: Record<string, SqlCellRun> = {}
       for (const [id, run] of Object.entries(state.cells)) {
-        // Two keys landing on one id cannot happen for a real move, but a run that would be
-        // overwritten is dropped rather than silently swapped: showing another cell's answer
-        // is the failure this method exists to prevent.
-        const target = remap(id) ?? id
+        const target = idAfterEdit(edit, id)
+        if (target === null) continue
+        // Two keys landing on one id cannot happen for a real edit, but a run that would be
+        // overwritten is dropped rather than silently swapped: showing another cell's answer is the
+        // failure this method exists to prevent.
         if (next[target] !== undefined) continue
         next[target] = run
       }

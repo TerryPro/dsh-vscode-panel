@@ -26,12 +26,10 @@ export interface SqlResultLabels {
   changes: (count: number) => string
   emptyRows: string
   // --- the paging slot -------------------------------------------------------------------
-  /** Names the group the arrows sit in, for a reader who never reaches them. */
+  /** Names the group the arrows sit in, and the caption beside them. */
   pager: string
   previousPage: string
   nextPage: string
-  /** Takes the cap rather than a page number: the first page is the only one this build has. */
-  pageOf: (limit: number) => string
   /** Why both arrows are dark. Paging the rest of a truncated block needs an offset the Host
    * does not take yet, so a control that promised a second page would promise a lie. */
   pagerUnavailable: string
@@ -89,17 +87,18 @@ export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; l
         </div>
       )}
       {/*
-        The paging slot, reserved outside the table because the sanitizer that guards kernel
-        HTML allows neither `button` nor `class` — a host-built result page could not put these
-        controls anywhere. They are dark on purpose: only a truncated block has a further page to
-        reach, and reaching it needs an offset the Host's execute route does not accept yet.
+        The paging slot, reserved outside the table because the sanitizer that guards kernel HTML
+        allows neither `button` nor `class` — a host-built result page could not put these controls
+        anywhere. It carries no page size and no page number on purpose: paging the rest of the
+        block needs an offset the Host's execute route does not accept yet, and a readout claiming
+        "1000 rows per page" would be describing a page that does not exist.
       */}
       {block.truncated && (
         <div className={css.resultPager} role="group" aria-label={labels.pager}>
+          <span className={css.pagerReadout}>{labels.pager}</span>
           <button type="button" className={css.pagerButton} aria-label={labels.previousPage} title={labels.pagerUnavailable} disabled>
             <span aria-hidden="true">‹</span>
           </button>
-          <span className={css.pagerReadout}>{labels.pageOf(block.rowLimit)}</span>
           <button type="button" className={css.pagerButton} aria-label={labels.nextPage} title={labels.pagerUnavailable} disabled>
             <span aria-hidden="true">›</span>
           </button>
