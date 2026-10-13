@@ -28,7 +28,10 @@ interface FileTreeLevelProps {
   onCreate: (draft: FileTreeCreateDraft, name: string) => Promise<boolean>
   onCancelCreate: () => void
   onToggle: (path: string) => void
+  /** Single click: select, and open what a click can safely open. */
   onOpen: (path: string) => void
+  /** Double click: the gesture that may do more than a click, such as create a file. */
+  onActivate: (path: string) => void
   onContextMenu: (entry: WorkspaceEntry, rect: DOMRect) => void
 }
 
@@ -59,6 +62,7 @@ export function FileTreeLevel(props: FileTreeLevelProps) {
             data-git-decoration={props.decorations[entry.path]}
             style={{ paddingLeft: 8 + props.depth * 16 }}
             onClick={() => { directory ? props.onToggle(entry.path) : props.onOpen(entry.path) }}
+            onDoubleClick={() => { if (!directory) props.onActivate(entry.path) }}
             onContextMenu={(event) => {
               event.preventDefault()
               event.stopPropagation()

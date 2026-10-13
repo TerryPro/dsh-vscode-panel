@@ -4,6 +4,9 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FileTree } from '../src/client/files/FileTree.tsx'
 import { zh } from '../src/client/core/locales.ts'
+import { WorkbenchApiError } from '../src/client/model/api.ts'
+import { SQL_NOTEBOOK_NAME_ATTEMPTS } from '../src/client/sql/sql-notebook-create.ts'
+import { parseSqlNotebook } from '../src/client/sql/sql-notebook-document.ts'
 
 const workbench = vi.hoisted(() => ({
   current: {
@@ -68,6 +71,27 @@ afterEach(() => {
   vi.useRealTimers()
   workbench.current = { activeTabId: undefined, tabs: [], sidebarAction: undefined, gitDecorations: {} }
 })
+
+/**
+ * 建笔记要的三段调用：`createFile` 只建空文件并拒同名，版本号要再读一次，内容靠 `saveFile` 落。
+ * 把这三段做成真接口，测试才能看到“先写盘再开标签”这件事真的发生了。
+ */
+function notebookApi(taken: string[] = []) {
+  const existing = new Set(taken)
+  const saved: Array<{ path: string; content: string }> = []
+  const createFile = vi.fn((_workspaceId: string, path: string) => {
+    if (existing.has(path)) return Promise.reject(new WorkbenchApiError('FS_ALREADY_EXISTS', '同名文件或目录已经存在。'))
+    existing.add(path)
+    return Promise.resolve({ name: path, path, kind: 'file' as const, size: 0 })
+  })
+  const readFile = vi.fn((_workspaceId: string, path: string) =>
+    Promise.resolve({ path, content: '', version: 'version-1', size: 0, markdown: false }))
+  const saveFile = vi.fn((_workspaceId: string, path: string, content: string) => {
+    saved.push({ path, content })
+    return Promise.resolve({ path, version: 'version-2', size: content.length })
+  })
+  return { createFile, readFile, saveFile, saved }
+}
 
 describe('文件目录', () => {
   it('用 Git 状态装饰文件但不把未跟踪红色传播到父目录', async () => {
@@ -332,6 +356,116 @@ describe('文件目录', () => {
     expect(view.getByRole('alert').textContent).toContain('未保存内容')
     expect(view.queryByRole('dialog', { name: '重命名文件或文件夹' })).toBeNull()
     expect(controller.api.renameEntry).not.toHaveBeenCalled()
+  })
+
+  it('给出 SQL 笔记菜单行，并且只在数据库文件上给出在 SQL 笔记中打开', async () => {
+    const root = {
+      path: '',
+      truncated: false,
+      entries: [
+        { name: 'docs', path: 'docs', kind: 'directory' as const },
+        { name: 'sample.db', path: 'sample.db', kind: 'file' as const },
+        { name: 'notes.md', path: 'notes.md', kind: 'file' as const },
+      ],
+    }
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...notebookApi() },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+
+    fireEvent.contextMenu(await view.findByRole('treeitem', { name: 'docs' }), { clientX: 20, clientY: 30 })
+    expect(view.getByRole('menuitem', { name: '新建 SQL 笔记' })).toBeTruthy()
+
+    fireEvent.contextMenu(view.getByRole('treeitem', { name: 'sample.db' }), { clientX: 20, clientY: 30 })
+    expect(view.getByRole('menuitem', { name: '在 SQL 笔记中打开' })).toBeTruthy()
+
+    // A plain text file has no notebook to open, so the row must not appear on it.
+    fireEvent.contextMenu(view.getByRole('treeitem', { name: 'notes.md' }), { clientX: 20, clientY: 30 })
+    expect(view.queryByRole('menuitem', { name: '在 SQL 笔记中打开' })).toBeNull()
+  })
+
+  it('双击数据库文件不当作文本打开，而是在同目录建一个笔记并打开', async () => {
+    const api = notebookApi()
+    const root = {
+      path: '',
+      truncated: false,
+      entries: [{ name: 'sample.db', path: 'sample.db', kind: 'file' as const }],
+    }
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...api },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+
+    const row = await view.findByRole('treeitem', { name: 'sample.db' })
+    // A single click only selects. Making a notebook writes a file, so a row that costs one
+    // per click is a row the reader cannot click twice.
+    fireEvent.click(row)
+    expect(api.createFile).not.toHaveBeenCalled()
+    expect(controller.openFile).not.toHaveBeenCalled()
+
+    fireEvent.doubleClick(row)
+
+    await waitFor(() => { expect(controller.openFile).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb') })
+    expect(controller.openFile).not.toHaveBeenCalledWith('workspace-1', 'sample.db')
+    expect(api.createFile).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
+    // The notebook made beside a database comes with a query that reads it; one made from
+    // the menu does not. The file is on disk before the tab opens, so the reader never
+    // sees an unsaved notebook they did not write.
+    expect(api.saved).toHaveLength(1)
+    expect(parseSqlNotebook(api.saved[0]?.content ?? '').cells[1]?.source).toContain('sqlite_master')
+  })
+
+  it('菜单新建的 SQL 笔记带一个空单元格', async () => {
+    const api = notebookApi()
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(() => Promise.resolve({ path: '', truncated: false, entries: [] })), ...api },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+    await view.findByText('此目录为空。')
+
+    fireEvent.contextMenu(view.getByRole('tree'), { clientX: 20, clientY: 30 })
+    fireEvent.click(view.getByRole('menuitem', { name: '新建 SQL 笔记' }))
+
+    await waitFor(() => { expect(controller.openFile).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb') })
+    const document = parseSqlNotebook(api.saved[0]?.content ?? '')
+    expect(document.warning).toBeNull()
+    expect(document.cells).toEqual([expect.objectContaining({ kind: 'sql', source: '' })])
+  })
+
+  it('名字被占满时给出原因，而不是静默不建文件', async () => {
+    const taken = Array.from({ length: SQL_NOTEBOOK_NAME_ATTEMPTS }, (_, index) => `query-${index + 1}.sqlnb`)
+    const api = notebookApi(taken)
+    const root = {
+      path: '',
+      truncated: false,
+      entries: [{ name: 'sample.db', path: 'sample.db', kind: 'file' as const }],
+    }
+    const controller = {
+      fileTreeExpanded: new Map<string, Set<string>>(),
+      api: { listDirectory: vi.fn(() => Promise.resolve(root)), ...api },
+      openFile: vi.fn(),
+    }
+    const view = render(
+      <FileTree controller={controller as never} workspaceId="workspace-1" workspacePath="/workspace/project" t={key => zh[key]} />,
+    )
+
+    fireEvent.doubleClick(await view.findByRole('treeitem', { name: 'sample.db' }))
+
+    await waitFor(() => { expect(view.getByRole('alert').textContent).toContain('当前目录下') })
+    expect(controller.openFile).not.toHaveBeenCalled()
+    expect(api.saved).toHaveLength(0)
   })
 
   it('在目录空白处通过鼠标或键盘打开根目录菜单', async () => {

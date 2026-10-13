@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { SqlBackend, isDatabasePath, type SqlDriver, type SqlHandle } from '../src/host/sql-backend.ts'
+import { SqlBackend, type SqlDriver, type SqlHandle } from '../src/host/sql-backend.ts'
+// `isDatabasePath` lives in the shared contract now, because the Host that refuses a
+// non-database open and the file tree that routes a `.db` row to the notebook entry have to
+// answer the same question the same way. The assertions stay here beside the rest of the SQL
+// surface they belong to.
+import { isDatabasePath } from '../src/shared/sql-protocol.ts'
 import type { ExecutableStatement } from '../src/host/sql-execute.ts'
 
 /**

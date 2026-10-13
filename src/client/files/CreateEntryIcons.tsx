@@ -65,3 +65,55 @@ export function IconFolderAddOutline16({ size = 16, className }: IconProps) {
     </span>
   )
 }
+
+/**
+ * 数据库圆柱体：SQL 笔记的标记。
+ *
+ * 不复用文档折角图标，因为这两行菜单要一眼分得开——一个建普通文件，一个建笔记。
+ * 中间那道弧线是圆柱体的堆叠线，也是它读起来像数据库而不是卷轴的原因。
+ */
+export function IconSqlNotebookOutline16({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      data-icon="sql-notebook"
+    >
+      <ellipse cx="8" cy="4" rx="4.7" ry="1.7" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M3.3 4v8c0 .94 2.1 1.7 4.7 1.7s4.7-.76 4.7-1.7V4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.3 8c0 .94 2.1 1.7 4.7 1.7s4.7-.76 4.7-1.7"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/** 圆柱体叠加 DSH 官方加号：新建 SQL 笔记。 */
+export function IconSqlNotebookAddOutline16({ size = 16, className }: IconProps) {
+  return (
+    <span
+      className={[css.composite, className].filter(Boolean).join(' ')}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+      data-icon="sql-notebook-add"
+    >
+      <IconSqlNotebookOutline16 size={size} />
+      <IconPlusOutlineMedium className={css.addGlyph} size={Math.max(8, Math.round(size / 2))} />
+    </span>
+  )
+}

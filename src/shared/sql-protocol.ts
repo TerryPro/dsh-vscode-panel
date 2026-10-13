@@ -26,6 +26,22 @@ export const SQL_MEMORY_TARGET = ':memory:'
 export const SQL_DATABASE_EXTENSIONS = ['db', 'sqlite', 'sqlite3'] as const
 
 /**
+ * Whether a workspace path names a file SQLite may be opened from.
+ *
+ * One definition on both sides: the Host refuses an open whose target is not a database
+ * (`SQL_DATABASE_REQUIRED`), and the file tree has to make the same call so a `.db` row
+ * goes to the notebook entry instead of the text editor. Two copies of an extension list
+ * is how one side starts accepting a file the other rejects.
+ *
+ * A bare `.db` has no basename, so the dot must not be the first character.
+ */
+export function isDatabasePath(path: string): boolean {
+  const dot = path.lastIndexOf('.')
+  if (dot < 1) return false
+  return (SQL_DATABASE_EXTENSIONS as readonly string[]).includes(path.slice(dot + 1).toLowerCase())
+}
+
+/**
  * Rows kept per result block, at the default.
  *
  * Declared as one constant because it is the *only* SQL cap that is a setting: a user has a real

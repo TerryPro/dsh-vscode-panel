@@ -42,7 +42,7 @@ import type {
   SqlTablesResult,
   SqlTreeEntry,
 } from '../shared/sql-protocol.ts'
-import { SQL_ACCESS_DEFAULT, SQL_DATABASE_EXTENSIONS, SQL_LIMITS, SQL_MEMORY_TARGET } from '../shared/sql-protocol.ts'
+import { SQL_ACCESS_DEFAULT, isDatabasePath, SQL_LIMITS, SQL_MEMORY_TARGET } from '../shared/sql-protocol.ts'
 import { WorkbenchHttpError } from './http.ts'
 import { normalizeWorkspacePath, WorkbenchInputError } from '../shared/path-policy.ts'
 import { authorizeSqlCall, isQueryableTableName } from './sql-guards.ts'
@@ -105,13 +105,6 @@ interface ManagedConnection {
   /** Session-local. `.sqlnb` never stores it, and a fresh connection restarts at zero. */
   executionCount: number
   abandonTimer: ReturnType<typeof setTimeout> | undefined
-}
-
-/** True for a workspace path SQLite can open as a database. A bare `.db` has no basename. */
-export function isDatabasePath(path: string): boolean {
-  const dot = path.lastIndexOf('.')
-  if (dot < 1) return false
-  return (SQL_DATABASE_EXTENSIONS as readonly string[]).includes(path.slice(dot + 1).toLowerCase())
 }
 
 function connectionKey(workspaceId: WorkspaceId, notebook: string): string {

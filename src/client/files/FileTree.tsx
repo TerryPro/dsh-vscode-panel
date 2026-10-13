@@ -7,7 +7,9 @@ import type { DirectoryListing, WorkspaceEntry } from '../../shared/contracts.ts
 import type { WorkbenchController } from '../model/controller.ts'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { childWorkspacePath } from '../../shared/path-policy.ts'
+import { isDatabasePath } from '../../shared/sql-protocol.ts'
 import { parentPath } from '../../shared/path-name.ts'
+import { createSqlNotebook, SQL_NOTEBOOK_NAME_ATTEMPTS, type SqlNotebookSeed } from '../sql/sql-notebook-create.ts'
 import { isSameOrDescendantPath, messageOf } from '../model/tab-model.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from './CreateEntryIcons.tsx'
 import type { FileTreeCreateKind } from './FileTreeCreateRow.tsx'
@@ -218,6 +220,68 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     return true
   }
 
+  /**
+   * Create one notebook on disk, then open it.
+   *
+   * Nothing here asks for a name. The tree's inline rename row is built for a name the
+   * reader types, and it creates zero bytes; a notebook needs a version and a first cell
+   * before the surface can show it, so the name comes from the counter in
+   * `sql-notebook-create.ts` and the file lands already valid.
+   */
+  const createNotebook = async (directory: string, seed: SqlNotebookSeed): Promise<void> => {
+    if (workspaceId === undefined) return
+    const targetWorkspace = workspaceId
+    setError(null)
+    setResult(null)
+    let path: string | null
+    try {
+      path = await createSqlNotebook({ api: controller.api, workspaceId: targetWorkspace, directory, seed })
+    } catch (reason: unknown) {
+      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      return
+    }
+    if (activeWorkspace.current !== targetWorkspace) return
+    if (path === null) {
+      setError(t('files.sqlNotebookNoName', { attempts: String(SQL_NOTEBOOK_NAME_ATTEMPTS) }))
+      return
+    }
+    void controller.refreshGitDecorations?.(targetWorkspace)
+    setSelection({ path, kind: 'file' })
+    await reloadDirectory(targetWorkspace, directory)
+    if (activeWorkspace.current === targetWorkspace) void controller.openFile(targetWorkspace, path)
+  }
+
+  /**
+   * Single click on a file row: select it, and open what a click may safely open.
+   *
+   * A database file is the one row a click leaves alone. The thing a click would do to it is
+   * make a notebook, and that writes a file — so a row the reader clicks twice would cost
+   * two `query-<n>.sqlnb` files. The double click and the menu rows below are the gestures
+   * that commit it.
+   */
+  const selectEntry = (path: string): void => {
+    if (workspaceId === undefined) return
+    setSelection({ path, kind: 'file' })
+    if (isDatabasePath(path)) return
+    void controller.openFile(workspaceId, path)
+  }
+
+  /**
+   * Open a file row on a deliberate gesture.
+   *
+   * A database file is never opened as text — the Host reads it as binary and refuses it —
+   * so what this row can open is a notebook made beside it.
+   */
+  const openEntry = (path: string): void => {
+    if (workspaceId === undefined) return
+    setSelection({ path, kind: 'file' })
+    if (isDatabasePath(path)) {
+      void createNotebook(parentPath(path), 'database')
+      return
+    }
+    void controller.openFile(workspaceId, path)
+  }
+
   const reloadDirectory = async (targetWorkspace: string, path: string): Promise<void> => {
     try {
       const listing = await controller.api.listDirectory(targetWorkspace, path)
@@ -327,10 +391,18 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
       beginCreate(action === 'new-file' ? 'file' : 'directory', entry?.kind === 'directory' ? entry.path : '')
       return
     }
+    if (action === 'new-sql-notebook') {
+      void createNotebook(entry?.kind === 'directory' ? entry.path : '', 'empty')
+      return
+    }
     if (entry === null) return
     if (action === 'open') {
       if (entry.kind === 'directory') toggle(entry.path)
-      else if (entry.kind === 'file') void controller.openFile(targetWorkspace, entry.path)
+      else if (entry.kind === 'file') openEntry(entry.path)
+      return
+    }
+    if (action === 'open-in-sql-notebook') {
+      if (entry.kind === 'file') void createNotebook(parentPath(entry.path), 'database')
       return
     }
     if (action === 'rename') {
@@ -443,7 +515,8 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
               onCreate={(draft, name) => createEntry(draft, name)}
               onCancelCreate={() => { setCreateDraft(null) }}
               onToggle={(path) => { setSelection({ path, kind: 'directory' }); toggle(path) }}
-              onOpen={(path) => { setSelection({ path, kind: 'file' }); void controller.openFile(workspaceId, path) }}
+              onOpen={selectEntry}
+              onActivate={openEntry}
               onContextMenu={openContextMenu}
             />
             {root.entries.length === 0 && createDraft === null && <div className={css.emptyState}>{t('files.empty')}</div>}

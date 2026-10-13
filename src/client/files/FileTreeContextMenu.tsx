@@ -10,13 +10,16 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceEntry } from '../../shared/contracts.ts'
-import { IconFileAddOutline16, IconFileOutline16, IconFolderAddOutline16 } from './CreateEntryIcons.tsx'
+import { isDatabasePath } from '../../shared/sql-protocol.ts'
+import { IconFileAddOutline16, IconFileOutline16, IconFolderAddOutline16, IconSqlNotebookAddOutline16, IconSqlNotebookOutline16 } from './CreateEntryIcons.tsx'
 import css from './files.module.css'
 
 export type FileTreeMenuAction =
   | 'open'
   | 'new-file'
   | 'new-directory'
+  | 'new-sql-notebook'
+  | 'open-in-sql-notebook'
   | 'rename'
   | 'delete'
   | 'copy-relative-path'
@@ -64,6 +67,7 @@ function rootItems(t: TranslateNS<'workbench'>): MenuEntry[] {
   return [
     { id: 'new-file', label: t('files.newFile'), icon: <IconFileAddOutline16 size={14} /> },
     { id: 'new-directory', label: t('files.newDirectory'), icon: <IconFolderAddOutline16 size={14} /> },
+    { id: 'new-sql-notebook', label: t('files.newSqlNotebook'), icon: <IconSqlNotebookAddOutline16 size={14} /> },
     { type: 'separator', id: 'root-refresh-separator' },
     { id: 'refresh', label: t('files.refresh'), icon: <IconRefreshOutlineMedium size={14} /> },
   ]
@@ -81,6 +85,11 @@ function entryItems(entry: WorkspaceEntry, expanded: boolean, t: TranslateNS<'wo
       icon: entry.kind === 'directory' ? <IconFolderOpenOutlineMedium size={14} /> : <IconFileOutline16 size={14} />,
       disabled: entry.kind !== 'file' && entry.kind !== 'directory',
     },
+    // A database file has nothing to show as text — the Host reads it as binary and refuses
+    // it — so the verb that means something on this row is the notebook beside it.
+    ...(entry.kind === 'file' && isDatabasePath(entry.path) ? [
+      { id: 'open-in-sql-notebook' as const, label: t('files.openInSqlNotebook'), icon: <IconSqlNotebookOutline16 size={14} /> },
+    ] : []),
     ...(entry.kind === 'directory' ? [
       { type: 'separator' as const, id: 'entry-expand-separator' },
       { id: 'expand-all', label: t('files.expandAll'), icon: <IconFolderOpenOutlineMedium size={14} /> },
@@ -88,6 +97,7 @@ function entryItems(entry: WorkspaceEntry, expanded: boolean, t: TranslateNS<'wo
       { type: 'separator' as const, id: 'entry-create-separator' },
       { id: 'new-file', label: t('files.newFile'), icon: <IconFileAddOutline16 size={14} /> },
       { id: 'new-directory', label: t('files.newDirectory'), icon: <IconFolderAddOutline16 size={14} /> },
+      { id: 'new-sql-notebook', label: t('files.newSqlNotebook'), icon: <IconSqlNotebookAddOutline16 size={14} /> },
     ] : []),
     { type: 'separator', id: 'entry-edit-separator' },
     { id: 'rename', label: t('files.rename'), icon: <IconEditOutlineMedium size={14} />, disabled: !mutable },
@@ -112,6 +122,8 @@ const FILE_TREE_MENU_ACTIONS: readonly FileTreeMenuAction[] = [
   'open',
   'new-file',
   'new-directory',
+  'new-sql-notebook',
+  'open-in-sql-notebook',
   'rename',
   'delete',
   'copy-relative-path',
