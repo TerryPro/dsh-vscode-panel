@@ -329,6 +329,11 @@ export function EditorTabBody({
     deadline: ms => t('sqlnotebook.deadline', { ms: String(ms) }),
     changes: count => t('sqlnotebook.changes', { count: String(count) }),
     emptyRows: t('sqlnotebook.emptyRows'),
+    pager: t('sqlnotebook.pager'),
+    previousPage: t('sqlnotebook.previousPage'),
+    nextPage: t('sqlnotebook.nextPage'),
+    pageOf: limit => t('sqlnotebook.pageOf', { limit: String(limit) }),
+    pagerUnavailable: t('sqlnotebook.pagerUnavailable'),
   }), [t])
   // Stable across renders so the surface can keep it in an effect dependency: a fresh closure
   // every render would restart the workspace scan on each keystroke in a cell.

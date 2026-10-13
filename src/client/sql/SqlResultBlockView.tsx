@@ -25,6 +25,16 @@ export interface SqlResultLabels {
   deadline: (ms: number) => string
   changes: (count: number) => string
   emptyRows: string
+  // --- the paging slot -------------------------------------------------------------------
+  /** Names the group the arrows sit in, for a reader who never reaches them. */
+  pager: string
+  previousPage: string
+  nextPage: string
+  /** Takes the cap rather than a page number: the first page is the only one this build has. */
+  pageOf: (limit: number) => string
+  /** Why both arrows are dark. Paging the rest of a truncated block needs an offset the Host
+   * does not take yet, so a control that promised a second page would promise a lie. */
+  pagerUnavailable: string
 }
 
 export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; labels: SqlResultLabels }) {
@@ -76,6 +86,23 @@ export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; l
           {notices.map((notice, index) => (
             <span key={index} className={notice.code === 'deadline' ? css.resultWarn : undefined}>{noticeText(notice, labels)}</span>
           ))}
+        </div>
+      )}
+      {/*
+        The paging slot, reserved outside the table because the sanitizer that guards kernel
+        HTML allows neither `button` nor `class` — a host-built result page could not put these
+        controls anywhere. They are dark on purpose: only a truncated block has a further page to
+        reach, and reaching it needs an offset the Host's execute route does not accept yet.
+      */}
+      {block.truncated && (
+        <div className={css.resultPager} role="group" aria-label={labels.pager}>
+          <button type="button" className={css.pagerButton} aria-label={labels.previousPage} title={labels.pagerUnavailable} disabled>
+            <span aria-hidden="true">‹</span>
+          </button>
+          <span className={css.pagerReadout}>{labels.pageOf(block.rowLimit)}</span>
+          <button type="button" className={css.pagerButton} aria-label={labels.nextPage} title={labels.pagerUnavailable} disabled>
+            <span aria-hidden="true">›</span>
+          </button>
         </div>
       )}
     </div>

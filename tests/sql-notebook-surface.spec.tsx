@@ -128,6 +128,11 @@ const resultLabels: SqlResultLabels = {
   deadline: ms => zh['sqlnotebook.deadline'].replace('{ms}', String(ms)),
   changes: count => zh['sqlnotebook.changes'].replace('{count}', String(count)),
   emptyRows: zh['sqlnotebook.emptyRows'],
+  pager: zh['sqlnotebook.pager'],
+  previousPage: zh['sqlnotebook.previousPage'],
+  nextPage: zh['sqlnotebook.nextPage'],
+  pageOf: limit => zh['sqlnotebook.pageOf'].replace('{limit}', String(limit)),
+  pagerUnavailable: zh['sqlnotebook.pagerUnavailable'],
 }
 
 const markdownLabels = {} as never
@@ -447,6 +452,36 @@ describe('SqlNotebookSurface 连接与执行', () => {
     await harness.view.findByText(resultLabels.rowsTruncated(1000))
     expect(harness.view.getByText(resultLabels.columnsDropped(7))).toBeTruthy()
     expect(harness.view.getByText(resultLabels.valuesTruncated(3))).toBeTruthy()
+  })
+
+  it('reserves the paging slot under a truncated block, with both arrows dark', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT * FROM t' }]), {
+      blocks: [block({ truncated: true, rowLimit: 1000 })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+
+    // The slot is there so the second page lands in place rather than pushing the table around
+    // later, and it says how far the rows it shows go. Both arrows are dark because there is no
+    // way to fetch the next page yet; an enabled one would promise rows this build cannot get.
+    const group = await harness.view.findByRole('group', { name: resultLabels.pager })
+    expect(group.textContent).toContain(resultLabels.pageOf(1000))
+    const previous = harness.view.getByRole('button', { name: resultLabels.previousPage }) as HTMLButtonElement
+    const next = harness.view.getByRole('button', { name: resultLabels.nextPage }) as HTMLButtonElement
+    expect(previous.disabled).toBe(true)
+    expect(next.disabled).toBe(true)
+    expect(next.getAttribute('title')).toBe(resultLabels.pagerUnavailable)
+  })
+
+  it('gives a block that reached its end no paging slot', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
+      blocks: [block({ truncated: false, rowLimit: 1000 })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+    await harness.view.findByText('In[1]')
+
+    expect(harness.view.queryByRole('group', { name: resultLabels.pager })).toBeNull()
   })
 
   it('reports rows written by a statement that returned no result set', async () => {
