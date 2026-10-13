@@ -12,7 +12,7 @@ import type { WorkbenchController, WorkbenchTerminalTab } from '../model/control
 import type { TerminalDot } from '../model/controller.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from '../files/CreateEntryIcons.tsx'
 import { IconSqlOutline16 } from '../sql/SqlIcon.tsx'
-import { activeSqlNotebook } from '../sql/SqlPanel.tsx'
+import { activeSqlNotebook } from '../sql/sql-notebook-tab.ts'
 import { createSqlNotebook } from '../sql/sql-notebook-create.ts'
 import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { terminalDot } from '../terminal/terminal-dot.ts'
@@ -44,7 +44,12 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
     if (workspaceId === undefined) return
     const target = workspaceId
     const path = await createSqlNotebook({ api: controller.api, workspaceId: target, directory: '', seed: 'empty' })
-    if (path === null) return
+    if (path === null) {
+      // Every generated name was taken, and a rail has nowhere to show a reason. Opening the file
+      // view is one gesture from the reader's fingers and lands them where the tree reports it.
+      controller.setSidebarMode('files')
+      return
+    }
     await controller.openFile(target, path)
     await controller.connectNewSqlNotebook(target, path)
   }

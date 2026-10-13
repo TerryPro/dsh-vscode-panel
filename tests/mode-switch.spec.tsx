@@ -96,6 +96,11 @@ describe('工作台活动栏', () => {
     // 6 views + editor + conversation + settings. The view count was 4 until the
     // kernel manager panel joined the dock, and 5 until the SQL notebook panel did.
     expect(dock?.querySelectorAll('button')).toHaveLength(9)
+    // The SQL view sits between the terminal and the kernel list: it is neither, and its place is
+    // what tells a reader scanning the rail which panel the icon opens.
+    const ordered = [...(dock?.querySelectorAll('button') ?? [])].map(button => button.getAttribute('aria-label'))
+    expect(ordered.indexOf('SQL')).toBe(ordered.indexOf('终端') + 1)
+    expect(ordered.indexOf('SQL')).toBe(ordered.indexOf('mode.kernels') - 1)
     // Was previously dead inside the trailing comment above; icons are 18px in the dock.
     expect(dock?.querySelector('[aria-label="Git"] svg')?.getAttribute('width')).toBe('18')
 

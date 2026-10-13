@@ -17,7 +17,9 @@ import { SQL_MEMORY_TARGET, type SqlAccess, type SqlColumnEntry, type SqlTablesR
 import type { WorkbenchController, WorkbenchFileTab, WorkbenchState } from '../model/controller.ts'
 import { messageOf } from '../model/tab-model.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import { appendSqlCell, isSqlNotebookPath } from './sql-notebook-document.ts'
+import { appendSqlCell } from './sql-notebook-document.ts'
+import { activeSqlNotebook } from './sql-notebook-tab.ts'
+import { connectionReadout } from './sql-connection-readout.ts'
 import { selectAllFrom } from './sql-schema-tree.ts'
 import { useDatabaseScan } from './use-database-scan.ts'
 import css from './sql-panel.module.css'
@@ -27,22 +29,6 @@ export interface SqlPanelProps {
   /** Workspace the panel reads databases from; the connection itself is keyed by the notebook. */
   workspaceId: string | undefined
   t: TranslateNS<'workbench'>
-}
-
-/**
- * The notebook this panel is about.
- *
- * The active tab wins when it is a `.sqlnb`. Otherwise the last `.sqlnb` in open order is used —
- * tabs are kept in the order they were opened, so that is the most recently opened notebook, which
- * is what a reader switching to the SQL view means when the editor is showing something else.
- */
-export function activeSqlNotebook(state: WorkbenchState): WorkbenchFileTab | null {
-  const active = state.tabs.find(tab => tab.id === state.activeTabId)
-  if (active?.kind === 'file' && isSqlNotebookPath(active.path)) return active
-  for (const tab of [...state.tabs].reverse()) {
-    if (tab.kind === 'file' && isSqlNotebookPath(tab.path)) return tab
-  }
-  return null
 }
 
 export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
@@ -96,7 +82,7 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
   const [openTable, setOpenTable] = useState<string | null>(null)
   const [columns, setColumns] = useState<Record<string, SqlColumnEntry[]>>({})
-  const lastExecution = useRef(0)
+  const lastExecution = useRef('')
 
   const loadSchema = useCallback((): void => {
     if (workspaceId === undefined || notebookPath === null) return
@@ -117,8 +103,14 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   }, [connectedPath, loadSchema])
 
   const executed = runState === null
-    ? 0
-    : Object.values(runState.cells).reduce((highest, run) => Math.max(highest, run.executionCount ?? 0), 0)
+    ? ''
+    : Object.entries(runState.cells)
+      // The signature is what the tree is stale *about*: a finished run may have created or dropped a
+      // table, and a failure may be the file going away — which the ticket wants re-read too. Keying
+      // on the execution count alone would miss every refused request, and those are the ones where
+      // the schema most likely changed underneath the reader.
+      .map(([id, run]) => `${id}:${run.executionCount ?? '-'}:${run.failure?.code ?? ''}`)
+      .join('|')
   // The ticket's rule: a refresh button plus one re-read per run, and no file watcher. A statement
   // may have created or dropped a table, so the run that just finished is what makes the tree stale.
   useEffect(() => {
@@ -210,7 +202,7 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     ? t('sqlnotebook.connecting')
     : connection === null
       ? t('sqlnotebook.notConnected')
-      : `${connection.path} · ${connection.access === 'writable' ? t('sqlnotebook.writableTier') : t('sqlnotebook.readOnlyTier')} · ${connection.rowLimit}`
+      : connectionReadout(connection, { readOnly: t('sqlnotebook.readOnlyTier'), writable: t('sqlnotebook.writableTier') })
 
   return (
     <div className={css.panelBody}>
@@ -284,6 +276,14 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
         {connection?.path === SQL_MEMORY_TARGET && (
           <div className={css.memoryNote}>{t('sqlnotebook.memoryNotice')}</div>
         )}
+        {/*
+          Measured: the first statement on a read-only WAL connection creates `-wal` and `-shm`
+          beside the file, and `close()` does not remove them. Said here, up front, because a reader
+          who finds two unexpected files next to their database has no way to trace them back.
+        */}
+        {connection?.walSidecarExpected === true && (
+          <div className={css.muted}>{t('sqlnotebook.walSidecarNotice')}</div>
+        )}
         {scan?.truncated === true && <div className={css.muted}>{t('sqlnotebook.scanTruncated')}</div>}
         {/*
           The schema tree, only while something is connected: it lists the *connected* database, so
@@ -337,7 +337,7 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
                               <li key={column.name} className={css.columnRow}>
                                 <span className={css.columnName}>{column.name}</span>
                                 <span className={css.columnType}>{column.type ?? ''}</span>
-                                {column.primaryKey && <span className={css.columnBadge}>PK</span>}
+                                {column.primaryKey && <span className={css.columnBadge}>{t('sqlnotebook.primaryKey')}</span>}
                               </li>
                             ))}
                           </ul>

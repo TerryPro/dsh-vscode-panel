@@ -38,6 +38,7 @@ import {
 import css from './sql-notebook.module.css'
 import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.tsx'
 import { buildSqlNotebookOutline } from './sql-notebook-outline.ts'
+import { connectionReadout } from './sql-connection-readout.ts'
 import { useDatabaseScan } from './use-database-scan.ts'
 import {
   applySqlNotebookEdit,
@@ -563,7 +564,7 @@ export function SqlNotebookSurface({
             ? labels.connecting
             : connection === null
               ? labels.notConnected
-              : `${connection.path} · ${connection.access === 'writable' ? labels.writableTier : labels.readOnlyTier} · ${connection.rowLimit}`}
+              : connectionReadout(connection, { readOnly: labels.readOnlyTier, writable: labels.writableTier })}
         </span>
       </div>
       {runState?.freshConnection === true && (

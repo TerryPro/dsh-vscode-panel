@@ -599,20 +599,24 @@ export class WorkbenchController {
   }
 
   /**
-   * Put a notebook the reader just created on an in-memory database.
+   * Connect a notebook the reader just created.
    *
-   * The ticket's default, and the reason it is not "connect every opened notebook": an existing
-   * notebook has a file the reader chose on purpose, while a fresh one has nothing to pick yet and
-   * `:memory:` is the safe place for the writes it will want (there is no file to damage). The tab
-   * is looked up by path because the create path writes the file and opens it, and the Host keys a
-   * connection by the notebook rather than by a tab id.
+   * `target` is the database the *entry* that created it had in mind: a notebook made beside a
+   * database is about that database, so it connects to it (read-only, the requirement's default); a
+   * notebook made from nothing has none, so it gets `:memory:` — the one database a fresh notebook
+   * can write to without asking for a file first. The tab is looked up by path because the create
+   * path writes the file and opens it, and the Host keys a connection by the notebook.
    */
-  async connectNewSqlNotebook(workspaceId: string, path: string): Promise<void> {
+  async connectNewSqlNotebook(workspaceId: string, path: string, target?: string): Promise<void> {
     const tab = this.store.getSnapshot().tabs.find(
       (candidate): candidate is WorkbenchFileTab => candidate.kind === 'file' && candidate.path === path,
     )
     if (tab === undefined || !isSqlNotebookPath(tab.path)) return
-    await this.sqlRuntime.connect(tab.id, SQL_MEMORY_TARGET, 'writable')
+    if (target === undefined) {
+      await this.sqlRuntime.connect(tab.id, SQL_MEMORY_TARGET, 'writable')
+      return
+    }
+    await this.sqlRuntime.connect(tab.id, target, 'read-only')
   }
 
   async save(tabId = this.store.getSnapshot().activeTabId): Promise<boolean> {

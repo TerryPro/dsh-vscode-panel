@@ -228,7 +228,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
    * before the surface can show it, so the name comes from the counter in
    * `sql-notebook-create.ts` and the file lands already valid.
    */
-  const createNotebook = async (directory: string, seed: SqlNotebookSeed): Promise<void> => {
+  const createNotebook = async (directory: string, seed: SqlNotebookSeed, connectTo?: string): Promise<void> => {
     if (workspaceId === undefined) return
     const targetWorkspace = workspaceId
     setError(null)
@@ -249,11 +249,12 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     setSelection({ path, kind: 'file' })
     await reloadDirectory(targetWorkspace, directory)
     if (activeWorkspace.current === targetWorkspace) {
-      // A notebook the reader just created opens on `:memory:` (the ticket's default): it runs
-      // without a first file pick, and an in-memory database is the safe place for the writes a
-      // fresh notebook wants. `openFile` resolves once the tab exists, which is what the connect
-      // needs — the connection is keyed by the notebook, so there is nothing to connect before it.
-      void controller.openFile(targetWorkspace, path).then(() => controller.connectNewSqlNotebook(targetWorkspace, path))
+      // What the new notebook connects to is decided by which entry made it: a notebook written
+      // beside a database is about *that* database, and its first cell queries it — landing it on
+      // `:memory:` would hand the reader a notebook whose seeded query can only return nothing.
+      // A notebook made from nothing has no database to point at, so it gets `:memory:`, which is
+      // the one place a fresh notebook can write without asking for a file first.
+      void controller.openFile(targetWorkspace, path).then(() => controller.connectNewSqlNotebook(targetWorkspace, path, connectTo))
     }
   }
 
@@ -282,7 +283,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     if (workspaceId === undefined) return
     setSelection({ path, kind: 'file' })
     if (isDatabasePath(path)) {
-      void createNotebook(parentPath(path), 'database')
+      void createNotebook(parentPath(path), 'database', path)
       return
     }
     void controller.openFile(workspaceId, path)
@@ -408,7 +409,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
       return
     }
     if (action === 'open-in-sql-notebook') {
-      if (entry.kind === 'file') void createNotebook(parentPath(entry.path), 'database')
+      if (entry.kind === 'file') void createNotebook(parentPath(entry.path), 'database', entry.path)
       return
     }
     if (action === 'rename') {

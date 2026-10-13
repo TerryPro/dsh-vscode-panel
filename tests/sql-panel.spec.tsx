@@ -89,6 +89,8 @@ function mount(options: {
   tablesTruncated?: boolean
   tablesRefuse?: WorkbenchApiError
   columns?: Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean }>
+  /** Whether the Host says a read-only WAL connection will leave -wal/-shm behind. */
+  walExpected?: boolean
 } = {}): Harness {
   const api = {
     // The handle answers with the target it was asked for: a fake that always says `demo.db` would
@@ -97,7 +99,7 @@ function mount(options: {
       path: request.path,
       access: (request.access ?? 'read-only') as 'read-only' | 'writable',
       sqliteVersion: '3.46.0',
-      walSidecarExpected: false,
+      walSidecarExpected: options.walExpected ?? false,
       rowLimit: 1000,
     })),
     sqlExecute: vi.fn(() => Promise.resolve({ path: 'demo.db', blocks: [], elapsedMs: 1, executionCount: 1 })),
@@ -252,6 +254,17 @@ describe('SqlPanel — 结构', () => {
 
     await waitFor(() => { expect(harness.consumeSidebarAction).toHaveBeenCalledWith(7) })
     expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(afterConnect)
+  })
+
+  it('says a WAL database leaves sidecar files, since nothing removes them', async () => {
+    // Measured: the first statement on a read-only WAL connection creates -wal and -shm beside the
+    // file and close() does not remove them. The panel is where the reader is told before finding
+    // two unexpected files on disk.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({ walExpected: true })
+    await harness.connect()
+
+    expect(harness.view.getByText(zh['sqlnotebook.walSidecarNotice'])).toBeTruthy()
   })
 
   it('shows why the schema could not be read', async () => {

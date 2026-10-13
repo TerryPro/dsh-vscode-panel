@@ -13,6 +13,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { SQL_PATH_UNAVAILABLE_CODE } from '../../shared/sql-protocol.ts'
+import { connectionReadout } from './sql-connection-readout.ts'
 import type { SqlRuntime } from './sql-runtime.ts'
 
 export interface SqlConnectionStatusProps {
@@ -37,11 +38,9 @@ export function SqlConnectionStatus({ runtime, tabId, t }: SqlConnectionStatusPr
       ? t('sqlnotebook.connecting')
       : connection === null
         ? t('sqlnotebook.notConnected')
-        : `${connection.path} · ${connection.access === 'writable' ? t('sqlnotebook.writableTier') : t('sqlnotebook.readOnlyTier')} · ${connection.rowLimit}`
+        : connectionReadout(connection, { readOnly: t('sqlnotebook.readOnlyTier'), writable: t('sqlnotebook.writableTier') })
 
-  return (
-    <span className="dsh-sql-connection-status" data-connected={connection !== null || undefined} data-problem={lostFile || undefined}>
-      {text}
-    </span>
-  )
+  // Plain text inside the strip's own flex row: the strip owns the spacing, and a class nothing
+  // styles would be a hook with no consumer.
+  return <span>{text}</span>
 }

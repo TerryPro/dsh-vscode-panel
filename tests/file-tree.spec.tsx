@@ -421,10 +421,9 @@ describe('文件目录', () => {
     // sees an unsaved notebook they did not write.
     expect(api.saved).toHaveLength(1)
     expect(parseSqlNotebook(api.saved[0]?.content ?? '').cells[1]?.source).toContain('sqlite_master')
-    // A notebook the reader just created opens on an in-memory database: it runs without a first
-    // file pick, and there is nothing on disk for it to damage. The connect is keyed by the
-    // notebook, so it has to wait for the tab that `openFile` creates.
-    await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb') })
+    // A notebook written beside a database connects to *that* database, read-only: its first cell
+    // queries this file, and `:memory:` would make that query return nothing.
+    await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb', 'sample.db') })
   })
 
   it('不把已经有文件的笔记自动接到内存库', async () => {
