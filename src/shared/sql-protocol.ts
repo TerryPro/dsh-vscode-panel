@@ -38,6 +38,17 @@ export const SQL_DEFAULT_MAX_ROWS = 1000
 /** What a connection may do to the file behind it. `:memory:` is always writable. */
 export type SqlAccess = 'read-only' | 'writable'
 
+/**
+ * Cell kinds `.sqlnb` defines.
+ *
+ * `raw` is not a kind users choose: it is what an unrecognized kind becomes, so a
+ * future version's cell type still reaches the screen as text instead of vanishing
+ * (ADR 0003: unknown cell kind degrades to a read-only raw cell, never to `sql`,
+ * because running text against a database the user did not intend it for is worse
+ * than not running it).
+ */
+export type SqlCellKind = 'sql' | 'markdown' | 'raw'
+
 /** The tier a request gets when it does not say. Requirement: read-only is the default. */
 export const SQL_ACCESS_DEFAULT: SqlAccess = 'read-only'
 
