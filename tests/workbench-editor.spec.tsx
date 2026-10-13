@@ -268,6 +268,53 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(controller.closeTab).toHaveBeenCalledWith('file:src/a.ts', true)
   })
 
+  it('asks before closing a SQL notebook whose cell is still running', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const controller = controllerFake()
+    controller.sqlRuntime.busy.mockReturnValue(true)
+    const view = renderEditor(controller)
+
+    fireEvent.click(view.getByRole('button', { name: '关闭 query.sqlnb' }))
+    // Running a cell never dirties the tab, so the unsaved-draft prompt above would have let this
+    // close quietly and give up the query in flight without saying so.
+    expect(controller.closeTab).not.toHaveBeenCalled()
+    expect(view.getByRole('dialog', { name: '这格还在执行' })).toBeTruthy()
+
+    fireEvent.click(view.getByRole('button', { name: '仍然关闭' }))
+    expect(controller.closeTab).toHaveBeenCalledWith('file:query.sqlnb')
+  })
+
+  it('leaves a running notebook alone when the reader chooses to stay', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const controller = controllerFake()
+    controller.sqlRuntime.busy.mockReturnValue(true)
+    const view = renderEditor(controller)
+
+    fireEvent.click(view.getByRole('button', { name: '关闭 query.sqlnb' }))
+    fireEvent.click(view.getByRole('button', { name: '取消' }))
+    expect(controller.closeTab).not.toHaveBeenCalled()
+    expect(view.queryByRole('dialog')).toBeNull()
+  })
+
+  it('asks about the running query before asking about unsaved text', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const notebookTab = workbenchState.current.tabs.at(-1)
+    if (notebookTab?.kind !== 'file') throw new Error('fixture tab is not a file tab')
+    notebookTab.dirty = true
+    const controller = controllerFake()
+    controller.sqlRuntime.busy.mockReturnValue(true)
+    // The real `closeTab` refuses a dirty draft, which is what hands the second prompt over.
+    controller.closeTab.mockReturnValue(false)
+    const view = renderEditor(controller)
+
+    fireEvent.click(view.getByRole('button', { name: '关闭 query.sqlnb' }))
+    expect(view.getByRole('dialog', { name: '这格还在执行' })).toBeTruthy()
+    expect(view.queryByRole('dialog', { name: '关闭未保存的文件？' })).toBeNull()
+
+    fireEvent.click(view.getByRole('button', { name: '仍然关闭' }))
+    expect(view.getByRole('dialog', { name: '关闭未保存的文件？' })).toBeTruthy()
+  })
+
   it('renders Diff as a normal closable editor tab beside files', () => {
     workbenchState.current.tabs.push(diffTab('src/a.ts'))
     focusPrimaryTab('diff:worktree::src/a.ts')
@@ -648,6 +695,9 @@ function controllerFake() {
     moveTabToPane: vi.fn(),
     setSidebarMode: vi.fn(),
     requestSidebarAction: vi.fn(() => 1),
+    // Whether closing a SQL notebook would give up a query is the runtime's to know; the shell
+    // only asks, so the fake answers the question instead of modelling the queue.
+    sqlRuntime: { busy: vi.fn(() => false), cancel: vi.fn(), forget: vi.fn() },
   }
 }
 

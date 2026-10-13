@@ -6,6 +6,7 @@ import type { EditorGroup, EditorPaneId, WorkbenchController, WorkbenchState, Wo
 import { tabsForCloseScope } from '../model/tab-model.ts'
 import { EditorEmpty } from './EditorShared.tsx'
 import { EditorPane } from './EditorPane.tsx'
+import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import type { EditorTabMenuAction } from './EditorTabContextMenu.tsx'
 import { SplitDivider } from './SplitDivider.tsx'
 import { useWorkbench } from '../model/use-workbench.ts'
@@ -29,6 +30,10 @@ interface EditorNotice {
 export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, controller, activateWorkspace, t }: WorkbenchEditorProps) {
   const state = useWorkbench(controller)
   const [pendingClose, setPendingClose] = useState<string | null>(null)
+  // Requirement: closing a SQL notebook while a cell runs is refused until the reader answers.
+  // The tab itself may be perfectly clean — a run never dirties it — so the unsaved-draft prompt
+  // below would not catch this, and the work in flight would be given up silently.
+  const [pendingBusyClose, setPendingBusyClose] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
   const [dragOverPane, setDragOverPane] = useState<EditorPaneId | null>(null)
   const [notice, setNotice] = useState<EditorNotice | null>(null)
@@ -54,6 +59,11 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
   const primaryActive = primaryTabs.find(candidate => candidate.id === state.panes.primary.activeTabId)
   const secondaryActive = secondaryTabs.find(candidate => candidate.id === state.panes.secondary.activeTabId)
   const closeTab = pendingClose === null ? undefined : findTab(pendingClose)
+  const runningTab = pendingBusyClose === null ? undefined : findTab(pendingBusyClose)
+  /** Whether closing this tab would give up a query that is still on the wire. */
+  const sqlRunOutstanding = (candidate: WorkbenchTab | undefined): boolean =>
+    candidate !== undefined && candidate.kind === 'file' && isSqlNotebookPath(candidate.path) &&
+    controller.sqlRuntime.busy(candidate.id)
   // A pane's Git baseline only tracks an editable file buffer (not a Markdown preview).
   const baselineFor = (active: WorkbenchTab | undefined) => ({
     tabId: active?.kind === 'file' && active.file !== null && active.markdownMode !== 'preview' ? active.id : undefined,
@@ -117,12 +127,36 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
   }
   const requestClose = (tabId: string): void => {
     const target = findTab(tabId)
+    // The running query is asked about first: it is the work in flight, and its answer is a
+    // different question from whether the file has unsaved text.
+    if (sqlRunOutstanding(target)) {
+      controller.selectTab(tabId)
+      setPendingBusyClose(tabId)
+      return
+    }
     if (target?.kind === 'file' && target.dirty) {
       controller.selectTab(tabId)
       setPendingClose(tabId)
       return
     }
     controller.closeTab(tabId)
+  }
+  const dismissBusyClose = (): void => {
+    pendingBatch.current = []
+    setPendingBusyClose(null)
+  }
+  /**
+   * Close over a running query.
+   *
+   * `closeTab` refuses a dirty draft, and that answer is still owed: the two prompts stack
+   * rather than merge, because "save it?" means something different from "give up the result?".
+   */
+  const closeOverRunningQuery = (): void => {
+    const target = pendingBusyClose
+    if (target === null) return
+    setPendingBusyClose(null)
+    if (controller.closeTab(target)) { continueBatch(); return }
+    setPendingClose(target)
   }
   /**
    * Close a batch one tab at a time, pausing on the first dirty draft so the
@@ -133,6 +167,13 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
       const id = ids[position]!
       const target = findTab(id)
       if (target === undefined) continue
+      if (sqlRunOutstanding(target)) {
+        // One prompt per tab that is still working, exactly as one per dirty draft.
+        pendingBatch.current = ids.slice(position + 1)
+        controller.selectTab(id)
+        setPendingBusyClose(id)
+        return
+      }
       if (target.kind === 'file' && target.dirty) {
         // The modal answers for this one tab; the rest resume only once it closes.
         pendingBatch.current = ids.slice(position + 1)
@@ -336,6 +377,21 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
           <div className={css.editorModalError} role="alert">{closeTab.error}</div>
         )}
       </Modal>
+      <Modal
+        open={runningTab !== undefined}
+        onClose={dismissBusyClose}
+        closeLabel={t('editor.cancelClose')}
+        title={t('editor.closeRunningTitle')}
+        {...runningTab === undefined || runningTab.kind !== 'file'
+          ? {}
+          : { description: t('editor.closeRunningDescription', { path: runningTab.path }) }}
+        footer={(
+          <>
+            <Button variant="outline" onClick={dismissBusyClose}>{t('editor.cancelClose')}</Button>
+            <Button variant="primary" onClick={closeOverRunningQuery}>{t('editor.closeAnyway')}</Button>
+          </>
+        )}
+      />
       {notice === null ? null : (
         <Toast
           key={notice.sequence}
