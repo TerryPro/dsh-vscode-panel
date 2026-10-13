@@ -44,6 +44,7 @@
     "tests/sql-values.spec.ts",
     "tests/sql-guards.spec.ts",
     "tests/sql-execute.spec.ts",
+    "tests/sql-backend.spec.ts",
     "tests/rightbar-seat.spec.ts",
     "tests/native-rightbar-entry.spec.ts"
   ]

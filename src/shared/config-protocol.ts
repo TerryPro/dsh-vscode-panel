@@ -34,7 +34,7 @@ export interface ConfigFieldMeta {
 export type ConfigUnit = 'count' | 'ms' | 'bytes'
 
 /** Sections the settings page groups its fields into. */
-export type ConfigGroup = 'files' | 'git' | 'kernel-count' | 'kernel-lifecycle' | 'kernel-output' | 'kernel-discovery'
+export type ConfigGroup = 'files' | 'git' | 'kernel-count' | 'kernel-lifecycle' | 'kernel-output' | 'kernel-discovery' | 'sql'
 
 /**
  * What each setting is called and what it bounds, in both languages.
@@ -50,6 +50,7 @@ export const CONFIG_FIELDS = {
   gitTimeoutMs: { title: { zh: 'Git 操作超时', en: 'Git timeout' }, description: { zh: '单次 Git 操作的超时（毫秒）。浅克隆的仓库或慢速网络可以适当放宽。', en: 'Wall clock for one Git operation, in milliseconds. Raise it for slow networks and large repositories.' } },
   gitMaxOutputBytes: { title: { zh: 'Git 输出上限', en: 'Git output limit' }, description: { zh: '单次 Git 操作可回传的最大字节数。差异视图过大时会截断而不是拖住界面。', en: 'Output one Git operation may return, in bytes. A larger diff is truncated rather than blocking.' } },
   gitGraphPageSize: { title: { zh: '提交图每页条数', en: 'Graph page size' }, description: { zh: '提交图每页的提交数。滚动到底部会继续按需加载，加大只是减少请求次数。', en: 'Commits per page of the history graph. Scrolling loads more, so this only sets how many arrive at once.' } },
+  sqlMaxRows: { title: { zh: 'SQL 每格返回行数', en: 'SQL rows per cell' }, description: { zh: 'SQL 笔记一个单元格最多返回多少行，超出会被截断并写明。它只限制返回的行数，不限制查询本身要跑多久。', en: 'Rows one SQL notebook cell returns before it is truncated with a notice. It bounds the rows delivered, not how long a query takes to run.' } },
   kernelStartTimeoutMs: { title: { zh: '内核启动超时', en: 'Kernel start timeout' }, description: { zh: '等待内核打开端口的最长时间（毫秒）。conda 环境或首次导入大量包时可调高。', en: 'How long a kernel may take to open its ports, in milliseconds. Raise it for conda environments or a first heavy import.' } },
   kernelRequestTimeoutMs: { title: { zh: '内核请求超时', en: 'Kernel request timeout' }, description: { zh: '补全、悬停信息等一次内核请求的超时（毫秒）。这些请求不应让界面等待。', en: 'Timeout for one completion or introspection request, in milliseconds. These should never hold the interface.' } },
   kernelMaxPerWorkspace: { title: { zh: '单工作区内核数', en: 'Kernels per workspace' }, description: { zh: '单个工作区同时可运行的内核数。每个笔记本一个内核，超出的新笔记本会启动失败。', en: 'Kernels one workspace may run at once. Each notebook has one, so a new one fails to start past this.' } },

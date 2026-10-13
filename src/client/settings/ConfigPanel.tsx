@@ -46,6 +46,10 @@ const GROUP_ORDER: readonly { group: ConfigGroup; label: WorkbenchKey }[] = [
   { group: 'kernel-discovery', label: 'config.group.kernel-discovery' },
   { group: 'files', label: 'config.group.files' },
   { group: 'git', label: 'config.group.git' },
+  // A group absent from this list renders nothing at all — the page maps over GROUP_ORDER
+  // rather than over the fields, so a new ConfigGroup needs a row here as well as a
+  // CONFIG_PRESENTATION entry. The compile error only guards the second half.
+  { group: 'sql', label: 'config.group.sql' },
 ]
 
 /**

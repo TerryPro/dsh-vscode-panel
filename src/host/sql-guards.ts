@@ -59,6 +59,13 @@ const DENIED_ALWAYS = new Set([
  */
 const DENIED_WHEN_SET = new Set([
   'journal_mode',
+  // Two knobs the *host* sets for its own reasons, which a user must not be able to undo:
+  // `temp_store` is set to memory at open so scratch work never lands in the user's temporary
+  // directory (measured default writes `etilqs_*` files there), and `busy_timeout` is set from the
+  // connection options so a lock cannot be waited on indefinitely on the host's only thread.
+  // Denying the assignment form leaves both readable, which is what the panel needs.
+  'temp_store',
+  'busy_timeout',
   'user_version',
   'schema_version',
   'application_id',

@@ -25,6 +25,16 @@ export const SQL_MEMORY_TARGET = ':memory:'
 /** Lowercase extensions the workbench will open as a database. */
 export const SQL_DATABASE_EXTENSIONS = ['db', 'sqlite', 'sqlite3'] as const
 
+/**
+ * Rows kept per result block, at the default.
+ *
+ * Declared as one constant because it is the *only* SQL cap that is a setting: a user has a real
+ * reason to change it for a particular query. Following the `GIT_GRAPH_PAGE_SIZE` precedent, the
+ * schema bounds this value and the settings page reads it off the schema, so the shipped number
+ * cannot end up declared twice with two different answers.
+ */
+export const SQL_DEFAULT_MAX_ROWS = 1000
+
 /** What a connection may do to the file behind it. `:memory:` is always writable. */
 export type SqlAccess = 'read-only' | 'writable'
 
@@ -67,6 +77,15 @@ export const SQL_LIMITS = {
    * from it. Without it the default is 0, and a momentarily locked file would fail at once.
    */
   busyTimeoutMs: 2_000,
+  /**
+   * How long a handle survives its page going away.
+   *
+   * A refresh finishes within seconds and re-arms the same connection, so the user keeps the
+   * temporary tables the design promised (measured: a page reload does not restart the host).
+   * Long enough for a reload, short enough that forgotten handles cannot fill the per-workspace
+   * ceiling — a leaked count there refuses real opens with an error the user cannot explain.
+   */
+  abandonGraceMs: 60_000,
 } as const
 
 /** One column header. */
@@ -209,17 +228,4 @@ export interface SqlColumnsResult {
   path: string
   table: string
   columns: SqlColumnEntry[]
-}
-
-/** What the panel needs in order to show the caps the Host actually enforces. */
-export interface SqlLimitsResult {
-  defaultRowLimit: number
-  maxRowLimit: number
-  columnLimit: number
-  valueCharLimit: number
-  blobByteLimit: number
-  cellDeadlineMs: number
-  maxConnectionsPerWorkspace: number
-  /** The cap in force for this connection, when one is open. */
-  currentRowLimit?: number
 }

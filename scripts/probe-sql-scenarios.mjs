@@ -267,68 +267,239 @@ const post = async (p, body) => {
 if (host === undefined) {
   gate('A1', 'host bundle mounts for route probes', false, 'mount failed')
 } else {
-  const opened = await post('/sqlnotebook/open', { workspaceId: 'ws-1', path: 'sample.db' })
+  // --- identity and path validation -------------------------------------------
+  const opened = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', path: 'sample.db' })
   gate('A1', 'POST /sqlnotebook/open resolves a connection (not 404)', opened.status !== 404, `status=${opened.status} code=${opened.json?.error?.code ?? '-'}`)
 
-  const escaped = await post('/sqlnotebook/open', { workspaceId: 'ws-1', path: '../outside.db' })
+  // Identity is the notebook, so a request that cannot name one is refused instead of being
+  // guessed at, and a missing connection is named apart from a bad path.
+  const noNotebook = await post('/sqlnotebook/open', { workspaceId: 'ws-1', path: 'sample.db' })
+  gate('A1', 'open refuses a request with no notebook identity', noNotebook.json?.error?.code === 'SQL_NOTEBOOK_REQUIRED',
+    `code=${noNotebook.json?.error?.code ?? '-'}`)
+
+  const escaped = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', path: '../outside.db' })
   gate('A1', 'open refuses a path outside the workspace', escaped.json?.error?.code === 'WORKSPACE_ESCAPE' || escaped.json?.error?.code === 'INVALID_PATH',
     `code=${escaped.json?.error?.code ?? '-'}`)
 
-  const exec = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', path: 'sample.db', sql: 'SELECT 9007199254740993 AS v, x\'0102\' AS b' })
-  const block = exec.json?.blocks?.[0]
-  const row = block?.rows?.[0]
-  gate('A1', 'execute normalizes big integers to strings and BLOBs to base64',
-    Array.isArray(row) && typeof row[0] === 'string' && typeof row[1] === 'string', JSON.stringify(row))
+  const stray = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-never-opened.sqlnb', sql: 'SELECT 1' })
+  gate('A1', 'execute on a notebook with no connection is refused by name', stray.json?.error?.code === 'SQL_NOT_CONNECTED',
+    `code=${stray.json?.error?.code ?? '-'}`)
 
-  const dup = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', path: 'sample.db', sql: 'SELECT a, a FROM t' })
+  // --- value normalization (the three silent-corruption classes) --------------
+  const exec = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT 9007199254740993 AS v, x\'0102\' AS b' })
+  const row = exec.json?.blocks?.[0]?.rows?.[0]
+  gate('A1', 'execute normalizes a big integer to a string and a BLOB to a base64 envelope',
+    Array.isArray(row) && row[0] === '9007199254740993' && typeof row[1] === 'object' && row[1] !== null && typeof row[1].base64 === 'string',
+    JSON.stringify(row))
+
+  const dup = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT a, a FROM t' })
   const cols = dup.json?.blocks?.[0]?.columns
   gate('A1', 'duplicate columns yield one entry per column with distinct labels and true names',
     Array.isArray(cols) && cols.length === 2 && cols[0].name === 'a' && cols[1].name === 'a' && cols[0].label !== cols[1].label,
     JSON.stringify(cols))
 
-  const multi = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', path: 'sample.db', sql: 'SELECT 1 AS one; SELECT 2 AS two' })
+  // An overflowed float arrives as JS Infinity, which JSON would write as `null` — indistinguishable
+  // from a genuine NULL in the grid. Asserting both halves in one row is what makes this gate mean
+  // something: a weaker form (value !== null) also passes when the value *is* a real NULL.
+  const overflow = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT 9e999 AS over, NULL AS nullcol' })
+  const overflowRow = overflow.json?.blocks?.[0]?.rows?.[0]
+  gate('A1', 'an overflowed float stays distinguishable from a real NULL',
+    String(overflowRow?.[0]) === 'Infinity' && overflowRow?.[1] === null, JSON.stringify(overflowRow))
+
+  // --- cell semantics ----------------------------------------------------------
+  const multi = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT 1 AS one; SELECT 2 AS two' })
   gate('A1', 'multi-statement cell returns one result block per statement',
     Array.isArray(multi.json?.blocks) && multi.json.blocks.length === 2, `blocks=${multi.json?.blocks?.length}`)
 
-  // A negative assertion must not be satisfied by an absent endpoint: `error !== undefined`
-  // was true while the route returned ENDPOINT_NOT_FOUND, so this gate passed for the wrong
-  // reason on the first run. Require the route to be alive AND the denial to carry its own
-  // code. These codes are the contract A1 implements.
-  const denied = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', path: 'sample.db', sql: `ATTACH DATABASE 'sample.db' AS other` })
+  // prepare() drops every statement after the first, so this gate is the sentinel for the
+  // sourceSQL-advancing loop (ADR 0006). One executed statement would leave a single block.
+  const three = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT 1 AS a; SELECT 2 AS b; SELECT 3 AS c' })
+  gate('A1', 'a three-statement cell runs all three rather than only the first',
+    three.json?.blocks?.length === 3, `blocks=${three.json?.blocks?.length}`)
+
+  // A negative assertion must not be satisfied by an absent endpoint: an earlier revision counted
+  // any `error` object as "refused", and ENDPOINT_NOT_FOUND made it pass for the wrong reason.
+  // Each refusal below therefore names the code the route has to mint.
+  const denied = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: `ATTACH DATABASE 'sample.db' AS other` })
   const denialCode = denied.json?.error?.code ?? denied.json?.blocks?.[0]?.error?.code
   gate('A1', 'read-only connection denies ATTACH with SQL_AUTHORIZATION_DENIED',
     denialCode === 'SQL_AUTHORIZATION_DENIED', `code=${denialCode ?? '-'} status=${denied.status}`)
 
-  const scratch = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', path: 'sample.db', sql: 'CREATE TEMP TABLE g(x); INSERT INTO g VALUES (1); SELECT count(*) AS n FROM g' })
-  const persisted = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', path: 'sample.db', sql: 'SELECT count(*) AS n FROM g' })
+  const checkpoint = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'PRAGMA wal_checkpoint' })
+  gate('A1', 'refuses PRAGMA wal_checkpoint in its no-argument form',
+    checkpoint.json?.blocks?.[0]?.error?.code === 'SQL_AUTHORIZATION_DENIED',
+    `code=${checkpoint.json?.blocks?.[0]?.error?.code ?? '-'}`)
+
+  const tempStore = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'PRAGMA temp_store=1' })
+  gate('A1', 'refuses a user re-setting temp_store after the host pinned it to memory',
+    tempStore.json?.blocks?.[0]?.error?.code === 'SQL_AUTHORIZATION_DENIED',
+    `code=${tempStore.json?.blocks?.[0]?.error?.code ?? '-'}`)
+
+  // The negative control that keeps both checks above honest: reading a pragma is how the schema
+  // tree and the WAL warning work, so a rule that also blocked reads must fail here.
+  const journalRead = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'PRAGMA journal_mode' })
+  gate('A1', 'still allows reading a pragma whose assignment was refused',
+    journalRead.json?.blocks?.[0]?.rows?.length === 1 && journalRead.json?.blocks?.[0]?.error === undefined,
+    `rows=${journalRead.json?.blocks?.[0]?.rows?.length} code=${journalRead.json?.blocks?.[0]?.error?.code ?? '-'}`)
+
+  // A read-only tier must refuse a write, whichever layer stops it (the authorizer acts first, so
+  // either refusal code is a pass — what must never happen is the write succeeding).
+  const readOnlyWrite = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: "INSERT INTO t VALUES (9, 9, 'x')" })
+  const writeCode = readOnlyWrite.json?.blocks?.[0]?.error?.code
+  gate('A1', 'read-only tier refuses a main-table write',
+    writeCode === 'SQL_AUTHORIZATION_DENIED' || writeCode === 'SQL_READ_ONLY', `code=${writeCode ?? '-'}`)
+
+  const queryOnly = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'PRAGMA query_only=ON' })
+  gate('A1', 'refuses query_only, which would silently break the scratch workflow',
+    queryOnly.json?.blocks?.[0]?.error?.code === 'SQL_AUTHORIZATION_DENIED',
+    `code=${queryOnly.json?.blocks?.[0]?.error?.code ?? '-'}`)
+
+  const missingTable = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT * FROM no_such_table' })
+  gate('A1', 'names a missing object as SQL_OBJECT_NOT_FOUND',
+    missingTable.json?.blocks?.[0]?.error?.code === 'SQL_OBJECT_NOT_FOUND',
+    `code=${missingTable.json?.blocks?.[0]?.error?.code ?? '-'}`)
+
+  // Measured: SQLite reports no line or column, so one readable line is all the precision the
+  // panel gets and the gate asserts that line survived, not a fabricated position.
+  const syntax = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELEKT 1' })
+  const syntaxFailure = syntax.json?.blocks?.[0]?.error
+  gate('A1', 'syntax error carries SQL_STATEMENT_FAILED with SQLite one-line message',
+    syntaxFailure?.code === 'SQL_STATEMENT_FAILED' && /near/iu.test(syntaxFailure?.message ?? ''),
+    `code=${syntaxFailure?.code ?? '-'} message=${JSON.stringify(syntaxFailure?.message ?? '')}`)
+
+  const emptyCell = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: '   ' })
+  gate('A1', 'an empty cell is refused by name instead of running nothing',
+    emptyCell.json?.error?.code === 'SQL_EMPTY_CELL', `code=${emptyCell.json?.error?.code ?? '-'}`)
+
+  // The row-cap *behaviour* is asserted properly in tests/sql-execute.spec.ts with a scripted
+  // driver. At route level the fixture has too few rows to overflow a 1000 cap honestly, so this
+  // checks only that the envelope carries the fields the panel needs to phrase truncation — the
+  // alternative here was a gate that passed while claiming to test something it never touched.
+  const envelope = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT a FROM t' })
+  const firstBlock = envelope.json?.blocks?.[0]
+  gate('A1', 'a result block reports its cap and truncation flags instead of guessing',
+    typeof firstBlock?.rowLimit === 'number' && typeof firstBlock?.truncated === 'boolean'
+    && typeof firstBlock?.columnsDropped === 'number' && typeof firstBlock?.valuesTruncated === 'number',
+    `rowLimit=${firstBlock?.rowLimit} truncated=${firstBlock?.truncated}`)
+
+  // --- scratch survives within one notebook's connection -------------------------
+  // Two executes on the same notebook: the temp table made in the first must still be there, which
+  // is exactly what "one notebook, one connection" buys and a per-request handle could not.
+  const scratch = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'CREATE TEMP TABLE g(x); INSERT INTO g VALUES (1); SELECT count(*) AS n FROM g' })
+  const persisted = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT count(*) AS n FROM g' })
   gate('A1', 'temporary tables survive across executes in one connection',
     scratch.json?.blocks?.length === 3 && Number(persisted.json?.blocks?.[0]?.rows?.[0]?.[0]) === 1,
     `scratch=${scratch.json?.blocks?.length} then=${JSON.stringify(persisted.json?.blocks?.[0]?.rows)}`)
 
-  const writableOne = await post('/sqlnotebook/open', { workspaceId: 'ws-1', path: 'sample.db', writable: true })
-  const writableTwo = await post('/sqlnotebook/open', { workspaceId: 'ws-1', path: 'sample.db', writable: true })
-  gate('A1', 'a second writable connection to the same file is refused with a named code',
-    writableTwo.json?.error?.code === 'SQL_WRITE_OCCUPIED', `code=${writableTwo.json?.error?.code ?? '-'} first=${writableOne.status}`)
+  const counts = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb', sql: 'SELECT 1 AS x' })
+  gate('A1', 'In[n] counts up per connection rather than resetting each request',
+    typeof persisted.json?.executionCount === 'number' && typeof counts.json?.executionCount === 'number'
+    && counts.json.executionCount > persisted.json.executionCount,
+    `then=${persisted.json?.executionCount} now=${counts.json?.executionCount}`)
 
-  const readOnlyThenWrite = await post('/sqlnotebook/open', { workspaceId: 'ws-1', path: 'second.db', writable: true })
-  gate('A1', 'opening a second file is unaffected by the first file being occupied',
-    readOnlyThenWrite.status !== 404 && readOnlyThenWrite.json?.error?.code !== 'SQL_WRITE_OCCUPIED', `code=${readOnlyThenWrite.json?.error?.code ?? '-'}`)
+  // --- occupancy across notebooks -------------------------------------------------
+  // Sequence matters: n-a still holds sample.db read-only, so it closes first. Otherwise the next
+  // request fails as SQL_RECONNECT_REQUIRED (same notebook, different tier) and the occupancy rule
+  // would never be what the gate actually measured.
+  await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-a.sqlnb' })
 
-  const tables = await post('/sqlnotebook/tables', { workspaceId: 'ws-1', path: 'sample.db' })
-  gate('A4', 'tables route lists tables and views with a cap and a truncation flag',
+  // A read-only holder blocks a writable request from *another* notebook: measured, an unfinished
+  // row scan keeps its read transaction, and the default `delete` journal mode locks out a writer.
+  await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-c.sqlnb', path: 'sample.db' })
+  const writeAfterRead = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-d.sqlnb', path: 'sample.db', access: 'writable' })
+  gate('A1', 'a read-only connection blocks a writable request from another notebook',
+    writeAfterRead.json?.error?.code === 'SQL_WRITE_OCCUPIED', `code=${writeAfterRead.json?.error?.code ?? '-'}`)
+
+  const anotherOnSameFile = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-b.sqlnb', path: 'sample.db' })
+  gate('A1', 'two notebooks may share one file read-only, each with its own handle',
+    anotherOnSameFile.json?.access === 'read-only', `access=${anotherOnSameFile.json?.access ?? anotherOnSameFile.json?.error?.code ?? '-'}`)
+
+  await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-c.sqlnb' })
+  await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-b.sqlnb' })
+
+  const writableOne = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-f.sqlnb', path: 'sample.db', access: 'writable' })
+  const writableTwo = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-g.sqlnb', path: 'sample.db', access: 'writable' })
+  gate('A1', 'a second writable connection to the same file by another notebook is refused',
+    writableOne.json?.access === 'writable' && writableTwo.json?.error?.code === 'SQL_WRITE_OCCUPIED',
+    `first=${writableOne.json?.access ?? writableOne.json?.error?.code} second=${writableTwo.json?.error?.code ?? '-'}`)
+
+  // A statement with no result set still has to say what it did, or an UPDATE that matched nothing
+  // looks identical to a CREATE TABLE. n-f holds sample.db writable here.
+  const changes = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-f.sqlnb', sql: 'CREATE TABLE z2(q); INSERT INTO z2 VALUES (1)' })
+  gate('A1', 'a write statement with no result set reports its change count',
+    changes.json?.blocks?.length === 2 && changes.json?.blocks?.[1]?.changes === 1,
+    `blocks=${changes.json?.blocks?.length} changes=${JSON.stringify(changes.json?.blocks?.[1]?.changes)}`)
+
+  // Switching tier on a live handle is refused rather than silently reopening (which would drop the
+  // user's temporary tables without warning).
+  const switchTier = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-f.sqlnb', path: 'sample.db' })
+  gate('A1', 'a live handle cannot silently change tier or database', switchTier.json?.error?.code === 'SQL_RECONNECT_REQUIRED',
+    `code=${switchTier.json?.error?.code ?? '-'}`)
+
+  const closed = await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-f.sqlnb' })
+  const closedTwice = await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-f.sqlnb' })
+  gate('A1', 'close is idempotent and reports whether it released anything',
+    closed.json?.closed === true && closedTwice.json?.closed === false,
+    `first=${closed.json?.closed} second=${closedTwice.json?.closed}`)
+
+  const afterCloseWrite = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-h.sqlnb', path: 'sample.db', access: 'writable' })
+  gate('A1', 'the file becomes writable once its holder closed',
+    afterCloseWrite.json?.access === 'writable', `access=${afterCloseWrite.json?.access ?? afterCloseWrite.json?.error?.code ?? '-'}`)
+  await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-h.sqlnb' })
+
+  // --- :memory: isolation ----------------------------------------------------------
+  await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-m1.sqlnb', path: ':memory:' })
+  await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-m2.sqlnb', path: ':memory:' })
+  await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-m1.sqlnb', sql: 'CREATE TABLE mine(q)' })
+  const otherMemory = await post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-m2.sqlnb', sql: 'SELECT count(*) AS n FROM mine' })
+  gate('A1', 'two notebooks on :memory: never share one database',
+    otherMemory.json?.blocks?.[0]?.error?.code === 'SQL_OBJECT_NOT_FOUND',
+    `code=${otherMemory.json?.blocks?.[0]?.error?.code ?? '-'}`)
+  await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-m1.sqlnb' })
+
+  // --- schema reads (used by the tree; bound here to this backend's work) ----------
+  const secondFile = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-e.sqlnb', path: 'second.db', access: 'read-only' })
+  gate('A1', 'opening a different file is unaffected by another file being occupied',
+    secondFile.json?.error?.code === undefined && secondFile.status !== 404, `code=${secondFile.json?.error?.code ?? '-'}`)
+
+  const tables = await post('/sqlnotebook/tables', { workspaceId: 'ws-1', notebook: 'n-e.sqlnb' })
+  gate('A1', 'tables lists tables and views with a truncation flag',
     Array.isArray(tables.json?.tables) && tables.json?.tables?.some(entry => entry.name === 't') && typeof tables.json?.truncated === 'boolean',
     JSON.stringify(tables.json?.tables)?.slice(0, 80))
 
-  const columns = await post('/sqlnotebook/columns', { workspaceId: 'ws-1', path: 'sample.db', table: 't' })
-  gate('A4', 'columns route returns declared types for one table (lazy schema tree)',
-    Array.isArray(columns.json?.columns) && columns.json.columns.length === 3, JSON.stringify(columns.json?.columns)?.slice(0, 80))
+  const columns = await post('/sqlnotebook/columns', { workspaceId: 'ws-1', notebook: 'n-e.sqlnb', table: 't' })
+  gate('A1', 'columns returns declared types for one table',
+    Array.isArray(columns.json?.columns) && columns.json.columns.length === 3 && columns.json.columns[0]?.type === 'INTEGER',
+    JSON.stringify(columns.json?.columns)?.slice(0, 80))
 
-  // Same hole as the ATTACH gate: the route's absence returned an error object, which this
-  // assertion counted as "refused". A table name that is not a plain identifier must be
-  // refused by the columns route itself, with its own code.
-  const quoteTable = await post('/sqlnotebook/columns', { workspaceId: 'ws-1', path: 'sample.db', table: 't"; DROP TABLE t;--' })
-  gate('A4', 'columns refuses a non-identifier table name with SQL_INVALID_TABLE',
-    quoteTable.json?.error?.code === 'SQL_INVALID_TABLE', `code=${quoteTable.json?.error?.code ?? '-'}`)
+  // The route's absence must not count as "refused": a name that cannot be a real table is refused
+  // by the columns route itself, with its own code.
+  const junkTable = await post('/sqlnotebook/columns', { workspaceId: 'ws-1', notebook: 'n-e.sqlnb', table: 'x'.repeat(2000) })
+  gate('A1', 'columns refuses a name that cannot be a table with SQL_INVALID_TABLE',
+    junkTable.json?.error?.code === 'SQL_INVALID_TABLE', `code=${junkTable.json?.error?.code ?? '-'}`)
+
+  // --- safety of refusals -------------------------------------------------------------
+  await writeFile(path.join(wsRoot, 'notes.md'), '# not a database')
+  const notDb = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-i.sqlnb', path: 'notes.md' })
+  gate('A1', 'open refuses a file that is not a database extension',
+    notDb.json?.error?.code === 'SQL_DATABASE_REQUIRED', `code=${notDb.json?.error?.code ?? '-'}`)
+
+  const rawRefusal = JSON.stringify(notDb.json)
+  gate('A1', 'no host absolute path reaches a refused response',
+    !/[a-zA-Z]:[\\/]/u.test(rawRefusal) && !rawRefusal.includes(wsRoot), rawRefusal.slice(0, 120))
+
+  const logs = (host.logs ?? []).join('\n')
+  gate('A1', 'no host absolute path reaches the log line either', !logs.includes(wsRoot), `${(host.logs ?? []).length} lines`)
+
+  // --- workspace teardown ------------------------------------------------------------
+  const released = await post('/sqlnotebook/release-workspace', { workspaceId: 'ws-1' })
+  gate('A1', 'release-workspace closes every remaining connection',
+    typeof released.json?.released === 'number' && released.json.released > 0,
+    `released=${JSON.stringify(released.json?.released)}`)
+
+  const afterRelease = await post('/sqlnotebook/tables', { workspaceId: 'ws-1', notebook: 'n-e.sqlnb' })
+  gate('A1', 'a released workspace answers SQL_NOT_CONNECTED rather than reusing a handle',
+    afterRelease.json?.error?.code === 'SQL_NOT_CONNECTED', `code=${afterRelease.json?.error?.code ?? '-'}`)
 }
 
 // Source-level canaries for milestones whose real assertions live in vitest specs added

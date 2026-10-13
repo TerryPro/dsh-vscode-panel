@@ -32,6 +32,22 @@ export interface ExecutableStatement {
   setReturnArrays(enabled: boolean): void
   iterate(...params: unknown[]): Iterable<readonly DriverValue[]> & { return?(value?: unknown): unknown }
   run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint }
+  /**
+   * The first row, or undefined.
+   *
+   * Not used by the cell loop — a cell always streams — but it is how the connection layer reads
+   * its own two facts (`sqlite_version()`, `journal_mode`) without inventing a second path to the
+   * driver.
+   */
+  get(...params: unknown[]): Record<string, DriverValue> | undefined
+  /**
+   * Every row, as objects keyed by column name.
+   *
+   * Not used by the cell loop either — a cell always streams so a huge scan cannot be pulled into
+   * memory at once — but the schema reads (`sqlite_master`, `pragma_table_info`) are bounded by a
+   * cap and small, so an object read is the honest shape there and needs no row-limit machinery.
+   */
+  all(...params: unknown[]): Record<string, DriverValue>[]
 }
 
 /** The driver's view of a connection, narrowed to what this loop uses. */

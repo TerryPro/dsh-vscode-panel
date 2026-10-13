@@ -16,12 +16,14 @@ import {
   type ConfigKey,
 } from './shared/config-protocol.ts'
 import { KERNEL_POST_PREFIX, KERNEL_STREAM_PATH } from './shared/notebook-protocol.ts'
+import { SQL_DEFAULT_MAX_ROWS, SQL_POST_PREFIX } from './shared/sql-protocol.ts'
 import { ConfigBackend } from './host/config-backend.ts'
 import { GitBackend } from './host/git-backend.ts'
 import { errorResponse, readJsonObject, sendJson, WorkbenchHttpError } from './host/http.ts'
 import { DEFAULT_KERNEL_LIMITS, KernelBackend } from './host/kernel-backend.ts'
 import { serveMermaidRuntime } from './host/mermaid-runtime.ts'
 import { isTrustedWorkbenchRequest } from './host/request-trust.ts'
+import { SqlBackend } from './host/sql-backend.ts'
 import { WorkspaceBackend } from './host/workspace-backend.ts'
 
 export const name = 'workbench-layout'
@@ -52,6 +54,7 @@ export interface Config {
   gitTimeoutMs: number
   gitMaxOutputBytes: number
   gitGraphPageSize: number
+  sqlMaxRows: number
   kernelStartTimeoutMs: number
   kernelRequestTimeoutMs: number
   kernelMaxPerWorkspace: number
@@ -101,6 +104,10 @@ export const Config: z<Partial<Config>, Config> = z.object({
   gitTimeoutMs: setting('gitTimeoutMs', 1000, 120_000, 30_000),
   gitMaxOutputBytes: setting('gitMaxOutputBytes', 64 * 1024, 32 * 1024 * 1024, 4 * 1024 * 1024),
   gitGraphPageSize: setting('gitGraphPageSize', 10, 500, GIT_GRAPH_PAGE_SIZE),
+  // The one SQL cap that is a setting: rows per result block. The rest (columns, value length,
+  // BLOB bytes, deadline) are protection values nobody has a reason to tune, so they stay
+  // constants in `SQL_LIMITS` rather than becoming five more fields on this page.
+  sqlMaxRows: setting('sqlMaxRows', 10, 100_000, SQL_DEFAULT_MAX_ROWS),
 
   // A cold Python kernel with a fat import graph takes seconds, not milliseconds.
   kernelStartTimeoutMs: setting('kernelStartTimeoutMs', 5_000, 180_000, defaults.startTimeoutMs),
@@ -170,6 +177,9 @@ export function apply(ctx: Context, config: Config): void {
     discoveryCacheMs: config.kernelDiscoveryCacheMs,
     probeTimeoutMs: config.kernelProbeTimeoutMs,
   })
+  // SQL notebook connections. Independent of the kernel backend by design (ADR 0002): it shares
+  // the cell view, not the Jupyter session or transport, so it never enters the kernel registry.
+  const sql = new SqlBackend(ctx, { maxRowLimit: config.sqlMaxRows })
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (req.method !== 'POST') throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '只允许 POST 请求。')
@@ -212,7 +222,7 @@ export function apply(ctx: Context, config: Config): void {
         }
         return
       }
-      const value = await dispatch(path, body, workspace, git, settings)
+      const value = await dispatch(path, body, workspace, git, settings, sql)
       sendJson(res, 200, value)
     } catch (error: unknown) {
       const response = errorResponse(error)
@@ -297,6 +307,9 @@ export function apply(ctx: Context, config: Config): void {
     'workbench-layout: mermaid runtime route',
   )
   ctx.effect(() => () => { void kernel.dispose() }, 'workbench-layout: kernel shutdown on dispose')
+  // No SQLite handle may outlive the effect that opened it: a leaked handle holds a file open and,
+  // under the default journal mode, its read transaction can block another writer.
+  ctx.effect(() => () => { sql.dispose() }, 'workbench-layout: sql connections closed on dispose')
   ctx.logger.info('workbench-layout: public-package workspace, Git, and kernel APIs registered')
 }
 
@@ -306,6 +319,7 @@ async function dispatch(
   workspace: WorkspaceBackend,
   git: GitBackend,
   settings: ConfigBackend,
+  sql: SqlBackend,
 ): Promise<unknown> {
   switch (path) {
     case CONFIG_READ_PATH:
@@ -388,6 +402,26 @@ async function dispatch(
       return git.discardAll(body.workspaceId)
     case `${WORKBENCH_API_PREFIX}/git/commit`:
       return git.commit(body.workspaceId, body.message)
+    // SQL notebook. These verbs are POST-only, so they ride the same prefix, origin fence and
+    // JSON bounds as files and Git rather than getting their own registration. Identity is the
+    // *notebook*, not the database: `path` below is the database, `notebook` is the .sqlnb file,
+    // and the connection belongs to the notebook (see src/host/sql-backend.ts).
+    case `${SQL_POST_PREFIX}/open`:
+      return sql.open(body.workspaceId, body.notebook, body.path, body.access, body.rowLimit)
+    case `${SQL_POST_PREFIX}/execute`:
+      return sql.execute(body.workspaceId, body.notebook, body.sql)
+    case `${SQL_POST_PREFIX}/close`:
+      return sql.close(body.workspaceId, body.notebook)
+    case `${SQL_POST_PREFIX}/tables`:
+      return sql.tables(body.workspaceId, body.notebook)
+    case `${SQL_POST_PREFIX}/columns`:
+      return sql.columns(body.workspaceId, body.notebook, body.table)
+    case `${SQL_POST_PREFIX}/abandon`:
+      return sql.abandon(body.workspaceId, body.notebook)
+    // Requirement: switching away from a workspace releases all of its connections rather than
+    // letting them hold files open until the grace timers happen to fire.
+    case `${SQL_POST_PREFIX}/release-workspace`:
+      return { released: sql.releaseWorkspace(body.workspaceId) }
     default:
       throw new WorkbenchHttpError(404, 'ENDPOINT_NOT_FOUND', '工作台接口不存在。')
   }

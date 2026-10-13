@@ -42,6 +42,7 @@ export const CONFIG_PRESENTATION: Record<ConfigKey, FieldPresentation> = {
   gitTimeoutMs: { group: 'git', unit: 'ms' },
   gitMaxOutputBytes: { group: 'git', unit: 'bytes' },
   gitGraphPageSize: { group: 'git' },
+  sqlMaxRows: { group: 'sql' },
   kernelStartTimeoutMs: { group: 'kernel-lifecycle', unit: 'ms' },
   kernelRequestTimeoutMs: { group: 'kernel-lifecycle', unit: 'ms' },
   kernelMaxPerWorkspace: { group: 'kernel-count' },
