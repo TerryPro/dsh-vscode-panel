@@ -118,4 +118,48 @@ describe('Workbench browser API', () => {
     }
     expect(JSON.parse(String((fetch.mock.calls[0]![1] as RequestInit).body))).toEqual({ workspaceId: 'ws-1' })
   })
+
+  it('addresses every SQL notebook request by its own sub-path, with the notebook as identity', async () => {
+    // Same shape of bug the kernel prefix once had: the Host dispatches these by exact
+    // sub-path, so a `postSql('')` would answer ENDPOINT_NOT_FOUND and every caller that
+    // mocks this facade would never notice. The second half of the assertion is the part
+    // ADR 0002 is about — a SQL notebook connection is not a kernel session.
+    const fetch = vi.fn((_input: string, _init?: RequestInit) => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    vi.stubGlobal('fetch', fetch)
+    const api = new WorkbenchApi()
+
+    await api.sqlOpen({ workspaceId: 'ws-1', notebook: 'query-1.sqlnb', path: 'demo.db', access: 'read-only' })
+    await api.sqlExecute('ws-1', 'query-1.sqlnb', 'SELECT 1')
+    await api.sqlTables('ws-1', 'query-1.sqlnb')
+    await api.sqlColumns('ws-1', 'query-1.sqlnb', 'city')
+    await api.sqlAbandon('ws-1', 'query-1.sqlnb')
+    await api.sqlClose('ws-1', 'query-1.sqlnb')
+    await api.sqlReleaseWorkspace('ws-1')
+
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      '/dsh-workbench-layout/sqlnotebook/open',
+      '/dsh-workbench-layout/sqlnotebook/execute',
+      '/dsh-workbench-layout/sqlnotebook/tables',
+      '/dsh-workbench-layout/sqlnotebook/columns',
+      '/dsh-workbench-layout/sqlnotebook/abandon',
+      '/dsh-workbench-layout/sqlnotebook/close',
+      '/dsh-workbench-layout/sqlnotebook/release-workspace',
+    ])
+    expect(JSON.parse(String((fetch.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      workspaceId: 'ws-1', notebook: 'query-1.sqlnb', path: 'demo.db', access: 'read-only',
+    })
+    expect(JSON.parse(String((fetch.mock.calls[1]![1] as RequestInit).body))).toEqual({
+      workspaceId: 'ws-1', notebook: 'query-1.sqlnb', sql: 'SELECT 1',
+    })
+    expect(JSON.parse(String((fetch.mock.calls[3]![1] as RequestInit).body))).toEqual({
+      workspaceId: 'ws-1', notebook: 'query-1.sqlnb', table: 'city',
+    })
+    for (const call of fetch.mock.calls) {
+      const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>
+      // A tier left out of an open request is the Host's default, not a field this page
+      // restates; a `rowLimit` absent is the configured default surviving untouched.
+      expect(body).not.toHaveProperty('kernelId')
+      expect(body).not.toHaveProperty('token')
+    }
+  })
 })

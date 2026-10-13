@@ -44,6 +44,15 @@ import type {
 } from '../../shared/notebook-protocol.ts'
 import { WORKBENCH_API_PREFIX } from '../../shared/contracts.ts'
 import { KERNEL_POST_PREFIX } from '../../shared/notebook-protocol.ts'
+import {
+  SQL_POST_PREFIX,
+  type SqlCloseResult,
+  type SqlColumnsResult,
+  type SqlAccess,
+  type SqlExecuteResult,
+  type SqlOpenResult,
+  type SqlTablesResult,
+} from '../../shared/sql-protocol.ts'
 
 export class WorkbenchApiError extends Error {
   constructor(readonly code: string, message: string) {
@@ -357,6 +366,65 @@ export class WorkbenchApi {
     return this.post('/config/update', { config })
   }
 
+  // --- SQL notebook -------------------------------------------------------------
+  //
+  // The identity these calls carry is the *notebook*, not the database: the Host owns one
+  // connection per open `.sqlnb`, keyed by that file, and the database appears only when a
+  // connection is created. Nothing here is a kernel id or token — SQL notebook connections
+  // never enter the kernel registry or the kernel event stream (ADR 0002).
+
+  /**
+   * Open or re-arm this notebook's connection to one database file.
+   *
+   * Re-opening the same notebook with the same file and tier is how a page that went away
+   * inside the Host's grace window gets its handle back — including the temporary tables
+   * that handle holds.
+   */
+  async sqlOpen(input: {
+    workspaceId: string
+    notebook: string
+    path: string
+    access?: SqlAccess
+    rowLimit?: number
+  }): Promise<SqlOpenResult> {
+    return this.postSql('/open', input)
+  }
+
+  /** Run one cell. The Host runs its statements in order and answers one block each. */
+  async sqlExecute(workspaceId: string, notebook: string, sql: string): Promise<SqlExecuteResult> {
+    return this.postSql('/execute', { workspaceId, notebook, sql })
+  }
+
+  /** Close the connection now, rolling back an open transaction on the way out. */
+  async sqlClose(workspaceId: string, notebook: string): Promise<SqlCloseResult> {
+    return this.postSql('/close', { workspaceId, notebook })
+  }
+
+  /**
+   * Let the Host keep this notebook's connection for its grace window instead of closing it.
+   *
+   * Used when the notebook leaves the screen but may come back within seconds, which is what
+   * makes a page reload keep the user's temporary tables.
+   */
+  async sqlAbandon(workspaceId: string, notebook: string): Promise<{ path: string; scheduled: boolean }> {
+    return this.postSql('/abandon', { workspaceId, notebook })
+  }
+
+  /** First schema level: tables and views, with the tree's own truncation flag. */
+  async sqlTables(workspaceId: string, notebook: string): Promise<SqlTablesResult> {
+    return this.postSql('/tables', { workspaceId, notebook })
+  }
+
+  /** Declared columns of one table or view, as the schema tree shows them. */
+  async sqlColumns(workspaceId: string, notebook: string, table: string): Promise<SqlColumnsResult> {
+    return this.postSql('/columns', { workspaceId, notebook, table })
+  }
+
+  /** Release every connection of a workspace the reader left. */
+  async sqlReleaseWorkspace(workspaceId: string): Promise<{ released: number }> {
+    return this.postSql('/release-workspace', { workspaceId })
+  }
+
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const response = await fetch(`${WORKBENCH_API_PREFIX}${path}`, {
       method: 'POST',
@@ -370,6 +438,17 @@ export class WorkbenchApi {
   /** One kernel JSON call; the path is relative to the kernel prefix. */
   private async postKernel<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const response = await fetch(`${KERNEL_POST_PREFIX}${path}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return readResponse<T>(response)
+  }
+
+  /** One SQL notebook JSON call; the path is relative to the SQL prefix. */
+  private async postSql<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    const response = await fetch(`${SQL_POST_PREFIX}${path}`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
