@@ -426,4 +426,49 @@ describe('SqlRuntime', () => {
     expect(fixture.api.sqlAbandon).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
     expect(fixture.runtime.state('tab-1').connection).toBeNull()
   })
+
+  it('moves a finished run with its cell when the reader changes rows', async () => {
+    // Ids name positions, so after `move 0 -> 2` the executed cell is row 2. Leaving its answer
+    // at `sqlnb-0` would paint the table under whichever neighbour slid into that row.
+    const fixture = createRuntime([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+      { kind: 'sql', source: 'SELECT 3' },
+    ])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    await settle(fixture, [block()])
+
+    fixture.runtime.moveCellRuns('tab-1', 0, 2)
+
+    const cells = fixture.runtime.state('tab-1').cells
+    expect(Object.keys(cells)).toEqual(['sqlnb-2'])
+    expect(cells['sqlnb-2']?.blocks).toHaveLength(1)
+  })
+
+  it('keeps a queued cell pointing at its own text across a move', async () => {
+    // The dangerous half of a reorder is not the screen but the wire: a cell waiting its turn
+    // is looked up by id when its turn comes, so an un-renamed queue would run whatever text
+    // landed in its old row.
+    const fixture = createRuntime([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    fixture.runtime.runCell('tab-1', 'sqlnb-1')
+
+    // The reader drags row 1 above row 0, and the file now reads [SELECT 2, SELECT 1].
+    fixture.runtime.moveCellRuns('tab-1', 1, 0)
+    fixture.drafts[0] = notebookDraft([
+      { kind: 'sql', source: 'SELECT 2' },
+      { kind: 'sql', source: 'SELECT 1' },
+    ])
+
+    // The request already on the wire was the first cell's, which is now row 1.
+    await settle(fixture, [block()])
+    expect(fixture.runtime.state('tab-1').cells['sqlnb-1']?.blocks).toHaveLength(1)
+    // And what goes next is the cell that was queued, by its own text rather than its old row.
+    expect(fixture.api.sqlExecute).toHaveBeenLastCalledWith('workspace-1', 'query-1.sqlnb', 'SELECT 2')
+  })
 })

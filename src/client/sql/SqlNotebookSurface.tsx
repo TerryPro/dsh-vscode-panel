@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useSyncExternalStore } from 'react'
 import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DirectoryListing } from '../../shared/contracts.ts'
@@ -25,6 +25,7 @@ import {
   IconClearOutputs16,
   IconDeleteCell16,
   IconEditCell16,
+  IconFold16,
   IconInterrupt16,
   IconMoveDown16,
   IconMoveUp16,
@@ -59,6 +60,9 @@ export interface SqlNotebookLabels {
   deleteCell: string
   moveUp: string
   moveDown: string
+  /** Fold the row to its header strip, and back. View state, never in the file. */
+  collapseCell: string
+  expandCell: string
   changeKind: string
   sqlCell: string
   markdownCell: string
@@ -67,6 +71,8 @@ export interface SqlNotebookLabels {
   degradedCell: string
   /** Shown above the cells when at least one row is degraded, or the file is not writable. */
   degradedNotice: string
+  /** Said on a folded row that is hiding results, so the fold does not read as losing them. */
+  foldedBlocks: (count: number) => string
   blankNotebook: string
   emptyNotebook: string
   invalidJson: string
@@ -165,6 +171,10 @@ export function SqlNotebookSurface({
   const [news, setNews] = useState<string | null>(null)
   /** Which markdown cells are showing their rendered form. Never in the file. */
   const [rendered, setRendered] = useState<Record<string, boolean>>({})
+  /** Which rows are folded to their header strip. View state, like `rendered`. */
+  const [folded, setFolded] = useState<Record<string, boolean>>({})
+  const [dropTarget, setDropTarget] = useState<{ cellId: string; after: boolean } | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const scanWanted = useRef(false)
 
   useEffect(() => {
@@ -221,15 +231,29 @@ export function SqlNotebookSurface({
    * the locale dictionary rather than the error's own message, which is written for whoever
    * reads the throw site.
    */
-  const applyEdit = useCallback((edit: SqlNotebookEdit): void => {
+  const applyEdit = useCallback((edit: SqlNotebookEdit): boolean => {
     try {
       const next = applySqlNotebookEdit(draft, edit)
       setRefusal(null)
       onEdit(next)
+      return true
     } catch (error) {
       setRefusal(error instanceof SqlNotebookEditError ? refusalMessage(error.code, labels) : labels.invalidJson)
+      return false
     }
   }, [draft, labels, onEdit])
+
+  /**
+   * Move a row, and move what the screen shows for it.
+   *
+   * The two halves have to happen together or not at all: cell ids name positions, so a move
+   * that renamed the rows without renaming the runs would leave a finished query's table under
+   * the neighbour that slid into its slot, and a queued cell would run the wrong text.
+   */
+  const moveCell = useCallback((from: number, to: number): void => {
+    if (!applyEdit({ type: 'move', from, to })) return
+    runtime.moveCellRuns(tabId, from, to)
+  }, [applyEdit, runtime, tabId])
 
   const run = useCallback((cellId: string): void => {
     const cell = document.cells.find(candidate => candidate.id === cellId)
@@ -297,13 +321,97 @@ export function SqlNotebookSurface({
     }
   }, [applyEdit, document.cells, run])
 
+  /**
+   * The gap between rows that a pointer at `clientY` is aiming at.
+   *
+   * Measured against each row's own box rather than counting rows by index, because the rows
+   * differ in height: a folded cell is not the size of one holding a thousand-row result. The
+   * shape is the notebook surface's, which is what makes a drop land where the reader aimed.
+   */
+  const gapAt = (clientY: number): { cellId: string; after: boolean } | null => {
+    const rows = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-cell-id]') ?? [])]
+    for (const row of rows) {
+      const id = row.dataset.cellId
+      if (id === undefined) continue
+      const box = row.getBoundingClientRect()
+      if (clientY < box.top + box.height / 2) return { cellId: id, after: false }
+    }
+    const lastId = rows.at(-1)?.dataset.cellId
+    // Overshooting the final row still means "last": a reorder that cannot reach the end of a
+    // long notebook is one the reader stops trusting.
+    return lastId === undefined ? null : { cellId: lastId, after: true }
+  }
+
+  const onCellDragStart = (cellId: string, event: ReactDragEvent<HTMLDivElement>): void => {
+    // `draggable` already says no in the attribute, which is the half the reader sees. This
+    // guard covers what the attribute cannot: the file turning unmodifiable mid-drag, when an
+    // external change lands while the pointer is already down.
+    if (!canStructure) {
+      event.preventDefault()
+      return
+    }
+    event.dataTransfer.effectAllowed = 'move'
+    // A MIME of our own rather than `text/plain`, which is what a file dragged from the tree,
+    // a URL and a text selection all arrive under: accepting those would reorder on a stray
+    // gesture. A type apart from the notebook's is also what keeps a Jupyter cell from ever
+    // being dropped into a SQL notebook's row list.
+    event.dataTransfer.setData(SQLNB_CELL_DRAG_TYPE, cellId)
+  }
+
+  const onCellDragOver = (event: ReactDragEvent<HTMLDivElement>): void => {
+    if (!canStructure || !carriesOurCell(event.dataTransfer)) return
+    // The coordinate comes off the native event: a `clientY` of `undefined` makes every
+    // comparison in `gapAt` false, which would aim every drop at the end of the notebook with
+    // nothing in the type system to see it — the synthetic event claims `clientY` is a number.
+    const gap = gapAt(event.nativeEvent.clientY)
+    if (gap === null) return
+    // Without this the browser decides the surface does not accept the drop and never fires
+    // `drop` at all, so the gesture would look broken rather than refused.
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    // Identity-preserving while the pointer stays in one gap, because `dragover` fires
+    // continuously and a new object per pixel would re-render the notebook as it drags.
+    setDropTarget(current => (
+      current !== null && current.cellId === gap.cellId && current.after === gap.after ? current : gap
+    ))
+  }
+
+  const onCellDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
+    // Guard before `preventDefault`: taking the event is what declares the drop consumed, so
+    // consuming one we then refuse would silently kill the target's own handling.
+    if (!canStructure || !carriesOurCell(event.dataTransfer)) return
+    event.preventDefault()
+    const movedId = event.dataTransfer.getData(SQLNB_CELL_DRAG_TYPE)
+    const gap = dropTarget
+    setDropTarget(null)
+    if (movedId === '' || gap === null) return
+    const from = document.cells.findIndex(cell => cell.id === movedId)
+    const target = document.cells.findIndex(cell => cell.id === gap.cellId)
+    if (from < 0 || target < 0) return
+    // `move` takes the position the cell *ends up* at, so the gap has to be read after the row
+    // was lifted out. Aiming at either gap beside the cell itself collapses to `from`, which is
+    // a drag that jittered on the spot: writing the same order back would mark a saved notebook
+    // dirty for a gesture that changed nothing.
+    const gapIndex = gap.after ? target + 1 : target
+    const finalIndex = gapIndex > from ? gapIndex - 1 : gapIndex
+    if (finalIndex === from) return
+    moveCell(from, finalIndex)
+  }
+
+  const onCellDragEnd = (): void => {
+    // Escape, or releasing the pointer outside the window, fires `dragend` on the handle and
+    // nothing else. Without this the drop line stays painted, pointing at a move that never
+    // happened.
+    setDropTarget(null)
+  }
+
   const appendIndex = document.cells.length - 1
   const documentWritable = !document.readOnly
   const canStructure = editable && documentWritable
   const canConnect = runState !== null && !runState.connecting
 
   return (
-    <div className={css.root} onKeyDown={onKeyDown}>
+    <div className={css.root} onKeyDown={onKeyDown} ref={rootRef}>
       <div className={css.toolbar}>
         <button
           type="button"
@@ -461,6 +569,15 @@ export function SqlNotebookSurface({
             rendered={rendered[cell.id] === true}
             canRun={connection !== null}
             onEdit={applyEdit}
+            onMove={moveCell}
+            folded={folded[cell.id] === true}
+            onFoldChange={(show) => { setFolded(previous => ({ ...previous, [cell.id]: !show })) }}
+            onDragStart={event => { onCellDragStart(cell.id, event) }}
+            onDragOver={onCellDragOver}
+            onDrop={onCellDrop}
+            onDragEnd={onCellDragEnd}
+            dropBefore={dropTarget !== null && dropTarget.cellId === cell.id && !dropTarget.after}
+            dropAfter={dropTarget !== null && dropTarget.cellId === cell.id && dropTarget.after}
             onRun={() => { run(cell.id) }}
             onCancel={() => { runtime.cancel(tabId) }}
             onClear={() => { runtime.clearOutputs(tabId, cell.id) }}
@@ -503,8 +620,17 @@ function SqlNotebookCell({
   canStructure,
   run,
   rendered,
+  folded,
   canRun,
+  dropBefore,
+  dropAfter,
   onEdit,
+  onMove,
+  onFoldChange,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onRun,
   onCancel,
   onClear,
@@ -522,8 +648,17 @@ function SqlNotebookCell({
   canStructure: boolean
   run: SqlCellRun | null
   rendered: boolean
+  folded: boolean
   canRun: boolean
+  dropBefore: boolean
+  dropAfter: boolean
   onEdit: (edit: SqlNotebookEdit) => void
+  onMove: (from: number, to: number) => void
+  onFoldChange: (show: boolean) => void
+  onDragStart: (event: ReactDragEvent<HTMLDivElement>) => void
+  onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void
+  onDrop: (event: ReactDragEvent<HTMLDivElement>) => void
+  onDragEnd: () => void
   onRun: () => void
   onCancel: () => void
   onClear: () => void
@@ -541,8 +676,40 @@ function SqlNotebookCell({
   const elapsed = run?.elapsedMs ?? null
   const failure = run?.failure ?? null
   return (
-    <div className={css.cell} data-degraded={cell.degraded || undefined} data-status={run?.status} data-cell-id={cell.id}>
-      <div className={css.cellHeader}>
+    <div
+      className={css.cell}
+      data-degraded={cell.degraded || undefined}
+      data-status={run?.status}
+      data-cell-id={cell.id}
+      /*
+        The row is a drop *target*, never a drag source: `draggable` belongs on the header strip
+        alone, because set on the whole row it would turn a text selection inside a cell's editor
+        into a drag of the cell. These two fire only while a drag is already in flight, so they
+        cost the reader nothing ordinary.
+      */
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      // The drop line is painted by a CSS pseudo-element, so aiming at a gap costs an attribute
+      // rather than a layout: `.cell` must stay free of `transform`/`filter`/`will-change`, which
+      // would make the row the containing block for CodeMirror's popup and clip it at the edge.
+      data-drop-before={dropBefore || undefined}
+      data-drop-after={dropAfter || undefined}
+    >
+      <div
+        className={css.cellHeader}
+        /*
+          The header strip is the handle, exactly as the workbench's own tabs are: a strip that
+          holds buttons and still drags is the shape the reader already knows. A row this build
+          will not rewrite is not draggable at all, so the grab cursor never promises a move the
+          file refuses.
+        */
+        draggable={canStructure}
+        // A stable hook for "this strip drags the cell around it": the class name is a CSS-module
+        // hash, so neither a style override nor a test could otherwise name the handle.
+        data-cell-handle=""
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      >
         <span className={css.cellPrompt} title={labels.promptNumber}>
           {`In[${run?.executionCount ?? (running ? '…' : '')}]`}
         </span>
@@ -551,6 +718,10 @@ function SqlNotebookCell({
             <span className={css.visuallyHidden}>{labels.changeKind}</span>
             <select
               aria-label={labels.changeKind}
+              // A `<select>` inside a draggable ancestor is the one control HTML5 drags instead
+              // of opening: declaring it not draggable is the documented fix, and a cell is
+              // already movable by its strip.
+              draggable={false}
               value={cell.kind}
               onChange={event => {
                 const kind = asCellKind(event.target.value)
@@ -566,12 +737,34 @@ function SqlNotebookCell({
           <span className={css.cellKind}>{kindLabel(cell.kind, labels)}</span>
         )}
         {cell.degraded && <span className={css.cellBadge}>{labels.degradedCell}</span>}
+        {/*
+          A folded row says what it is hiding: a cell whose thousand-row table vanished because
+          the reader clicked a chevron is a different fact from one whose results disappeared, and
+          the header is the only place left to state it.
+        */}
+        {folded && blocks.length > 0 && <span className={css.cellBadge}>{labels.foldedBlocks(blocks.length)}</span>}
         {run !== null && run.status !== 'done' && (
           <span className={css.cellBadge}>{statusLabel(run.status, labels)}</span>
         )}
         {elapsed !== null && (
           <span className={css.cellElapsed}>{labels.elapsed(elapsed)}</span>
         )}
+        {/*
+          Fold sits in the always-visible header strip, not the hover action row: a folded cell
+          shows no body, so if its expand button only appeared on hover the reader would have to
+          hover an empty row to find the way back. Folding is view state, never gated on whether
+          the file accepts edits.
+        */}
+        <button
+          type="button"
+          className={css.cellAction}
+          aria-label={folded ? labels.expandCell : labels.collapseCell}
+          title={folded ? labels.expandCell : labels.collapseCell}
+          aria-expanded={!folded}
+          onClick={() => { onFoldChange(folded) }}
+        >
+          <IconFold16 expanded={!folded} />
+        </button>
         <span className={css.cellActions}>
           <button
             type="button"
@@ -610,10 +803,10 @@ function SqlNotebookCell({
           <button type="button" className={css.cellAction} aria-label={labels.insertMarkdownBelow} title={labels.insertMarkdownBelow} disabled={!canStructure} onClick={() => { onEdit({ type: 'insertAfter', index, kind: 'markdown' }) }}>
             <IconAddMarkdown16 />
           </button>
-          <button type="button" className={css.cellAction} aria-label={labels.moveUp} title={labels.moveUp} disabled={!canStructure || first} onClick={() => { onEdit({ type: 'move', from: index, to: index - 1 }) }}>
+          <button type="button" className={css.cellAction} aria-label={labels.moveUp} title={labels.moveUp} disabled={!canStructure || first} onClick={() => { onMove(index, index - 1) }}>
             <IconMoveUp16 />
           </button>
-          <button type="button" className={css.cellAction} aria-label={labels.moveDown} title={labels.moveDown} disabled={!canStructure || last} onClick={() => { onEdit({ type: 'move', from: index, to: index + 1 }) }}>
+          <button type="button" className={css.cellAction} aria-label={labels.moveDown} title={labels.moveDown} disabled={!canStructure || last} onClick={() => { onMove(index, index + 1) }}>
             <IconMoveDown16 />
           </button>
           <button type="button" className={css.cellAction} aria-label={labels.deleteCell} title={labels.deleteCell} disabled={!canStructure} onClick={() => { onEdit({ type: 'remove', index }) }}>
@@ -621,40 +814,70 @@ function SqlNotebookCell({
           </button>
         </span>
       </div>
-      <div className={css.cellBody}>
-        {editableCell ? (
-          showEditor ? (
-            <CodeEditor
-              key={`${cell.id}:${cell.kind}:${grammarPath(path, cell.kind)}`}
-              value={cell.source}
-              ariaLabel={`${cell.id} ${cell.kind}`}
-              path={grammarPath(path, cell.kind)}
-              wrap
-              cell
-              onChange={source => { onEdit({ type: 'source', index, source }) }}
-            />
-          ) : (
-            <div className={css.renderedMarkdown} onDoubleClick={() => { onRenderChange(false) }} title={labels.editMarkdown}>
-              <MarkdownText text={cell.source} labels={markdownLabels} />
-            </div>
-          )
-        ) : (
-          <pre className={css.cellText}>{cell.source}</pre>
-        )}
-      </div>
-      {blocks.map((block, blockIndex) => (
-        <SqlResultBlockView key={`${cell.id}-block-${blockIndex}`} block={block} labels={resultLabels} />
-      ))}
       {/*
-        A refusal the cell itself has nowhere to show. A failed statement is already said by
-        its own block, in the place the result would have been, and repeating it under the
-        table would be the same line twice in two different tones.
+        Folding renders the header and nothing else, rather than hiding the body with CSS: a
+        folded cell that kept its CodeEditor mounted would keep a live editor and a caret that
+        nobody can see, and a reader who typed into it could not tell what they were changing.
+        The results fold with the body — they are the tall part, and a row that keeps a
+        thousand-row table open is not shorter.
       */}
-      {failure !== null && blocks.length === 0 && (
-        <div className={css.noticeError} role="alert">{refusalText(failure, labels)}</div>
+      {!folded && (
+        <>
+          <div className={css.cellBody}>
+            {editableCell ? (
+              showEditor ? (
+                <CodeEditor
+                  key={`${cell.id}:${cell.kind}:${grammarPath(path, cell.kind)}`}
+                  value={cell.source}
+                  ariaLabel={`${cell.id} ${cell.kind}`}
+                  path={grammarPath(path, cell.kind)}
+                  wrap
+                  cell
+                  onChange={source => { onEdit({ type: 'source', index, source }) }}
+                />
+              ) : (
+                <div className={css.renderedMarkdown} onDoubleClick={() => { onRenderChange(false) }} title={labels.editMarkdown}>
+                  <MarkdownText text={cell.source} labels={markdownLabels} />
+                </div>
+              )
+            ) : (
+              <pre className={css.cellText}>{cell.source}</pre>
+            )}
+          </div>
+          {blocks.map((block, blockIndex) => (
+            <SqlResultBlockView key={`${cell.id}-block-${blockIndex}`} block={block} labels={resultLabels} />
+          ))}
+          {/*
+            A refusal the cell itself has nowhere to show. A failed statement is already said by
+            its own block, in the place the result would have been, and repeating it under the
+            table would be the same line twice in two different tones.
+          */}
+          {failure !== null && blocks.length === 0 && (
+            <div className={css.noticeError} role="alert">{refusalText(failure, labels)}</div>
+          )}
+        </>
       )}
     </div>
   )
+}
+
+/**
+ * The `DataTransfer` type one of this notebook's cells travels under.
+ *
+ * Deliberately not the Jupyter notebook's type: two cell lists that share a payload type would
+ * accept each other's cells, and a code cell dropped into a `.sqlnb` has no meaning to hand back.
+ */
+const SQLNB_CELL_DRAG_TYPE = 'application/x-dsh-sqlnb-cell'
+
+/**
+ * Whether this drag carries one of our cells.
+ *
+ * `types` only, never `getData`: during a `dragover` the browser keeps payload values unreadable
+ * so a page cannot sniff what is about to be dropped. Reading the value there always sees an
+ * empty string, and the guard would silently refuse every legitimate reorder.
+ */
+function carriesOurCell(dataTransfer: DataTransfer): boolean {
+  return [...dataTransfer.types].includes(SQLNB_CELL_DRAG_TYPE)
 }
 
 /**

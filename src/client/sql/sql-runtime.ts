@@ -123,6 +123,27 @@ function emptyRun(status: SqlCellStatus): SqlCellRun {
   return { status, executionCount: null, elapsedMs: null, blocks: [], failure: null }
 }
 
+/**
+ * Where a row lands after one `move` edit, whose `to` is the position the cell *ends up* at.
+ *
+ * Same splice the document layer performs: lift the row out, then insert at `to`. Positions
+ * above the lifted row keep their number, positions below lose one, and everything at or after
+ * the insertion point gains one back.
+ */
+function indexAfterMove(index: number, from: number, to: number): number {
+  if (index === from) return to
+  const shifted = index > from ? index - 1 : index
+  return shifted >= to ? shifted + 1 : shifted
+}
+
+/** The row a cell id names, or null for an id this derivation never produces. */
+function cellIndexInId(id: string): number | null {
+  if (!id.startsWith('sqlnb-')) return null
+  const rest = id.slice('sqlnb-'.length)
+  const index = Number(rest)
+  return Number.isInteger(index) && index >= 0 && String(index) === rest ? index : null
+}
+
 /** A run refused before a request: the code says which gate, the panel says it in words. */
 function refusedLocally(code: string): SqlCellRun {
   return { status: 'error', executionCount: null, elapsedMs: null, blocks: [], failure: { code, message: '' } }
@@ -333,6 +354,42 @@ export class SqlRuntime {
   }
 
   /**
+   * Follow the runs this notebook is showing through a cell that changed row.
+   *
+   * Ids come from position (`sqlnb-<index>`), so a move renames every cell it shifts. Without
+   * this, the result of a query that finished would be painted under the neighbour that slid
+   * into its row, and — worse — a cell still queued would go and run whatever text now sits
+   * at its old position. Re-keying the ids by the same splice the document applied is what
+   * keeps "this cell's answer" attached to the cell rather than to the row number.
+   */
+  moveCellRuns(tabId: string, from: number, to: number): void {
+    const tab = this.tabs.get(tabId)
+    if (tab === undefined || from === to) return
+    const remap = (id: string): string | null => {
+      const index = cellIndexInId(id)
+      if (index === null) return null
+      return `sqlnb-${indexAfterMove(index, from, to)}`
+    }
+    const mappedIds = (ids: string[]): string[] => ids.map(id => remap(id) ?? id)
+    tab.queue = mappedIds(tab.queue)
+    tab.stretch = mappedIds(tab.stretch)
+    if (tab.inflight !== null) tab.inflight = remap(tab.inflight) ?? tab.inflight
+    if (tab.stoppedAt !== null) tab.stoppedAt = remap(tab.stoppedAt) ?? tab.stoppedAt
+    tab.store.update(state => {
+      const next: Record<string, SqlCellRun> = {}
+      for (const [id, run] of Object.entries(state.cells)) {
+        // Two keys landing on one id cannot happen for a real move, but a run that would be
+        // overwritten is dropped rather than silently swapped: showing another cell's answer
+        // is the failure this method exists to prevent.
+        const target = remap(id) ?? id
+        if (next[target] !== undefined) continue
+        next[target] = run
+      }
+      state.cells = next
+    })
+  }
+
+  /**
    * Stop showing the running cell and start nothing further.
    *
    * The outstanding request is left alone: this runtime has no way to interrupt a statement
@@ -477,21 +534,21 @@ export class SqlRuntime {
     try {
       result = await this.api.sqlExecute(tab.workspaceId, tab.notebook, source)
     } catch (error: unknown) {
-      this.settle(tab, cellId, run => {
+      this.settleCurrentRun(tab, run => {
         const failure = failureOf(error)
         run.status = 'error'
         run.failure = failure
       })
+      this.afterCommit(tab)
       tab.inflight = null
-      this.afterCommit(tab, cellId)
       this.notifyIdle(tab)
       void this.drain(tabId)
       return
     }
 
-    // A cancelled or disconnected tab has no place to put this answer. The request was
-    // allowed to finish on the Host; only its result is dropped, which is the honest half.
-    this.settle(tab, cellId, run => {
+    // A cancelled or disconnected tab has no place to put this answer. The request was allowed
+    // to finish on the Host; only its result is dropped, which is the honest half.
+    this.settleCurrentRun(tab, run => {
       const failing = result.blocks.find(block => block.error !== undefined)?.error
       run.blocks = result.blocks
       run.elapsedMs = result.elapsedMs
@@ -500,7 +557,7 @@ export class SqlRuntime {
       run.failure = failing === undefined ? null : { code: failing.code, message: failing.message }
     })
 
-    this.afterCommit(tab, cellId)
+    this.afterCommit(tab)
     tab.inflight = null
     this.notifyIdle(tab)
     void this.drain(tabId)
@@ -512,8 +569,10 @@ export class SqlRuntime {
    * Called on both ways a run can end — an answer, or a refusal at the request level — because
    * the stretch has to stop at whichever cell failed, whichever way it failed.
    */
-  private afterCommit(tab: TabRuntime, cellId: string): void {
+  private afterCommit(tab: TabRuntime): void {
     if (!tab.stretchActive) return
+    const cellId = tab.inflight
+    if (cellId === null) return
     const status = tab.store.getSnapshot().cells[cellId]?.status
     if (status === 'cancelled') {
       tab.stretchActive = false
@@ -535,13 +594,16 @@ export class SqlRuntime {
   /**
    * Write a finished run back, unless nothing is waiting for this answer.
    *
-   * Two things clear the way back: the tab stopped owning the connection (a disconnect), or
-   * the reader cancelled the cell. A cancelled cell keeps its `cancelled` state and loses the
-   * rows that arrived after — the request was allowed to finish on the Host precisely because
-   * its result is no longer wanted.
+   * The cell is taken from `tab.inflight` rather than from the id the request was dispatched
+   * under, because a reorder renames it: the reader may have dragged the row elsewhere while
+   * the query ran, and the answer belongs to the cell, not to the row number it happened to
+   * occupy at dispatch. Two things still clear the way back — the tab stopped owning the
+   * connection (`dropWork` nulls the id), or the reader cancelled, which leaves the run marked
+   * `cancelled` and this write steps around it.
    */
-  private settle(tab: TabRuntime, cellId: string, apply: (run: SqlCellRun) => void): void {
-    if (tab.inflight !== cellId) return
+  private settleCurrentRun(tab: TabRuntime, apply: (run: SqlCellRun) => void): void {
+    const cellId = tab.inflight
+    if (cellId === null) return
     tab.store.update(state => {
       const run = state.cells[cellId]
       if (run === undefined || run.status !== 'running') return

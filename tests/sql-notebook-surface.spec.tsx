@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { zh } from '../src/client/core/locales.ts'
@@ -65,12 +66,15 @@ const labels: SqlNotebookLabels = {
   deleteCell: zh['sqlnotebook.deleteCell'],
   moveUp: zh['sqlnotebook.moveUp'],
   moveDown: zh['sqlnotebook.moveDown'],
+  collapseCell: zh['sqlnotebook.collapseCell'],
+  expandCell: zh['sqlnotebook.expandCell'],
   changeKind: zh['sqlnotebook.changeKind'],
   sqlCell: zh['sqlnotebook.sqlCell'],
   markdownCell: zh['sqlnotebook.markdownCell'],
   rawCell: zh['sqlnotebook.rawCell'],
   degradedCell: zh['sqlnotebook.degradedCell'],
   degradedNotice: zh['sqlnotebook.degradedNotice'],
+  foldedBlocks: count => zh['sqlnotebook.foldedBlocks'].replace('{count}', String(count)),
   blankNotebook: zh['sqlnotebook.blankNotebook'],
   emptyNotebook: zh['sqlnotebook.emptyNotebook'],
   invalidJson: zh['sqlnotebook.invalidJson'],
@@ -161,6 +165,9 @@ function open(draft: string, options: {
 } = {}): Harness {
   const onEdit = vi.fn()
   const onSave = vi.fn()
+  // The draft the surface and the runtime both read: an edit writes it before it repaints, so a
+  // queued cell sees the text that is in its cell when its turn comes.
+  const box = { current: draft }
   const api = {
     sqlOpen: vi.fn(() => Promise.resolve({
       path: 'demo.db', access: 'read-only' as const, sqliteVersion: '3.46.0', walSidecarExpected: false, rowLimit: 1000,
@@ -174,27 +181,38 @@ function open(draft: string, options: {
     sqlClose: vi.fn(() => Promise.resolve({ path: 'demo.db', closed: true, rolledBack: options.rolledBack ?? false })),
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
   }
-  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => draft })
+  const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => box.current })
   const root: DirectoryListing = { path: '', entries: options.entries ?? [{ name: 'demo.db', path: 'demo.db', kind: 'file' }], truncated: false }
   const listDirectory = vi.fn((path: string) => Promise.resolve(path === '' ? root : { path, entries: [], truncated: false }))
-  const view = render(
-    <SqlNotebookSurface
-      tabId="file:query.sqlnb"
-      workspaceId="workspace-1"
-      path="query.sqlnb"
-      draft={draft}
-      editable
-      dirty={false}
-      saving={false}
-      runtime={runtime}
-      listDirectory={listDirectory as never}
-      onEdit={onEdit}
-      onSave={onSave}
-      labels={labels}
-      resultLabels={resultLabels}
-      markdownLabels={markdownLabels}
-    />,
-  )
+  /**
+   * The draft held in state, the way the file tab holds it.
+   *
+   * A fixed prop would let a reorder test assert on the text the surface wrote while the screen
+   * it claims to show never moved — and would leave the runtime reading a draft the reader has
+   * already rearranged, which is the one case the re-keying below exists for.
+   */
+  function SurfaceHost() {
+    const [text, setText] = useState(draft)
+    return (
+      <SqlNotebookSurface
+        tabId="file:query.sqlnb"
+        workspaceId="workspace-1"
+        path="query.sqlnb"
+        draft={text}
+        editable
+        dirty={false}
+        saving={false}
+        runtime={runtime}
+        listDirectory={listDirectory as never}
+        onEdit={next => { box.current = next; onEdit(next); setText(next) }}
+        onSave={onSave}
+        labels={labels}
+        resultLabels={resultLabels}
+        markdownLabels={markdownLabels}
+      />
+    )
+  }
+  const view = render(<SurfaceHost />)
   async function connect(): Promise<void> {
     // The picker lists the workspace, so the row a reader picks is a path the scan found.
     const select = view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
@@ -529,5 +547,237 @@ describe('SqlNotebookSurface 连接与执行', () => {
     await Promise.resolve()
     await waitFor(() => { expect(harness.view.queryByText('In[1]')).toBeNull() })
     expect(harness.view.queryByText('Tokyo')).toBeNull()
+  })
+})
+
+/** A `DOMRect` good enough for the drag geometry this file needs (top and height only). */
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left, top, width, height,
+    right: left + width, bottom: top + height,
+    x: left, y: top, toJSON: () => ({}),
+  } as DOMRect
+}
+
+/**
+ * Stack the rows one per 100px so a `clientY` says which half of which row it landed in:
+ * row 0 occupies 0-100, row 1 100-200, row 2 200-300.
+ *
+ * jsdom gives every element a zero-sized box, so without this every row's midpoint is 0 and
+ * every drop aims at the first row — a test that would pass the wrong order.
+ */
+function stubRowRects(container: HTMLElement): void {
+  const rows = [...container.querySelectorAll('[data-cell-id]')]
+  expect(rows.length).toBeGreaterThan(0)
+  rows.forEach((row, index) => { row.getBoundingClientRect = () => rect(0, index * 100, 400, 100) })
+}
+
+function rowOf(container: HTMLElement, cellId: string): HTMLElement {
+  const row = container.querySelector<HTMLElement>(`[data-cell-id="${cellId}"]`)
+  if (row === null) throw new Error(`no row for ${cellId}`)
+  return row
+}
+
+/** The header strip of one row, which is where a drag of that cell starts. */
+function handleOf(container: HTMLElement, cellId: string): HTMLElement {
+  const handle = container.querySelector<HTMLElement>(`[data-cell-id="${cellId}"] [data-cell-handle]`)
+  if (handle === null) throw new Error(`no drag handle for ${cellId}`)
+  return handle
+}
+
+/**
+ * A `DataTransfer` stand-in that records what was stored rather than knowing the payload.
+ *
+ * One object belongs to one gesture: the cell id only exists after a `dragStart` put it there,
+ * so a `drop` that never began on the handle has nothing to move. A pre-filled stub would pass
+ * even if the handle did nothing, which is the regression this must catch. `types` is a live
+ * view because that is all a `dragover` may read — the browser locks payload values mid-drag.
+ */
+function fakeTransfer(): {
+  types: string[]
+  getData: (requested: string) => string
+  setData: (requested: string, value: string) => void
+  dropEffect: string
+  effectAllowed: string
+} {
+  const carried = new Map<string, string>()
+  return {
+    get types(): string[] { return [...carried.keys()] },
+    getData: (requested: string) => carried.get(requested) ?? '',
+    setData: (requested: string, value: string) => { carried.set(requested, value) },
+    dropEffect: '',
+    effectAllowed: '',
+  }
+}
+
+/**
+ * Fire a drag event that actually carries `clientY`.
+ *
+ * `fireEvent.dragOver(el, { clientY })` drops the coordinate here: jsdom has no constructible
+ * `DragEvent`, so testing-library builds a plain event and the init key dies on the setter-less
+ * prototype getter. The name passed to `dispatchEvent` is the native lowercase one — React
+ * listens for `dragover`, and a camel-cased type silently fires nothing.
+ */
+function fireDrag(
+  el: Element,
+  type: 'dragStart' | 'dragOver' | 'drop' | 'dragEnd',
+  transfer: ReturnType<typeof fakeTransfer>,
+  clientY?: number,
+): Event {
+  const event = new Event(type.toLowerCase(), { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'dataTransfer', { value: transfer })
+  if (clientY !== undefined) Object.defineProperty(event, 'clientY', { value: clientY })
+  act(() => { el.dispatchEvent(event) })
+  return event
+}
+
+/** Which rows currently carry a drop line, as `id:before|after`. */
+function dropLines(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('[data-drop-before], [data-drop-after]')]
+    .map(node => `${node.getAttribute('data-cell-id')}:${node.getAttribute('data-drop-before') === 'true' ? 'before' : 'after'}`)
+}
+
+describe('SqlNotebookSurface 拖拽与折叠', () => {
+  it('drags a row below another one and writes the drop position back as the file order', () => {
+    const { view, onEdit } = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+      { kind: 'sql', source: 'SELECT 3' },
+    ]))
+    stubRowRects(view.container)
+    const transfer = fakeTransfer()
+    fireDrag(handleOf(view.container, 'sqlnb-0'), 'dragStart', transfer)
+    const third = rowOf(view.container, 'sqlnb-2')
+    // The reader has to see *where* the row will land, not only that a drag is happening: a
+    // reorder that drops blind is how a notebook gets quietly mangled.
+    expect(dropLines(view.container)).toHaveLength(0)
+    fireDrag(third, 'dragOver', transfer, 260)
+    expect(dropLines(view.container)).toEqual(['sqlnb-2:after'])
+    fireDrag(third, 'drop', transfer)
+
+    const written = onEdit.mock.calls[0]?.[0] as string
+    expect(parseSqlNotebook(written).cells.map(cell => cell.source)).toEqual(['SELECT 2', 'SELECT 3', 'SELECT 1'])
+    expect(dropLines(view.container)).toHaveLength(0)
+  })
+
+  it('lifts a row to the top when the pointer aims at the first row’s upper half', () => {
+    const { view, onEdit } = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+      { kind: 'sql', source: 'SELECT 3' },
+    ]))
+    stubRowRects(view.container)
+    const transfer = fakeTransfer()
+    fireDrag(handleOf(view.container, 'sqlnb-2'), 'dragStart', transfer)
+    const first = rowOf(view.container, 'sqlnb-0')
+    fireDrag(first, 'dragOver', transfer, 10)
+    fireDrag(first, 'drop', transfer)
+
+    const written = onEdit.mock.calls[0]?.[0] as string
+    expect(parseSqlNotebook(written).cells.map(cell => cell.source)).toEqual(['SELECT 3', 'SELECT 1', 'SELECT 2'])
+  })
+
+  it('writes nothing for a drag that lands beside the row it started on', () => {
+    const { view, onEdit } = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    stubRowRects(view.container)
+    const transfer = fakeTransfer()
+    const handle = handleOf(view.container, 'sqlnb-0')
+    fireDrag(handle, 'dragStart', transfer)
+    const own = rowOf(view.container, 'sqlnb-0')
+    fireDrag(own, 'dragOver', transfer, 10)
+    fireDrag(own, 'drop', transfer)
+
+    // A jitter on the spot that rewrote the file would mark a saved notebook dirty for a gesture
+    // that changed nothing.
+    expect(onEdit).not.toHaveBeenCalled()
+  })
+
+  it('leaves a drag it did not start alone, so a file drop stays the editor’s', () => {
+    const { view, onEdit } = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    stubRowRects(view.container)
+    // A payload from elsewhere: a file from the tree, a URL or a text selection all arrive as
+    // `text/plain`, and taking one would reorder on a stray gesture.
+    const transfer = fakeTransfer()
+    transfer.setData('text/plain', 'sqlnb-0')
+    const second = rowOf(view.container, 'sqlnb-1')
+    const over = fireDrag(second, 'dragOver', transfer, 150)
+    expect(over.defaultPrevented).toBe(false)
+    expect(dropLines(view.container)).toHaveLength(0)
+    const dropped = fireDrag(second, 'drop', transfer)
+    expect(dropped.defaultPrevented).toBe(false)
+    expect(onEdit).not.toHaveBeenCalled()
+  })
+
+  it('refuses to drag a row of a file it will not rewrite', () => {
+    const { view } = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }], SQLNB_VERSION + 1))
+    const handle = handleOf(view.container, 'sqlnb-0')
+    expect(handle.getAttribute('draggable')).toBe('false')
+    const transfer = fakeTransfer()
+    fireDrag(handle, 'dragStart', transfer)
+    // The grab cursor is already off, and the payload stays empty: a drag that looks grabbable
+    // and does nothing reads as a broken drag rather than a refusal.
+    expect(transfer.types).toEqual([])
+  })
+
+  it('clears the drop line when the drag is cancelled instead of dropped', () => {
+    const { view } = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    stubRowRects(view.container)
+    const transfer = fakeTransfer()
+    const handle = handleOf(view.container, 'sqlnb-0')
+    fireDrag(handle, 'dragStart', transfer)
+    fireDrag(rowOf(view.container, 'sqlnb-1'), 'dragOver', transfer, 150)
+    expect(dropLines(view.container)).toHaveLength(1)
+    // Escape, or releasing outside the window, fires `dragend` on the handle and nothing else.
+    fireDrag(handle, 'dragEnd', transfer)
+    expect(dropLines(view.container)).toHaveLength(0)
+  })
+
+  it('folds a row to its header and says what it is hiding', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    await harness.connect()
+    fireEvent.click(harness.view.getByRole('button', { name: labels.runCell }))
+    await harness.view.findByText('In[1]')
+    expect(harness.view.container.querySelector('table')).not.toBeNull()
+
+    fireEvent.click(harness.view.getByRole('button', { name: labels.collapseCell }))
+    expect(harness.view.queryByRole('textbox')).toBeNull()
+    expect(harness.view.container.querySelector('table')).toBeNull()
+    // A row whose table vanished because the reader clicked a chevron is a different fact from
+    // one whose results disappeared, and the header is the only place left to say it.
+    expect(harness.view.getByText(labels.foldedBlocks(1))).toBeTruthy()
+
+    fireEvent.click(harness.view.getByRole('button', { name: labels.expandCell }))
+    expect(harness.view.getByRole('textbox', { name: 'sqlnb-0 sql' })).toBeTruthy()
+    expect(harness.view.container.querySelector('table')).not.toBeNull()
+  })
+
+  it('keeps a run’s result with its cell when the cell changes row', async () => {
+    const harness = open(notebookDraft([
+      { kind: 'sql', source: 'SELECT 1' },
+      { kind: 'sql', source: 'SELECT 2' },
+    ]))
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+    await harness.view.findByText('In[1]')
+
+    // Cell ids name positions, so moving the executed row down has to move the run state with
+    // it: leaving it behind would paint this query's table under the neighbour's row.
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.moveDown })[0] as HTMLElement)
+    await waitFor(() => {
+      const moved = harness.view.getByRole('textbox', { name: 'sqlnb-1 sql' }) as HTMLTextAreaElement
+      expect(moved.value).toBe('SELECT 1')
+    })
+
+    expect(rowOf(harness.view.container, 'sqlnb-1').querySelector('table')).not.toBeNull()
+    expect(rowOf(harness.view.container, 'sqlnb-0').querySelector('table')).toBeNull()
   })
 })

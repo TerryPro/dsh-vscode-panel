@@ -119,11 +119,43 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.cellIndex {
-  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
-  font-size: 11px;
-  min-width: 16px;
-  text-align: end;
+/*
+ * The gap a drop aims at is painted on the row's own edge rather than out in the 10px gap
+ * between cells: `.cell` is `overflow: hidden`, so a pseudo-element placed in that gap would be
+ * clipped and the line would appear and vanish as the pointer moved. It borrows the editor's
+ * tab-drop colour but not its shape — a pane accepts a tab *into an area*, while a reorder aims
+ * at a position between two rows, which a line states and a box around one cell would not.
+ */
+.cell[data-drop-before='true']::before,
+.cell[data-drop-after='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--dsw-alias-state-business-primary, #2f6fb0);
+  pointer-events: none;
+}
+
+.cell[data-drop-before='true']::before {
+  top: 0;
+}
+
+.cell[data-drop-after='true']::after {
+  bottom: 0;
+}
+
+/*
+ * The header strip is the drag handle, so it earns the grab cursor the workbench's own draggable
+ * tabs use, `grabbing` included. A row that can be dragged but does not say so reads as a dead
+ * strip of chrome.
+ */
+.cellHeader[draggable='true'] {
+  cursor: grab;
+}
+
+.cellHeader[draggable='true']:active {
+  cursor: grabbing;
 }
 
 .cellKind {
