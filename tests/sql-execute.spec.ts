@@ -174,6 +174,52 @@ describe('runCell — row cap and deadline', () => {
     expect(run.blocks[0]?.truncated).toBe(false)
   })
 
+  it('stops taking rows at the next chunk when the reader cancels', async () => {
+    // The cancel flag is read at the same await points as the deadline, because those are the only
+    // places the host thread comes back. What the scan had already fetched stays in the block:
+    // this loop's job is to stop pulling, not to decide what the panel shows for a cancelled cell.
+    let checks = 0
+    const rows = Array.from({ length: SQL_LIMITS.rowChunk * 4 }, (_unused, i) => [i])
+    const db = fakeDatabase([
+      { consumed: 'SELECT i FROM t', columns: [{ name: 'i', type: 'INTEGER' }], rows },
+      { consumed: ' SELECT 2 AS b', columns: [{ name: 'b', type: null }], rows: [[2]] },
+    ])
+    const run = await runCell(db, 'SELECT i FROM t; SELECT 2 AS b', {
+      rowLimit: 10_000,
+      // Checked at both ends of a chunk: once when the cell starts and once when the loop hands
+      // the thread back. The third ask is the first one at the second boundary.
+      isCancelled: () => { checks += 1; return checks >= 3 },
+    })
+
+    expect(run.blocks).toHaveLength(1)
+    expect(run.blocks[0]?.rows).toHaveLength(SQL_LIMITS.rowChunk * 2)
+    // Not truncated: the cap stopped nothing, the reader did.
+    expect(run.blocks[0]?.truncated).toBe(false)
+    // The abandoned scan released its iterator, which is the hazard the cancel exists to end: an
+    // unfinished scan keeps its read transaction, and that keeps the file occupied.
+    expect(db.released).toHaveLength(1)
+    expect(db.calls).toHaveLength(1)
+  })
+
+  it('does not start the next statement once the reader has cancelled', async () => {
+    // A cancel landing between statements ends the cell instead of beginning the next one: the
+    // reader asked this cell to stop, and the cell is its statements.
+    let checks = 0
+    const db = fakeDatabase([
+      { consumed: 'SELECT 1 AS a;', columns: [{ name: 'a', type: null }], rows: [[1]] },
+      { consumed: ' SELECT 2 AS b;', columns: [{ name: 'b', type: null }], rows: [[2]] },
+    ])
+    const run = await runCell(db, 'SELECT 1 AS a; SELECT 2 AS b;', {
+      rowLimit: 1000,
+      isCancelled: () => { checks += 1; return checks > 1 },
+    })
+
+    expect(run.blocks).toHaveLength(1)
+    expect(run.blocks[0]?.rows).toHaveLength(1)
+    expect(db.calls).toHaveLength(1)
+    expect(checks).toBe(2)
+  })
+
   it('yields the event loop between chunks rather than holding the host thread', async () => {
     // The whole reason the execution shape exists: one measured synchronous query left a real
     // host route waiting 4336 ms. A fake clock proves the awaits happened; counting them proves

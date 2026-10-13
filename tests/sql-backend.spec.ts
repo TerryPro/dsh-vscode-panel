@@ -6,7 +6,7 @@ import { SqlBackend, type SqlDriver, type SqlHandle } from '../src/host/sql-back
 // non-database open and the file tree that routes a `.db` row to the notebook entry have to
 // answer the same question the same way. The assertions stay here beside the rest of the SQL
 // surface they belong to.
-import { isDatabasePath } from '../src/shared/sql-protocol.ts'
+import { isDatabasePath, SQL_LIMITS } from '../src/shared/sql-protocol.ts'
 import type { ExecutableStatement } from '../src/host/sql-execute.ts'
 
 /**
@@ -25,7 +25,7 @@ interface FakeHandle extends SqlHandle {
   closedTimes: number
 }
 
-function makeHandle(target: string, readOnly: boolean): FakeHandle {
+function makeHandle(target: string, readOnly: boolean, scan: number[][] = []): FakeHandle {
   let open = true
   let transaction = false
   const scalar: Record<string, Record<string, unknown>> = {
@@ -51,10 +51,12 @@ function makeHandle(target: string, readOnly: boolean): FakeHandle {
       const record = scalar[sql]
       return {
         sourceSQL: sql,
-        columns: () => [],
+        // A scripted non-empty column list is what makes the cell loop stream rows instead of
+        // treating the statement as a write, which is the only way to watch a cancel land.
+        columns: () => (scan.length === 0 ? [] : [{ name: 'i', type: 'INTEGER' }]),
         setReadBigInts: vi.fn(),
         setReturnArrays: vi.fn(),
-        iterate: () => [][Symbol.iterator](),
+        iterate: () => scan[Symbol.iterator](),
         run: () => ({ changes: 0, lastInsertRowid: 0 }),
         get: () => (record ?? {}) as never,
         all: () => [],
@@ -66,11 +68,12 @@ function makeHandle(target: string, readOnly: boolean): FakeHandle {
 
 const ABSOLUTE = '/ws/data/app.db'
 
-function harness(options: { maxRowLimit?: number; graceMs?: number } = {}) {
+function harness(options: { maxRowLimit?: number; graceMs?: number; /** Rows a prepared query streams, so a cancel can be observed mid-scan. */ scanRows?: number } = {}) {
   const handles: FakeHandle[] = []
+  const scan = Array.from({ length: options.scanRows ?? 0 }, (_unused, index) => [index])
   const driver: SqlDriver = {
     open(target, opts) {
-      const handle = makeHandle(target, opts.readOnly)
+      const handle = makeHandle(target, opts.readOnly, scan)
       handles.push(handle)
       return handle
     },
@@ -341,5 +344,48 @@ describe('SqlBackend grace window', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('SqlBackend.cancel', () => {
+  it('stops the scan that is stepping at its next chunk of rows', async () => {
+    // Why cancel reaches the Host instead of staying a screen concern: a scan that keeps pulling
+    // rows keeps holding its read transaction, and a file with a live read transaction is
+    // *occupied* — another notebook cannot take it writable until that scan finishes.
+    const { backend } = harness({ scanRows: SQL_LIMITS.rowChunk * 3 })
+    await backend.open('ws-1', 'a.sqlnb', 'data/app.db', 'read-only', undefined)
+    // Not awaiting the execute leaves the loop parked at its first yield, which is the only state
+    // a cancel can land on: the flag is read where the loop gives the thread back.
+    const running = backend.execute('ws-1', 'a.sqlnb', 'SELECT i FROM t')
+    expect(backend.cancel('ws-1', 'a.sqlnb')).toEqual({ cancelled: true })
+    const result = await running
+
+    expect(result.blocks[0]?.rows).toHaveLength(SQL_LIMITS.rowChunk)
+    // Not truncated: the row cap stopped nothing, the reader did.
+    expect(result.blocks[0]?.truncated).toBe(false)
+  })
+
+  it('says when there was no run to stop, and does not carry that cancel into the next cell', async () => {
+    const { backend } = harness({ scanRows: 2 })
+    await backend.open('ws-1', 'a.sqlnb', 'data/app.db', 'read-only', undefined)
+    await backend.execute('ws-1', 'a.sqlnb', 'SELECT i FROM t')
+
+    // A cancel that arrives after the answer stopped nothing, and saying so is the honest half:
+    // the panel's button is weaker than an interrupt, and a stale flag would stop the *next*
+    // query the reader runs instead.
+    expect(backend.cancel('ws-1', 'a.sqlnb')).toEqual({ cancelled: false })
+    const after = await backend.execute('ws-1', 'a.sqlnb', 'SELECT i FROM t')
+    expect(after.blocks[0]?.rows).toHaveLength(2)
+  })
+
+  it('refuses a cancel for a notebook that has no connection, by name', async () => {
+    const { backend } = harness()
+    let caught: unknown
+    try {
+      backend.cancel('ws-1', 'ghost.sqlnb')
+    } catch (error: unknown) {
+      caught = error
+    }
+    expect((caught as { code?: string }).code).toBe('SQL_NOT_CONNECTED')
   })
 })

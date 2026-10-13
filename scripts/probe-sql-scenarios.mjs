@@ -457,6 +457,49 @@ if (host === undefined) {
     `code=${otherMemory.json?.blocks?.[0]?.error?.code ?? '-'}`)
   await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-m1.sqlnb' })
 
+  // --- cancel reaches the row loop -------------------------------------------------
+  // The claim this holds the host to: a cancel is honoured where the row loop hands the thread
+  // back, so a scan that is taking rows stops early instead of running to its cap. It is
+  // measurable without a new field: fewer rows than the cap, `truncated` false, over a source
+  // with far more rows than the cap — so the cap cannot be what stopped it.
+  //
+  // Why this is worth a route at all: an unfinished scan keeps its read transaction, and a file
+  // with a live read transaction is *occupied* — another notebook cannot take it writable. A
+  // cancel that only cleared the screen would leave the file blocked for the rest of the scan.
+  //
+  // The per-row cost has to be real, and correlated: an uncorrelated scalar subquery is computed
+  // once for the whole statement, and the first revision of this query therefore finished before
+  // the cancel was even sent. Each output row now scans a 20000-row source, measured here at
+  // 344 ms for 1000 rows, so one chunk of 200 rows is about 70 ms of uninterruptible work.
+  //
+  // The assertion that keeps this honest is the Host's own answer: `cancelled: true` can only come
+  // back if a run was outstanding when the request was handled. On a machine fast enough to finish
+  // the scan inside one chunk the gate goes red instead of passing quietly — widen the source
+  // rather than loosen the assertion.
+  const heavyScan = 'WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v < 20000)'
+    + ' SELECT v, (SELECT count(*) FROM n AS x WHERE x.v < n.v) AS c FROM n'
+  await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb', path: 'sample.db' })
+  const scanRequest = post('/sqlnotebook/execute', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb', sql: heavyScan })
+  const stop = await post('/sqlnotebook/cancel', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb' })
+  const scanned = await scanRequest
+  const scannedBlock = scanned.json?.blocks?.[0]
+  const scanRows = scannedBlock?.rows?.length
+  gate('A3', 'cancel stops a row scan at its next chunk rather than running to the cap',
+    stop.json?.cancelled === true && typeof scanRows === 'number' && scanRows > 0
+    && scanRows < scannedBlock?.rowLimit && scannedBlock?.truncated === false,
+    `cancelled=${stop.json?.cancelled} rows=${scanRows} limit=${scannedBlock?.rowLimit} truncated=${scannedBlock?.truncated}`)
+
+  // The negative control has to be answered by the route itself rather than by its absence: a
+  // missing endpoint gives `cancelled: undefined`, which is not the `false` asserted here.
+  const idleCancel = await post('/sqlnotebook/cancel', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb' })
+  gate('A3', 'a cancel with no run outstanding says it stopped nothing',
+    idleCancel.json?.cancelled === false, `cancelled=${JSON.stringify(idleCancel.json?.cancelled)} code=${idleCancel.json?.error?.code ?? '-'}`)
+
+  const ghostCancel = await post('/sqlnotebook/cancel', { workspaceId: 'ws-1', notebook: 'n-none.sqlnb' })
+  gate('A3', 'a cancel for a notebook with no connection is refused by name',
+    ghostCancel.json?.error?.code === 'SQL_NOT_CONNECTED', `code=${ghostCancel.json?.error?.code ?? '-'}`)
+  await post('/sqlnotebook/close', { workspaceId: 'ws-1', notebook: 'n-cancel.sqlnb' })
+
   // --- schema reads (used by the tree; bound here to this backend's work) ----------
   const secondFile = await post('/sqlnotebook/open', { workspaceId: 'ws-1', notebook: 'n-e.sqlnb', path: 'second.db', access: 'read-only' })
   gate('A1', 'opening a different file is unaffected by another file being occupied',

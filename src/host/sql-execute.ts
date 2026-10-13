@@ -13,7 +13,8 @@
  *     waiting 4336 ms against a 13 ms baseline. Rows are therefore pulled through `iterate()` with
  *     a genuine await every `rowChunk` rows, and the cell deadline is checked at exactly those
  *     points. It cannot bound an aggregate, whose whole cost lands in the first row — that
- *     limitation is the panel's to state, not this loop's to paper over.
+ *     limitation is the panel's to state, not this loop's to paper over. The same await points are
+ *     where a reader's cancel is honoured, for the same reason and with the same limit.
  *   - Object rows key by column name and would lose a value under duplicate names, so rows are
  *     taken as arrays (ADR 0005) and aligned to `columns()` by index.
  */
@@ -62,6 +63,15 @@ export interface RunCellOptions {
   rowChunk?: number
   /** Wall clock for the cell, checked between chunks. */
   deadlineMs?: number
+  /**
+   * Asked at the same two points the deadline is: between row chunks and between statements.
+   *
+   * A cancel can only be honoured where this loop gives the thread back, so it bounds a scan that
+   * yields rows. A statement whose entire cost sits in its first row — an aggregate, a write —
+   * runs on to its end whatever the reader asks for: the same limitation as `deadlineMs`, from
+   * the same measured cause, and the panel's wording has to carry it.
+   */
+  isCancelled?: () => boolean
   /** Injectable so a test can watch the deadline fire without waiting fifteen seconds. */
   now?: () => number
   /** Injectable for the same reason: a fake driver can step the clock and need no real timer. */
@@ -186,10 +196,14 @@ export async function runCell(
   const deadlineMs = options.deadlineMs ?? SQL_LIMITS.cellDeadlineMs
   const rowChunk = options.rowChunk ?? SQL_LIMITS.rowChunk
   const deadline = startedAt + deadlineMs
+  const cancelledNow = options.isCancelled ?? (() => false)
   const blocks: SqlResultBlock[] = []
   let remaining = sql
 
   while (remaining.trim() !== '') {
+    // A cancel that lands between statements ends the cell instead of starting the next one: the
+    // reader asked this cell to stop, and the cell is its statements.
+    if (cancelledNow()) break
     let statement: ExecutableStatement
     try {
       statement = database.prepare(remaining)
@@ -258,6 +272,12 @@ export async function runCell(
         }
         if (collected.length % rowChunk !== 0) continue
         await yieldNow()
+        if (cancelledNow()) {
+          // Stop pulling, and let the `break` call the iterator's `return()` so the read
+          // transaction goes with it: a cancelled scan that kept holding the file would leave the
+          // database occupied for exactly as long as the cancel was supposed to end.
+          break
+        }
         if (now() >= deadline) {
           // Rows already fetched stay on screen: the point of a deadline is to hand something
           // back instead of throwing away a long scan.

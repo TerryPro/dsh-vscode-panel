@@ -35,6 +35,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
   SqlAccess,
+  SqlCancelResult,
   SqlCloseResult,
   SqlColumnsResult,
   SqlExecuteResult,
@@ -46,7 +47,7 @@ import { SQL_ACCESS_DEFAULT, isDatabasePath, SQL_LIMITS, SQL_MEMORY_TARGET } fro
 import { WorkbenchHttpError } from './http.ts'
 import { normalizeWorkspacePath, WorkbenchInputError } from '../shared/path-policy.ts'
 import { authorizeSqlCall, isQueryableTableName } from './sql-guards.ts'
-import { runCell, type ExecutableDatabase, type ExecutableStatement } from './sql-execute.ts'
+import { runCell, type ExecutableDatabase, type ExecutableStatement, type SqlCellRun } from './sql-execute.ts'
 
 /** A handle this module can open, guard, run and close. */
 export interface SqlHandle {
@@ -104,6 +105,16 @@ interface ManagedConnection {
   rowLimit: number
   /** Session-local. `.sqlnb` never stores it, and a fresh connection restarts at zero. */
   executionCount: number
+  /**
+   * Cell loops this handle is stepping through right now.
+   *
+   * A count rather than a boolean because nothing here proves a client sends one execute at a
+   * time: the workbench's own queue does, but a cancel asked for while any loop is open has to be
+   * honoured, and one that lands when none is must be able to say so.
+   */
+  activeRuns: number
+  /** Set by a cancel and read at every chunk boundary of the loop that is running. */
+  cancelRequested: boolean
   abandonTimer: ReturnType<typeof setTimeout> | undefined
 }
 
@@ -221,6 +232,8 @@ export class SqlBackend {
       absolute: file?.absolute,
       rowLimit: this.readRowLimit(rowLimitValue) ?? this.limits.maxRowLimit,
       executionCount: 0,
+      activeRuns: 0,
+      cancelRequested: false,
       abandonTimer: undefined,
     }
     try {
@@ -248,11 +261,24 @@ export class SqlBackend {
     if (typeof sqlValue !== 'string' || sqlValue.trim() === '') {
       throw new WorkbenchInputError('SQL_EMPTY_CELL', '这一格没有可执行的内容。')
     }
-    const run = await runCell(managed.handle as unknown as ExecutableDatabase, sqlValue, {
-      rowLimit: managed.rowLimit,
-      deadlineMs: SQL_LIMITS.cellDeadlineMs,
-      ...(managed.absolute === undefined ? {} : { absolutePath: managed.absolute }),
-    })
+    // A cancel from the previous cell must not stop this one, so the flag is cleared on the way
+    // in rather than only on the way out: the reader who pressed cancel and then pressed run
+    // means the new query to run.
+    managed.cancelRequested = false
+    managed.activeRuns += 1
+    let run: SqlCellRun
+    try {
+      run = await runCell(managed.handle as unknown as ExecutableDatabase, sqlValue, {
+        rowLimit: managed.rowLimit,
+        deadlineMs: SQL_LIMITS.cellDeadlineMs,
+        isCancelled: () => managed.cancelRequested,
+        ...(managed.absolute === undefined ? {} : { absolutePath: managed.absolute }),
+      })
+    } finally {
+      // Decrement even when the loop throws, or a handle would remember a run that no longer
+      // exists and answer every later cancel as though something were still going.
+      managed.activeRuns -= 1
+    }
     // Counted per connection, so two pages of one notebook continue the same visible sequence.
     managed.executionCount += 1
     return {
@@ -261,6 +287,22 @@ export class SqlBackend {
       elapsedMs: run.elapsedMs,
       blocks: run.blocks,
     }
+  }
+
+  /**
+   * Ask this notebook's connection to stop the cell it is stepping through.
+   *
+   * The flag is read where the row loop yields, which is the only place anything can be honoured
+   * on this runtime: a query that produces no rows until it finishes cannot be interrupted, and
+   * `cancelled` says whether there was a run to stop at all rather than claiming more than the
+   * mechanism does. Stopping also releases the read transaction the unfinished scan was holding,
+   * which is what makes the file free to be opened writable again.
+   */
+  cancel(workspaceIdValue: unknown, notebookValue: unknown): SqlCancelResult {
+    const managed = this.mustFind(workspaceIdValue, notebookValue)
+    if (managed.activeRuns === 0) return { cancelled: false }
+    managed.cancelRequested = true
+    return { cancelled: true }
   }
 
   /**

@@ -83,7 +83,8 @@ export interface SqlNotebookLabels {
   runCell: string
   runAll: string
   cancel: string
-  /** The limit the cancel button has to state: this runtime has no interrupt. */
+  /** The limit the cancel button has to state: a scan stops at its next chunk, a statement that
+   * yields no rows until it finishes does not stop. */
   cancelLimit: string
   clearAllOutputs: string
   clearCellOutputs: string

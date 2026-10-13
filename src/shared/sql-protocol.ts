@@ -89,9 +89,10 @@ export const SQL_LIMITS = {
   /**
    * Wall clock for one cell, checked between row chunks.
    *
-   * It cannot abort a statement that is already stepping — this runtime has no interrupt —
+   * It cannot abort a statement that is already stepping — nothing can interrupt at that point —
    * so it bounds row-yielding scans and leaves aggregates honest about being unbounded.
-   * That limitation belongs to the panel's wording, not to this number.
+   * That limitation belongs to the panel's wording, not to this number, and it is the same
+   * boundary the cancel flag is read at: both are honoured where the loop hands the thread back.
    */
   cellDeadlineMs: 15_000,
   /** Rows pulled per chunk before yielding the event loop back to the host. */
@@ -228,6 +229,19 @@ export interface SqlCloseResult {
   closed: boolean
   /** True when a transaction was open and rolled back on the way out (requirement Q47). */
   rolledBack: boolean
+}
+
+/** What a cancel request found to cancel. */
+export interface SqlCancelResult {
+  /**
+   * Whether the handle had a run outstanding when the request landed.
+   *
+   * Reported rather than assumed: a cancel that arrives after the cell already answered stopped
+   * nothing, and letting it read as a successful interrupt would teach the reader that the
+   * button is stronger than it is. It is also the only honest way to say that a statement which
+   * never yields rows (an aggregate, a write) cannot be interrupted mid-flight.
+   */
+  cancelled: boolean
 }
 
 /** First schema level. */

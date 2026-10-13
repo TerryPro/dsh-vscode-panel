@@ -63,6 +63,7 @@ interface Fixture {
     sqlExecute: ReturnType<typeof vi.fn>
     sqlClose: ReturnType<typeof vi.fn>
     sqlAbandon: ReturnType<typeof vi.fn>
+    sqlCancel: ReturnType<typeof vi.fn>
   }
   /** The next request the runtime put on the wire, in the order they were made. */
   request: () => Held
@@ -86,6 +87,7 @@ function createRuntime(cells: Array<{ kind: string; source: string }>): Fixture 
     }),
     sqlClose: vi.fn(() => Promise.resolve({ path: 'demo.db', closed: true, rolledBack: false })),
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
+    sqlCancel: vi.fn(() => Promise.resolve({ cancelled: true })),
   }
   const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, bridge)
   runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
@@ -278,10 +280,10 @@ describe('SqlRuntime', () => {
     expect(afterCancel.cells['sqlnb-1']?.status).toBe('cancelled')
     expect(afterCancel.cells['sqlnb-2']?.status).toBe('cancelled')
     expect(afterCancel.cells['sqlnb-0']?.status).toBe('cancelled')
-    // The first cell reads as cancelled while its request is still outstanding: this runtime
-    // has no interrupt, so cancel means "stop showing this, start nothing new", not "the
-    // query stopped". Starting the next cell before the Host answered would put two
-    // statements on one connection at once.
+    // The first cell reads as cancelled while its request is still outstanding. The Host was told
+    // to stop taking rows, but the answer still has to come back before another cell uses this
+    // connection: two statements on one handle at once would corrupt each other. So cancel means
+    // "stop showing this, stop pulling rows, start nothing new", not "the query is gone".
     expect(fixture.runtime.busy('tab-1')).toBe(true)
 
     fixture.runtime.runCell('tab-1', 'sqlnb-0')
@@ -425,6 +427,29 @@ describe('SqlRuntime', () => {
 
     expect(fixture.api.sqlAbandon).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
     expect(fixture.runtime.state('tab-1').connection).toBeNull()
+  })
+
+  it('asks the Host to stop the cell that is in flight, not only the screen', async () => {
+    // A screen-only cancel would leave the row scan pulling rows to its cap on the Host, keeping
+    // the file occupied for the whole time — the reader pressed cancel and the database still
+    // says another notebook may not take the file writable.
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+    fixture.runtime.runCell('tab-1', 'sqlnb-0')
+    fixture.runtime.cancel('tab-1')
+
+    expect(fixture.api.sqlCancel).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
+  })
+
+  it('does not ask the Host to stop what is not running', async () => {
+    // A cancel that lands with nothing on the wire must not leave a flag set for the *next* cell
+    // to trip over, so it is not sent at all.
+    const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
+    await connect(fixture)
+    fixture.runtime.cancel('tab-1')
+
+    expect(fixture.api.sqlCancel).not.toHaveBeenCalled()
+    expect(fixture.runtime.busy('tab-1')).toBe(false)
   })
 
   it('moves a finished run with its cell when the reader changes rows', async () => {

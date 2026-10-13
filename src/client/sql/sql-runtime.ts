@@ -11,10 +11,12 @@
  *   "running a cell never marks the tab dirty" (ADR 0003) is a type-level fact here rather
  *   than a rule every method has to remember. The notebook folds outputs into the draft on
  *   `cell_completed`; the two formats diverge exactly there.
- * - **interrupt a query.** This runtime has no interrupt; a cancelled cell's request stays
- *   outstanding until the Host answers, and no next cell starts before it does, because two
- *   statements on one connection at once would corrupt each other. Cancel therefore means
- *   "stop showing this and start nothing new", and the panel has to say so.
+ * - **interrupt a statement outright.** It asks the Host to stop, and the Host can only honour
+ *   that where its row loop yields. A query whose whole cost sits in the first row — an
+ *   aggregate, a write — runs on whatever the reader asks for, and the next cell still waits for
+ *   the outstanding request to come back, because two statements on one connection at once would
+ *   corrupt each other. Cancel therefore means "stop what has not started, stop taking rows, and
+ *   show nothing for what is in flight"; the panel has to say so rather than promise an interrupt.
  * - **own the `In[n]` number.** The Host counts executions per connection and returns the
  *   number with the result, so a page that re-arms a handle inside the grace window keeps
  *   its reader's numbering instead of restarting at one.
@@ -390,15 +392,19 @@ export class SqlRuntime {
   }
 
   /**
-   * Stop showing the running cell and start nothing further.
+   * Stop the queue, stop taking rows, and stop showing the cell in flight.
    *
-   * The outstanding request is left alone: this runtime has no way to interrupt a statement
-   * that is already stepping, so the honest effect is on the queue and on what the reader
-   * sees, not on the database.
+   * The Host is told as well, which is the half that matters beyond the screen: a scan that keeps
+   * pulling rows keeps holding its read transaction, and a file with a live read transaction is
+   * *occupied* — another notebook cannot take it writable until the scan ends. The cancel flag is
+   * read at the next chunk boundary, so the loop stops there and lets the iterator release the
+   * file. A statement that yields no rows until it finishes is not interruptible either side of
+   * the wire, and `cancelLimit` is worded for that weaker fact.
    */
   cancel(tabId: string): void {
     const tab = this.tabs.get(tabId)
     if (tab === undefined) return
+    const outstanding = tab.inflight
     const queued = [...tab.queue]
     tab.queue = []
     tab.stretch = []
@@ -409,12 +415,20 @@ export class SqlRuntime {
         if (run === undefined || run.status !== 'queued') continue
         state.cells[id] = { ...run, status: 'cancelled' }
       }
-      if (tab.inflight !== null) {
-        const running = state.cells[tab.inflight]
-        if (running !== undefined) state.cells[tab.inflight] = { ...running, status: 'cancelled' }
+      if (outstanding !== null) {
+        const running = state.cells[outstanding]
+        if (running !== undefined) state.cells[outstanding] = { ...running, status: 'cancelled' }
       }
     })
     this.notifyIdle(tab)
+    if (outstanding === null) return
+    void this.api.sqlCancel(tab.workspaceId, tab.notebook).then(outcome => {
+      // Worth a line rather than a dialog: whether the flag landed or the cell had already
+      // answered is invisible on screen, and this is the only place the difference is recorded.
+      this.logger.info(`workbench-layout: sql cancel requested (stopped=${outcome.cancelled})`)
+    }, (error: unknown) => {
+      this.logger.warn(`workbench-layout: sql cancel refused (${failureOf(error).code})`)
+    })
   }
 
   /**

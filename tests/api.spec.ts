@@ -134,6 +134,7 @@ describe('Workbench browser API', () => {
     await api.sqlColumns('ws-1', 'query-1.sqlnb', 'city')
     await api.sqlAbandon('ws-1', 'query-1.sqlnb')
     await api.sqlClose('ws-1', 'query-1.sqlnb')
+    await api.sqlCancel('ws-1', 'query-1.sqlnb')
     await api.sqlReleaseWorkspace('ws-1')
 
     expect(fetch.mock.calls.map(call => call[0])).toEqual([
@@ -143,6 +144,7 @@ describe('Workbench browser API', () => {
       '/dsh-workbench-layout/sqlnotebook/columns',
       '/dsh-workbench-layout/sqlnotebook/abandon',
       '/dsh-workbench-layout/sqlnotebook/close',
+      '/dsh-workbench-layout/sqlnotebook/cancel',
       '/dsh-workbench-layout/sqlnotebook/release-workspace',
     ])
     expect(JSON.parse(String((fetch.mock.calls[0]![1] as RequestInit).body))).toEqual({

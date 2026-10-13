@@ -410,6 +410,11 @@ async function dispatch(
       return sql.open(body.workspaceId, body.notebook, body.path, body.access, body.rowLimit)
     case `${SQL_POST_PREFIX}/execute`:
       return sql.execute(body.workspaceId, body.notebook, body.sql)
+    // Cancel is a separate verb from close because it answers a different question: the reader
+    // wants this cell to stop taking rows while keeping the connection, its scratch tables and
+    // its place in the session. Closing would drop all three.
+    case `${SQL_POST_PREFIX}/cancel`:
+      return sql.cancel(body.workspaceId, body.notebook)
     case `${SQL_POST_PREFIX}/close`:
       return sql.close(body.workspaceId, body.notebook)
     case `${SQL_POST_PREFIX}/tables`:

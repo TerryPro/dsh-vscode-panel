@@ -185,6 +185,7 @@ function open(draft: string, options: {
     }))),
     sqlClose: vi.fn(() => Promise.resolve({ path: 'demo.db', closed: true, rolledBack: options.rolledBack ?? false })),
     sqlAbandon: vi.fn(() => Promise.resolve({ path: 'demo.db', scheduled: true })),
+    sqlCancel: vi.fn(() => Promise.resolve({ cancelled: true })),
   }
   const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, { getDraft: () => box.current })
   const root: DirectoryListing = { path: '', entries: options.entries ?? [{ name: 'demo.db', path: 'demo.db', kind: 'file' }], truncated: false }
@@ -570,9 +571,10 @@ describe('SqlNotebookSurface 连接与执行', () => {
     fireEvent.click(runButtons[0] as HTMLElement)
     fireEvent.click(runButtons[1] as HTMLElement)
 
-    // The affordance exists only while something is outstanding, and its tooltip states the
-    // limit rather promising an interrupt this runtime does not have. The toolbar and each
-    // outstanding row all offer it, so the assertion takes the first of them.
+    // The affordance exists only while something is outstanding, and its tooltip states what the
+    // button really reaches: a scan stops at its next chunk, a statement that yields no rows until
+    // it finishes does not. The toolbar and each outstanding row all offer it, so the assertion
+    // takes the first of them.
     const cancel = (await harness.view.findAllByRole('button', { name: labels.cancel }))[0] as HTMLElement
     expect(cancel.getAttribute('title')).toContain(labels.cancelLimit)
     fireEvent.click(cancel)

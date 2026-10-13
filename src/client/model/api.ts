@@ -46,6 +46,7 @@ import { WORKBENCH_API_PREFIX } from '../../shared/contracts.ts'
 import { KERNEL_POST_PREFIX } from '../../shared/notebook-protocol.ts'
 import {
   SQL_POST_PREFIX,
+  type SqlCancelResult,
   type SqlCloseResult,
   type SqlColumnsResult,
   type SqlAccess,
@@ -398,6 +399,17 @@ export class WorkbenchApi {
   /** Close the connection now, rolling back an open transaction on the way out. */
   async sqlClose(workspaceId: string, notebook: string): Promise<SqlCloseResult> {
     return this.postSql('/close', { workspaceId, notebook })
+  }
+
+  /**
+   * Ask the Host to stop the cell this notebook's connection is stepping through.
+   *
+   * Honoured where the row loop yields, so it bounds a scan that returns rows and not an
+   * aggregate whose whole cost sits in its first row. The answer says whether anything was
+   * running at all.
+   */
+  async sqlCancel(workspaceId: string, notebook: string): Promise<SqlCancelResult> {
+    return this.postSql('/cancel', { workspaceId, notebook })
   }
 
   /**
