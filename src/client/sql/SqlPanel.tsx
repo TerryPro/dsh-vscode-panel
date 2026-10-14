@@ -11,8 +11,14 @@
  * disconnect button and no connection readout — not because those facts are unimportant, but
  * because a second copy of a control is a second place the same rule has to be written, and a
  * reader facing two identical database dropdowns cannot tell which one is authoritative. What stays
- * here is the one thing the notebook cannot offer comfortably: the table and column tree, and the
- * gestures that write out of it into the notebook.
+ * here is the one thing the notebook cannot offer comfortably: the table tree, and the gestures
+ * that write out of it into the notebook.
+ *
+ * The tree is the same shape as `FileTree`: a recursive list of nodes with a depth-based indent
+ * and a lazy read on first expand. A database's nodes are tables and views; a table's nodes are
+ * categories (字段 / 索引 / 外键 / 触发器); a 字段 node's nodes are columns. The four-level
+ * shape is the standard one in DataGrip / DBeaver / TablePlus, and the "every field is a node"
+ * rule is what file-management panels already follow here.
  *
  * It is still not a second editor: no draft, no result, no run state of its own. It binds the
  * runtime and replays the file's connection record because the tree needs a live handle to describe
@@ -20,9 +26,9 @@
  * screen would have connected.
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SqlColumnEntry, SqlTablesResult } from '../../shared/sql-protocol.ts'
+import type { SqlColumnEntry, SqlTablesResult, SqlTreeEntry } from '../../shared/sql-protocol.ts'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import type { WorkbenchController } from '../model/controller.ts'
 import { messageOf } from '../model/tab-model.ts'
@@ -31,6 +37,11 @@ import { appendSqlCell } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
 import { quotedSqlIdentifier, selectAllFrom } from './sql-schema-tree.ts'
 import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
+import {
+  SqlTreeNode,
+  type SqlSchemaNode,
+  type SqlTreeNodeLabels,
+} from './sql-tree-node.tsx'
 import css from './sql-panel.module.css'
 
 export interface SqlPanelProps {
@@ -69,21 +80,14 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   )
   const runState = useSyncExternalStore(subscribe, readState)
 
-  /**
-   * The connection, and the path it is on.
-   *
-   * The effects below depend on `connectedPath` and not on the connection object: that object is
-   * rebuilt on every runtime update, and a schema re-read per keystroke in a cell would make this
-   * panel the slowest thing in the workbench.
-   */
   const connection = runState?.connection ?? null
   const connectedPath = connection?.path ?? null
 
   const [tables, setTables] = useState<SqlTablesResult | null>(null)
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
-  const [openTable, setOpenTable] = useState<string | null>(null)
   const [columns, setColumns] = useState<Record<string, SqlColumnEntry[]>>({})
   const [menuTarget, setMenuTarget] = useState<SqlTableMenuTarget | null>(null)
+  const [filter, setFilter] = useState('')
   const lastExecution = useRef('')
 
   const loadSchema = useCallback((): void => {
@@ -95,34 +99,25 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     )
   }, [controller, notebookPath, workspaceId])
 
-  // A connection is a different database, so nothing read from the last one survives it.
   useEffect(() => {
     setTables(null)
     setColumns({})
-    setOpenTable(null)
     setSchemaProblem(null)
+    setFilter('')
     if (connectedPath !== null) loadSchema()
   }, [connectedPath, loadSchema])
 
   const executed = runState === null
     ? ''
     : Object.entries(runState.cells)
-      // The signature is what the tree is stale *about*: a finished run may have created or dropped a
-      // table, and a failure may be the file going away — which the ticket wants re-read too. Keying
-      // on the execution count alone would miss every refused request, and those are the ones where
-      // the schema most likely changed underneath the reader.
       .map(([id, run]) => `${id}:${run.executionCount ?? '-'}:${run.failure?.code ?? ''}`)
       .join('|')
-  // The ticket's rule: a refresh button plus one re-read per run, and no file watcher. A statement
-  // may have created or dropped a table, so the run that just finished is what makes the tree stale.
   useEffect(() => {
     if (executed === lastExecution.current) return
     lastExecution.current = executed
     if (connectedPath !== null) loadSchema()
   }, [connectedPath, executed, loadSchema])
 
-  // A rail action is consumed once, by id: the request is a store write, so the effect that handles
-  // it runs again on every unrelated store change and must not re-read the schema each time.
   const handledAction = useRef(0)
   useEffect(() => {
     const request = state.sidebarAction
@@ -134,11 +129,11 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   }, [connectedPath, controller, loadSchema, state.sidebarAction])
 
   /**
-   * Read a table's columns once, however often it is opened.
+   * Read a table's columns once, however often the column category is opened.
    *
-   * Shared by the expander and by the menu's copy row, because a reader who right-clicks a table
-   * they never expanded is asking a question the panel can answer — it just has to go get the data
-   * first. The cached read is returned as-is so the caller never re-derives it.
+   * Mirrors `FileTreeLevel`'s lazy load: the read is keyed by the table's name, and the
+   * returned promise is dropped on the floor by the click handler. The "open" half of the
+   * disclosure owns the read so a re-render of the panel does not silently trigger one.
    */
   const readColumns = useCallback((name: string): Promise<SqlColumnEntry[]> => {
     const known = columns[name]
@@ -156,47 +151,17 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     )
   }, [columns, controller, notebookPath, workspaceId])
 
-  const toggleTable = useCallback((name: string): void => {
-    if (openTable === name) {
-      setOpenTable(null)
-      return
-    }
-    setOpenTable(name)
-    if (columns[name] !== undefined) return
-    void readColumns(name).catch(() => {})
-  }, [columns, openTable, readColumns])
-
-  /**
-   * Write a statement into a new cell of the notebook.
-   *
-   * The query goes through the same document layer the surface writes through, so a notebook this
-   * build will not rewrite refuses here too and the reader keeps their bytes.
-   */
   const insertSql = useCallback((source: string): void => {
     if (notebook === null || tabId === null || connection === null) return
     try {
       controller.setDraft(appendSqlCell(notebook.draft, source), 'input', tabId)
       setSchemaProblem(null)
     } catch {
-      // The document layer refuses rather than re-serializing a file it does not fully understand,
-      // so the reader keeps their bytes and is told to fix the file instead.
       setSchemaProblem(t('sqlnotebook.treeRefused'))
     }
   }, [connection, controller, notebook, tabId, t])
 
-  /**
-   * Copy out of the tree.
-   *
-   * Success is deliberately silent, matching the tab menu's "Copy path": a clipboard write that
-   * worked has nothing to report. Failure is the opposite case — the browser can refuse the write,
-   * and a copy that vanished without a word is a reader pasting nothing and wondering whether the
-   * tree is broken. It lands in the same line the schema reads use, because it is the same kind of
-   * "this panel could not do the thing you asked".
-   */
   const copyOut = useCallback((text: string): void => {
-    // Success clears only a previous COPY failure, never the line wholesale: a schema read that
-    // failed stays failed just because a copy worked, and blanking it here would hide a real
-    // problem behind an unrelated success.
     void copyTextToClipboard(text).then(
       () => {
         setSchemaProblem(previous => (previous === t('sqlnotebook.copyFailed') ? null : previous))
@@ -212,21 +177,89 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     if (action === 'copy-columns') void readColumns(table).then(entries => { copyOut(entries.map(entry => entry.name).join('\n')) }, () => {})
   }, [connection?.rowLimit, copyOut, insertSql, readColumns])
 
+  const filterQuery = filter.trim().toLowerCase()
+  const filteredTables = useMemo(() => {
+    if (tables === null) return null
+    if (filterQuery === '') return tables.tables
+    return tables.tables.filter(entry => {
+      if (entry.name.toLowerCase().includes(filterQuery)) return true
+      const loaded = columns[entry.name]
+      if (loaded === undefined) return false
+      return loaded.some(column => column.name.toLowerCase().includes(filterQuery))
+    })
+  }, [columns, filterQuery, tables])
+
+  const tableCount = useMemo(() => {
+    if (tables === null) return 0
+    return tables.tables.filter(entry => entry.kind === 'table').length
+  }, [tables])
+  const viewCount = useMemo(() => {
+    if (tables === null) return 0
+    return tables.tables.length - tableCount
+  }, [tables, tableCount])
+
+  /**
+   * The labels every node reads. The tree itself does not look at the dictionary: a node's
+   * `label` is already a translated string, and these are the few that the panel still
+   * computes at render time (the loading line, the view badge, etc.).
+   */
+  const labels: SqlTreeNodeLabels = useMemo(() => ({
+    databaseRoot: t('sqlnotebook.schema'),
+    databaseMemory: t('sqlnotebook.memoryDatabaseLabel'),
+    categoryColumns: t('sqlnotebook.categoryColumns'),
+    categoryIndexes: t('sqlnotebook.categoryIndexes'),
+    categoryForeignKeys: t('sqlnotebook.categoryForeignKeys'),
+    categoryTriggers: t('sqlnotebook.categoryTriggers'),
+    viewBadge: t('sqlnotebook.viewLabel'),
+    columnNotNull: t('sqlnotebook.columnNotNull'),
+    columnNullable: t('sqlnotebook.columnNullable'),
+    openTable: t('sqlnotebook.openTable'),
+    noColumns: t('sqlnotebook.schemaEmpty'),
+    loading: t('sqlnotebook.schemaLoading'),
+  }), [t])
+
+  /**
+   * The root node, built from the host's last schema read.
+   *
+   * The root is the one place that owns the `path` value of the tree's first `Set` key,
+   * because the root is what every other path is anchored to. The recursive children below
+   * do not need to know that key — they just compose theirs from the `parentPath` prop.
+   */
+  const rootNode = useMemo<SqlSchemaNode | null>(() => {
+    if (tables === null) return null
+    return {
+      kind: 'database',
+      path: tables.path,
+      databaseKind: tables.databaseKind,
+      tables: filteredTables ?? tables.tables,
+      truncated: tables.truncated,
+    }
+  }, [filteredTables, tables])
+
+  /**
+   * Expansion state. The set is keyed by the path the recursion threads, so a click on a
+   * nested column toggles only that row. Default open: the root, so a reader sees the table
+   * list without a click. Categories open lazily: opening "字段" issues a column read the
+   * first time only.
+   */
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['database']))
+  const toggle = useCallback((path: string) => {
+    setExpanded(previous => {
+      const next = new Set(previous)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
   const header = (
     <header className={css.panelHeader} data-dsh-workbench-panel-header="">
-      {/*
-        The panel is the structure of a database, so that is its title. The key it uses is the one
-        the tree itself was labelled with: keeping both would have said 结构 twice in one column,
-        once as a heading and once as the heading of the thing under it.
-      */}
       <span className={css.panelTitle}>{t('sqlnotebook.schema')}</span>
       <button
         type="button"
         className={css.headerAction}
         aria-label={t('sqlnotebook.refreshSchema')}
         title={t('sqlnotebook.refreshSchema')}
-        // Nothing to re-read until there is a handle: this button reloads the tree, and the tree
-        // belongs to a connected database, not to the workspace.
         disabled={connectedPath === null}
         onClick={loadSchema}
       >
@@ -249,67 +282,82 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       {header}
       <div className={css.body}>
         <div className={css.notebookLine}>{t('sqlnotebook.panelNotebook', { path: notebookPath })}</div>
-        {/*
-          With no handle there is nothing this panel could list, and the action that would change
-          that is no longer here. Saying only 未连接 would strand the reader in a column that offers
-          neither the fact nor the way out, so the second line names where the control went.
-        */}
         {connection === null ? (
           <>
             <div className={css.muted}>{t('sqlnotebook.notConnected')}</div>
             <div className={css.pointer}>{t('sqlnotebook.connectInToolbar')}</div>
           </>
         ) : (
-          <div className={css.schema}>
-            {tables === null
-              ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
-              : tables.tables.length === 0
-                ? <div className={css.muted}>{t('sqlnotebook.schemaEmpty')}</div>
-                : tables.tables.map(entry => (
-                  <div key={entry.name} className={css.schemaNode}>
-                    {/*
-                      One click expands, two insert a query, right-click lists what else the row can
-                      do. The gesture that writes into the file is the deliberate one, exactly as
-                      opening a `.db` from the tree is a double click: a single click on a row the
-                      reader is scanning to read must not edit anything. The menu is what makes the
-                      write gesture findable — a double-click nobody has been told about is a feature
-                      that does not exist yet.
-                    */}
-                    <button
-                      type="button"
-                      className={css.tableRow}
-                      aria-expanded={openTable === entry.name}
-                      title={t('sqlnotebook.openTable')}
-                      onClick={() => { toggleTable(entry.name) }}
-                      onDoubleClick={() => { insertSql(selectAllFrom(entry.name, connection.rowLimit)) }}
-                      onContextMenu={event => {
-                        event.preventDefault()
-                        setMenuTarget({ table: entry.name, rect: event.currentTarget.getBoundingClientRect() })
-                      }}
-                    >
-                      <span className={css.tableName}>{entry.name}</span>
-                      {entry.kind === 'view' && <span className={css.tableKind}>{t('sqlnotebook.viewLabel')}</span>}
-                    </button>
-                    {openTable === entry.name && (
-                      columns[entry.name] === undefined
-                        ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
-                        : (
-                          <ul className={css.columnList}>
-                            {(columns[entry.name] ?? []).map(column => (
-                              <li key={column.name} className={css.columnRow}>
-                                <span className={css.columnName}>{column.name}</span>
-                                <span className={css.columnType}>{column.type ?? ''}</span>
-                                {column.primaryKey && <span className={css.columnBadge}>{t('sqlnotebook.primaryKey')}</span>}
-                              </li>
-                            ))}
-                          </ul>
-                        )
-                    )}
-                  </div>
-                ))}
-            {tables?.truncated === true && <div className={css.muted}>{t('sqlnotebook.schemaTruncated')}</div>}
-            {schemaProblem !== null && <div className={css.problem} role="alert">{schemaProblem}</div>}
-          </div>
+          <>
+            <div className={css.connHeader}>
+              <div className={css.connFile} title={connection.path}>
+                <span className={css.connFileLabel}>{t('sqlnotebook.connFile')}</span>
+                <span className={css.connFilePath}>{connection.path}</span>
+              </div>
+              <div className={css.connMeta}>
+                {tables !== null && (
+                  <span className={css.connCount}>
+                    {tables.tables.length === 0
+                      ? t('sqlnotebook.connNoTables')
+                      : t('sqlnotebook.connRowCount', { tables: tableCount, views: viewCount })}
+                  </span>
+                )}
+                <span className={`${css.tierBadge} ${connection.access === 'writable' ? css.tierBadgeWritable : css.tierBadgeReadonly}`}>
+                  {connection.access === 'writable' ? t('sqlnotebook.writableTier') : t('sqlnotebook.readOnlyTier')}
+                </span>
+              </div>
+            </div>
+            <div className={css.filterBar}>
+              <input
+                type="search"
+                className={css.filterInput}
+                placeholder={t('sqlnotebook.searchPlaceholder')}
+                value={filter}
+                onChange={event => { setFilter(event.target.value) }}
+                aria-label={t('sqlnotebook.searchPlaceholder')}
+              />
+              {filter !== '' && (
+                <button
+                  type="button"
+                  className={css.filterClear}
+                  onClick={() => { setFilter('') }}
+                  aria-label={t('sqlnotebook.searchPlaceholder')}
+                  title={t('sqlnotebook.searchNoResults')}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <div className={css.schema} role="tree" aria-label={t('sqlnotebook.schema')}>
+              {tables === null
+                ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
+                : tables.tables.length === 0
+                  ? <div className={css.muted}>{t('sqlnotebook.schemaEmpty')}</div>
+                  : (filteredTables ?? []).length === 0
+                    ? <div className={css.searchNoResults}>{t('sqlnotebook.searchNoResults')}</div>
+                    : rootNode === null
+                      ? null
+                      : (
+                        <SqlTreeNode
+                          node={rootNode}
+                          depth={0}
+                          expanded={expanded}
+                          filterQuery={filterQuery}
+                          onToggle={toggle}
+                          onRequestColumns={(table) => { void readColumns(table).catch(() => {}) }}
+                          onInsertSelect={(table) => { insertSql(selectAllFrom(table, connection.rowLimit)) }}
+                          onTableContextMenu={(event, table) => {
+                            event.preventDefault()
+                            setMenuTarget({ table, rect: event.currentTarget.getBoundingClientRect() })
+                          }}
+                          columnsFor={name => columns[name]}
+                          labels={labels}
+                        />
+                      )}
+              {tables?.truncated === true && <div className={css.muted}>{t('sqlnotebook.schemaTruncated')}</div>}
+              {schemaProblem !== null && <div className={css.problem} role="alert">{schemaProblem}</div>}
+            </div>
+          </>
         )}
       </div>
       <SqlTableContextMenu

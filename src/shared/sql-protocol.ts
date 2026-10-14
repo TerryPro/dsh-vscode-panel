@@ -259,13 +259,58 @@ export interface SqlTreeEntry {
   name: string
   /** Anything else sqlite_master holds (indexes, triggers) is not offered as a tree node. */
   kind: 'table' | 'view'
+  /**
+   * Cheap counts of the secondary objects the panel renders as "分类" sub-nodes under this
+   * table or view. The host may omit any of them (a future enrichment); the panel renders the
+   * category as `(0)` in that case so the tree's shape does not change between databases.
+   */
+  sections?: SqlTableSections
+}
+
+/** Per-table counts of the secondary object categories. Every field is optional. */
+export interface SqlTableSections {
+  /** Number of indexes on the table, from `PRAGMA index_list`. */
+  indexes?: number
+  /** Number of foreign keys declared on the table, from `PRAGMA foreign_key_list`. */
+  foreignKeys?: number
+  /** Number of triggers on the table, from `sqlite_master` filtered by `type = 'trigger'`. */
+  triggers?: number
 }
 
 export interface SqlTablesResult {
   path: string
+  /**
+   * The kind of database the result describes: a real file on disk, or an in-memory `:memory:`
+   * handle. The panel uses it to pick the root node's icon and label; the runtime already knows,
+   * but carrying it here keeps the panel from reaching back to the runtime to ask.
+   */
+  databaseKind: 'file' | 'memory'
   tables: SqlTreeEntry[]
   /** True when more exist than were returned, so a short list does not look like all of them. */
   truncated: boolean
+}
+
+/** A foreign-key reference a column carries, when the host could read it. */
+export interface SqlForeignKey {
+  /** The referenced table. Workspace-relative to the open file. */
+  table: string
+  /** The referenced column on that table, when a single one is named. */
+  column?: string
+}
+
+/**
+ * Cheap statistics the panel may show next to a column, when the host computed them.
+ *
+ * Deliberately *not* the row count of the table (requirement: a `SELECT COUNT(*)` over hundreds
+ * of tables is not a free re-read). The values here are what `sqlite_stat1` already keeps when
+ * ANALYZE has been run on the database, and what the panel can show as `~N rows / N distinct`
+ * without asking the database to do extra work.
+ */
+export interface SqlColumnStats {
+  /** Approximate row count, from `sqlite_stat1` when present. */
+  approxRows?: number
+  /** Approximate number of distinct values, from `sqlite_stat1` when present. */
+  approxDistinct?: number
 }
 
 export interface SqlColumnEntry {
@@ -273,6 +318,19 @@ export interface SqlColumnEntry {
   type?: string
   notNull: boolean
   primaryKey: boolean
+  /**
+   * The column has a UNIQUE or UNIQUE INDEX on it, when the host could tell. Absent when the
+   * host did not read the index, so a future enrichment of the protocol can fill it without a
+   * panel rewrite.
+   */
+  unique?: boolean
+  /**
+   * Foreign-key target the column points at, when the host could tell. The host may not have
+   * read the foreign-key list at all (P2); the panel reads `undefined` as "no icon, no claim".
+   */
+  foreignKey?: SqlForeignKey
+  /** Cheap per-column statistics from `sqlite_stat1`, when the host has them. */
+  stats?: SqlColumnStats
 }
 
 export interface SqlColumnsResult {

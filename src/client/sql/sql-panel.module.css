@@ -106,31 +106,169 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/*
- * The schema tree: the connected database's tables, each expanding into its columns.
- *
- * Indentation and a guide rule rather than a fold arrow: the whole row is the disclosure control,
- * and a column list that hangs off a rule is what makes "these belong to that table" readable
- * without hovering anything.
- */
-.schema {
+/* ── Connection header ──────────────────────────────────────────────── */
+
+.connHeader {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 0;
+  padding: 5px 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  border-radius: 6px;
+  font-size: 11px;
 }
 
-.schemaNode {
+.connFile {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.connFileLabel {
+  color: var(--dsw-alias-label-tertiary);
+  flex-shrink: 0;
+}
+
+.connFilePath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.connMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+
+.connCount {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.tierBadge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.tierBadgeWritable {
+  background: color-mix(in srgb, var(--dsw-alias-state-confirm-bg) 20%, transparent);
+  color: var(--dsw-alias-state-confirm-label);
+}
+
+.tierBadgeReadonly {
+  background: color-mix(in srgb, var(--dsw-alias-interactive-bg-hover) 40%, transparent);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── Search filter ─────────────────────────────────────────────────── */
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.filterInput {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11px;
+  outline: none;
+}
+
+.filterInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.filterInput:focus {
+  border-color: var(--dsw-alias-focus-ring);
+  box-shadow: 0 0 0 1px var(--dsw-alias-focus-ring);
+}
+
+.filterClear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.filterClear:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.searchNoResults {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 4px 6px;
+}
+
+/* ── Schema tree ──────────────────────────────────────────────────── */
+
+.schema {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.treeNode {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.tableRow {
+.treeChildren {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The disclosure row: chevron, icon, label, optional count badge. The depth-based indent
+ * is set inline (paddingInlineStart) so the same class works at every level. */
+.treeRow {
   display: flex;
   align-items: center;
-  gap: 6px;
   min-width: 0;
+  padding: 1px 0;
+}
+
+.treeRowButton {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
   padding: 3px 6px;
   border: 0;
   border-radius: 5px;
@@ -142,56 +280,165 @@
   cursor: pointer;
 }
 
-.tableRow:hover {
+.treeRowButton:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.tableRow[aria-expanded='true'] {
+.treeRowButton[aria-expanded='true'] {
   background: var(--dsw-alias-interactive-bg-active);
 }
 
-.tableName {
+.treeRowButton:disabled {
+  cursor: default;
+}
+
+.treeChevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+.treeIcon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.treeLabel {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  color: var(--dsw-alias-label-primary);
 }
 
-.tableKind {
+.treeBadge {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tableNameMark {
+  background: var(--dsw-alias-state-selection-bg);
+  border-radius: 2px;
+  color: inherit;
+}
+
+/* ── Column row (child of 字段) ─────────────────────────────────────── */
+
+/*
+ * The column row: leading icons, then the column name and its declared type, then any pill
+ * badges for properties that do not have an icon of their own (NOT NULL, today). The row is a
+ * grid rather than a flex line because the leading icon slot and the trailing badge slot have
+ * to be the same width on every column — the eye reads a tree by the alignment of those slots
+ * down the list, and a flex row that let the icons move would not feel like a table.
+ */
+.columnRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 5px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.columnLeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: 28px;
+  flex-shrink: 0;
   color: var(--dsw-alias-label-tertiary);
 }
 
-.columnList {
-  margin: 0 0 2px 10px;
-  padding: 0 0 0 8px;
-  list-style: none;
-  border-inline-start: 1px solid var(--dsw-alias-border-l1);
+.columnLeading:empty {
+  /* A column with no leading icon still has to reserve the slot, so a PK row's key lands in
+   * the same place as a plain column's gap. A `:empty` rule is the cleanest way to make a
+   * grid cell that is empty take its declared width without rendering anything. */
+  display: block;
 }
 
-.columnRow {
+.sqlColumnIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 14px;
+  color: inherit;
+}
+
+.sqlColumnIconPk {
+  color: var(--dsw-alias-state-info-label);
+}
+
+.sqlColumnIconUq {
+  color: var(--dsw-alias-state-confirm-label);
+}
+
+.sqlColumnIconFk {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.columnLeft {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--dsw-alias-label-secondary);
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .columnName {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.columnNameMark {
+  background: var(--dsw-alias-state-selection-bg);
+  border-radius: 2px;
+  color: inherit;
 }
 
 .columnType {
   color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
-.columnBadge {
-  padding: 0 4px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 4px;
-  font-size: 9px;
+.columnStat {
   color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The "可为空" / "非空" text sits in its own grid column so every column row has the
+ * label landing in the same place. It is plain text, not a pill, because the file
+ * management panel puts every property in plain text — a pill would be the loudest
+ * thing on the row. */
+.columnNotNull {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  flex-shrink: 0;
+  width: 36px;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
 }
 
 .panelEmpty {
