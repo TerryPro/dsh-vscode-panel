@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -1116,5 +1118,26 @@ describe('SqlNotebookSurface 拖拽与折叠', () => {
     }
 
     expect((scrolled as unknown as HTMLElement | null)?.getAttribute('data-cell-id')).toBe('sqlnb-2')
+  })
+})
+
+/**
+ * The result grid carries vertical rules.
+ *
+ * Asserted against the stylesheet because jsdom applies none: a DOM test cannot see a cell's
+ * border, so nothing above would have caught this. It is written down because it has already been
+ * removed once — the design sheet draws horizontal rules only, which looks right in a mockup whose
+ * columns are narrow and wrong against a real result, where column widths follow the values and a
+ * value then sits far from the header naming it. Whoever trims the grid again has to argue with a
+ * failing test rather than with a screenshot.
+ */
+describe('SqlResultBlockView 结果表', () => {
+  it('draws a column rule on every cell, not only a row rule', () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
+    const block = (stylesheet.match(/\.resultTable th,\s*\.resultTable td \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(block, 'the shared cell rule must exist').toBeDefined()
+    // `border: 1px solid` sets all four sides. The horizontal-only form this replaced wrote
+    // `border-block-end`, which leaves the columns open — so this is the shape that must hold.
+    expect(block).toMatch(/border: 1px solid/u)
   })
 })

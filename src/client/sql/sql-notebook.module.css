@@ -441,30 +441,40 @@
   border-inline-start: 1px solid var(--dsw-alias-border-l2);
 }
 
-/* The scrollport for a wide table. It is the table's own, not the block's, so the headline above
-   stays put while the columns slide under it. */
+/*
+ * The scrollport for a wide table — the table's own, not the block's, so the headline above stays
+ * put while the columns slide under it.
+ *
+ * The padding is what keeps the grid's outer rule from landing on the cell's own border, which
+ * would read as one line twice as thick. The headline above it stays full-bleed on purpose: it is
+ * a strip, and a strip inset from its own block would look like a floating box.
+ */
 .resultScroll {
   overflow-x: auto;
+  padding: 8px 10px 10px;
 }
 
+/*
+ * A closed grid: rules on every side of every cell.
+ *
+ * The design sheet, and this file until now, drew horizontal rules only. That reads well in a
+ * mockup whose columns are narrow and rows short; it does not hold against a real result. Column
+ * widths follow the values, so one wide column pushes everything after it rightward and a value
+ * ends up far from the header that names it. The row hover only half fixes that — it says "these
+ * cells are one row", not "this cell is this column". The vertical rules are what make a row
+ * readable across, and the trailing one is what closes the grid.
+ */
 .resultTable {
+  width: 100%;
   border-collapse: collapse;
   font-size: 12px;
   font-family: var(--dsw-font-family-code, ui-monospace, monospace);
 }
 
-/*
- * Horizontal rules only, with the row's own hover to follow it across.
- *
- * The grid used to box every cell on all four sides. With a 64-column result that is 64 vertical
- * lines competing with the values, and the design drops them: fewer rules plus a row that lights
- * up under the pointer is what lets the eye track a row across, so the two go together rather than
- * either alone.
- */
 .resultTable th,
 .resultTable td {
   padding: 6px 12px;
-  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  border: 1px solid var(--dsw-alias-border-l1);
   text-align: start;
   vertical-align: top;
   white-space: pre-wrap;
@@ -476,12 +486,8 @@
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
+  /* The header's own edge is the louder one, so the grid reads as "header, then rows". */
   border-block-end: 1px solid var(--dsw-alias-border-l2);
-}
-
-/* The last row's rule is the block's own edge, not a separator; the pager or padding sits below. */
-.resultTable tbody tr:last-child td {
-  border-block-end: none;
 }
 
 .resultTable tbody tr:hover td {
