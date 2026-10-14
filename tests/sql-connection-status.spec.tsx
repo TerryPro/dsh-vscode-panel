@@ -34,13 +34,13 @@ afterEach(() => { cleanup() })
 const t = (key: string): string => (zh as Record<string, string>)[key] ?? key
 
 /** One notebook and a runtime that answers open with whatever tier it was asked for. */
-function mount(props: { hideReadout?: boolean } = {}): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: Record<string, ReturnType<typeof vi.fn>> } {
+function mount(props: { hideReadout?: boolean; walExpected?: boolean; path?: string } = {}): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: Record<string, ReturnType<typeof vi.fn>> } {
   const api = {
     sqlOpen: vi.fn((request: { path: string; access?: string }) => Promise.resolve({
       path: request.path,
       access: (request.access ?? 'read-only') as 'read-only' | 'writable',
       sqliteVersion: '3.46.0',
-      walSidecarExpected: false,
+      walSidecarExpected: props.walExpected ?? false,
       rowLimit: 1000,
     })),
     sqlExecute: vi.fn(() => Promise.resolve({ path: 'demo.db', blocks: [], elapsedMs: 1, executionCount: 1 })),
@@ -121,5 +121,53 @@ describe('SqlConnectionStatus', () => {
     runtime.runCell('tab-1', 'sqlnb-0')
 
     await waitFor(() => { expect(view.container.textContent).toBe(zh['sqlnotebook.reconnectHint']) })
+  })
+
+  /*
+   * Two standing session facts moved into the strip from above the cell surface (#16 accepted the
+   * same line-on-top reading for the panel, but a line that only shows while the cell view is on
+   * screen is a fact the reader has to remember the toolbar for, and that is not what a handle
+   * fact is). The strip outlives the cell surface, so it is the home for the same line.
+   */
+  it('appends the WAL sidecar notice to the strip when the handle is expected to leave -wal/-shm', async () => {
+    const { runtime, view } = mount({ walExpected: true })
+    await runtime.connect('tab-1', 'demo.db', 'read-only')
+
+    await waitFor(() => {
+      // The connection line and the sidecar notice share the strip, so the textContent holds both
+      // — asserting the sidecar line is in there is the contract, and the prior tests above
+      // already keep the connection line honest.
+      expect(view.container.textContent).toContain(zh['sqlnotebook.walSidecarNotice'])
+    })
+  })
+
+  it('appends the in-memory notice to the strip when the handle is on :memory:', async () => {
+    const { runtime, view } = mount()
+    await runtime.connect('tab-1', ':memory:', 'read-only')
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain(zh['sqlnotebook.memoryNotice'])
+    })
+  })
+
+  it('shows both notices side by side when both apply, with the in-memory fact first', async () => {
+    // A read-only handle on :memory: is not what the Host grants, but the strip's job is to render
+    // what it is told, and a component test that re-derives the access tier would assert against
+    // its own input. Both flags are independently observable on the connection; their order on
+    // screen is the contract.
+    const { runtime, view } = mount({ walExpected: true })
+    await runtime.connect('tab-1', ':memory:', 'read-only')
+
+    await waitFor(() => {
+      const text = view.container.textContent ?? ''
+      const walAt = text.indexOf(zh['sqlnotebook.walSidecarNotice'])
+      const memAt = text.indexOf(zh['sqlnotebook.memoryNotice'])
+      expect(walAt).toBeGreaterThanOrEqual(0)
+      // The two notices are appended in the order the connection surfaces them, with the
+      // in-memory fact first (the more time-critical one — the database is evaporating right
+      // now) and the WAL sidecar after. The component owns that order; the test pins it.
+      expect(memAt).toBeGreaterThanOrEqual(0)
+      expect(memAt).toBeLessThan(walAt)
+    })
   })
 })

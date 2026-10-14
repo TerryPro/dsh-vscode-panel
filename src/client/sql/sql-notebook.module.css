@@ -448,9 +448,14 @@
  * No padding: the grid runs to the block's edges, and the block's own border is what frames it.
  * Inset by even a few pixels the table stops reading as "this cell's rows" and starts reading as a
  * panel floating inside the panel.
+ *
+ * Capped at a height that fits roughly 16 rows in the design's body type, so a 1000-row answer
+ * does not push the pager and every other block past the fold. The pager sits in the block, not
+ * in this scrollport, so turning a page does not move the controls.
  */
 .resultScroll {
-  overflow-x: auto;
+  max-height: 480px;
+  overflow: auto;
 }
 
 /*
@@ -485,6 +490,45 @@
   max-width: 420px;
 }
 
+/*
+ * A cell can hold anything the database returned, including a single value with no newlines
+ * repeated until the row is a hundred lines tall. The grid is read across many cells at once,
+ * so a runaway cell pulls the rest of the row's width and height with it and the table stops
+ * being a table.
+ *
+ * The clamp is on the *value* (`.resultText`) rather than on the `td`, because `td` already
+ * owns `pre-wrap` and `overflow-wrap: anywhere` for content that needs to break. Putting the
+ * clamp there would also cut the header chip, the NULL symbol and the BLOB size, which are
+ * already short and intentionally readable. The full value still rides on `title`, so a hover
+ * surfaces it without forcing the table open again.
+ *
+ * `display: -webkit-box` is the only form of `line-clamp` that Chromium-based renderers
+ * (Electron) take; the `line-clamp` shorthand is the modern name for the same rule and is
+ * written alongside so the line below the cut is the one readers actually use.
+ */
+.resultText {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  /*
+   * The ellipsis on a `-webkit-line-clamp` is drawn by the engine itself, so an extra
+   * `text-overflow: ellipsis` here would be a no-op in the box model that matters. It is left in
+   * for the same reason the `line-clamp` shorthand is written alongside the `-webkit-` one:
+   * future renderers are expected to read the unprefixed name, and a missing rule would be the
+   * reason the truncation silently turned into a hard cut.
+   */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  /*
+   * `pre-wrap` on the `td` above still applies here, because `-webkit-box` is a block-formatted
+   * container that obeys its own white-space rule. Forcing `normal` would glue the value into
+   * one unbreakable token and let one long word blow the clamp; that is the same failure the
+   * `td` rule above exists to prevent, so it stays.
+   */
+  word-break: break-word;
+}
+
 /* The cell's own left/right border frames the grid; a rule on top of it would double it. */
 .resultTable tr > :first-child {
   border-inline-start: none;
@@ -496,19 +540,33 @@
 
 /* The top edge belongs to the strip above (which already closes itself), the bottom to the cell. */
 .resultTable thead th {
-  border-block-start: none;
-}
-
-.resultTable tbody tr:last-child > td {
-  border-block-end: none;
-}
-
-.resultTable thead th {
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
   /* The header's own edge is the louder one, so the grid reads as "header, then rows". */
   border-block-end: 1px solid var(--dsw-alias-border-l2);
+  /*
+   * Stuck to the top of `.resultScroll` so the column names are still there on the row a reader
+   * is looking at, instead of scrolled off with everything before it. The background above is
+   * what hides the rows sliding under the header, not transparent space — without it the column
+   * names render on top of the values, which reads as a typo, not a header.
+   *
+   * `top: 0` rather than `-1px` so the header sits flush with the rounded top of the block.
+   */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* The header owns the top edge of the cell now, so it must not also draw the second one. */
+.resultTable thead th {
+  border-block-start: none;
+}
+
+/* The cell that holds the table draws its own bottom border; a rule on the last row
+ * would double it. */
+.resultTable tbody tr:last-child > td {
+  border-block-end: none;
 }
 
 .resultTable tbody tr:hover td {
@@ -687,4 +745,20 @@
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
+}
+
+/*
+ * A standing session banner that lives in the editor's status strip rather than above the cells.
+ *
+ * The strip is grey-on-grey (`editorStatusBar` paints everything `label-tertiary`), which is the
+ * right default for caret position and language chips but wrong for a fact the reader is meant to
+ * act on. A separate class with `state-warn-label` is what makes "this handle is leaving files
+ * behind" or "this database evaporates with the tab" pop without having to repaint the whole
+ * strip.
+ *
+ * The class is on the `span` itself rather than on the strip, so the same strip can carry one
+ * fact or two side by side and each one stands on its own.
+ */
+.statusBarNotice {
+  color: var(--dsw-alias-state-warn-label);
 }

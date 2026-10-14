@@ -87,7 +87,6 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
   const [columns, setColumns] = useState<Record<string, SqlColumnEntry[]>>({})
   const [menuTarget, setMenuTarget] = useState<SqlTableMenuTarget | null>(null)
-  const [filter, setFilter] = useState('')
   const lastExecution = useRef('')
 
   const loadSchema = useCallback((): void => {
@@ -103,7 +102,6 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     setTables(null)
     setColumns({})
     setSchemaProblem(null)
-    setFilter('')
     if (connectedPath !== null) loadSchema()
   }, [connectedPath, loadSchema])
 
@@ -177,27 +175,6 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     if (action === 'copy-columns') void readColumns(table).then(entries => { copyOut(entries.map(entry => entry.name).join('\n')) }, () => {})
   }, [connection?.rowLimit, copyOut, insertSql, readColumns])
 
-  const filterQuery = filter.trim().toLowerCase()
-  const filteredTables = useMemo(() => {
-    if (tables === null) return null
-    if (filterQuery === '') return tables.tables
-    return tables.tables.filter(entry => {
-      if (entry.name.toLowerCase().includes(filterQuery)) return true
-      const loaded = columns[entry.name]
-      if (loaded === undefined) return false
-      return loaded.some(column => column.name.toLowerCase().includes(filterQuery))
-    })
-  }, [columns, filterQuery, tables])
-
-  const tableCount = useMemo(() => {
-    if (tables === null) return 0
-    return tables.tables.filter(entry => entry.kind === 'table').length
-  }, [tables])
-  const viewCount = useMemo(() => {
-    if (tables === null) return 0
-    return tables.tables.length - tableCount
-  }, [tables, tableCount])
-
   /**
    * The labels every node reads. The tree itself does not look at the dictionary: a node's
    * `label` is already a translated string, and these are the few that the panel still
@@ -231,10 +208,10 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       kind: 'database',
       path: tables.path,
       databaseKind: tables.databaseKind,
-      tables: filteredTables ?? tables.tables,
+      tables: tables.tables,
       truncated: tables.truncated,
     }
-  }, [filteredTables, tables])
+  }, [tables])
 
   /**
    * Expansion state. The set is keyed by the path the recursion threads, so a click on a
@@ -281,7 +258,6 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     <div className={css.panelBody}>
       {header}
       <div className={css.body}>
-        <div className={css.notebookLine}>{t('sqlnotebook.panelNotebook', { path: notebookPath })}</div>
         {connection === null ? (
           <>
             <div className={css.muted}>{t('sqlnotebook.notConnected')}</div>
@@ -289,71 +265,29 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
           </>
         ) : (
           <>
-            <div className={css.connHeader}>
-              <div className={css.connFile} title={connection.path}>
-                <span className={css.connFileLabel}>{t('sqlnotebook.connFile')}</span>
-                <span className={css.connFilePath}>{connection.path}</span>
-              </div>
-              <div className={css.connMeta}>
-                {tables !== null && (
-                  <span className={css.connCount}>
-                    {tables.tables.length === 0
-                      ? t('sqlnotebook.connNoTables')
-                      : t('sqlnotebook.connRowCount', { tables: tableCount, views: viewCount })}
-                  </span>
-                )}
-                <span className={`${css.tierBadge} ${connection.access === 'writable' ? css.tierBadgeWritable : css.tierBadgeReadonly}`}>
-                  {connection.access === 'writable' ? t('sqlnotebook.writableTier') : t('sqlnotebook.readOnlyTier')}
-                </span>
-              </div>
-            </div>
-            <div className={css.filterBar}>
-              <input
-                type="search"
-                className={css.filterInput}
-                placeholder={t('sqlnotebook.searchPlaceholder')}
-                value={filter}
-                onChange={event => { setFilter(event.target.value) }}
-                aria-label={t('sqlnotebook.searchPlaceholder')}
-              />
-              {filter !== '' && (
-                <button
-                  type="button"
-                  className={css.filterClear}
-                  onClick={() => { setFilter('') }}
-                  aria-label={t('sqlnotebook.searchPlaceholder')}
-                  title={t('sqlnotebook.searchNoResults')}
-                >
-                  ×
-                </button>
-              )}
-            </div>
             <div className={css.schema} role="tree" aria-label={t('sqlnotebook.schema')}>
               {tables === null
                 ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
                 : tables.tables.length === 0
                   ? <div className={css.muted}>{t('sqlnotebook.schemaEmpty')}</div>
-                  : (filteredTables ?? []).length === 0
-                    ? <div className={css.searchNoResults}>{t('sqlnotebook.searchNoResults')}</div>
-                    : rootNode === null
-                      ? null
-                      : (
-                        <SqlTreeNode
-                          node={rootNode}
-                          depth={0}
-                          expanded={expanded}
-                          filterQuery={filterQuery}
-                          onToggle={toggle}
-                          onRequestColumns={(table) => { void readColumns(table).catch(() => {}) }}
-                          onInsertSelect={(table) => { insertSql(selectAllFrom(table, connection.rowLimit)) }}
-                          onTableContextMenu={(event, table) => {
-                            event.preventDefault()
-                            setMenuTarget({ table, rect: event.currentTarget.getBoundingClientRect() })
-                          }}
-                          columnsFor={name => columns[name]}
-                          labels={labels}
-                        />
-                      )}
+                  : rootNode === null
+                    ? null
+                    : (
+                      <SqlTreeNode
+                        node={rootNode}
+                        depth={0}
+                        expanded={expanded}
+                        onToggle={toggle}
+                        onRequestColumns={(table) => { void readColumns(table).catch(() => {}) }}
+                        onInsertSelect={(table) => { insertSql(selectAllFrom(table, connection.rowLimit)) }}
+                        onTableContextMenu={(event, table) => {
+                          event.preventDefault()
+                          setMenuTarget({ table, rect: event.currentTarget.getBoundingClientRect() })
+                        }}
+                        columnsFor={name => columns[name]}
+                        labels={labels}
+                      />
+                    )}
               {tables?.truncated === true && <div className={css.muted}>{t('sqlnotebook.schemaTruncated')}</div>}
               {schemaProblem !== null && <div className={css.problem} role="alert">{schemaProblem}</div>}
             </div>

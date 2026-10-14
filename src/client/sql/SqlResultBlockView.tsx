@@ -214,7 +214,10 @@ function SqlResultCell({ value, labels }: { value: SqlWireValue; labels: SqlResu
         </span>
       )
     case 'text':
-      return <span>{display.text}</span>
+      // `title` carries the full value so a cell that the line-clamp below cropped is still
+      // copyable from a tooltip — the ellipsis on screen is a presentation, not a loss. NULL
+      // and the empty string take the same path above for the same reason.
+      return <span className={css.resultText} title={display.text}>{display.text}</span>
   }
 }
 

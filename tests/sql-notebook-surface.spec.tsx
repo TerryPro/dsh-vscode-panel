@@ -588,21 +588,32 @@ describe('SqlNotebookSurface 连接与执行', () => {
   // The two standing facts about a live handle moved with the control they describe, and stayed
   // lines rather than becoming tooltips: an in-memory database is still evaporating while the reader
   // is four queries in, and a WAL sidecar is still there after the handle closes.
-  it('keeps saying an in-memory database goes with the notebook, while that is the handle', async () => {
+  // The two standing facts about the live handle used to render as a line above the cells. They
+  // moved into the editor's status strip (the `attachment` slot `EditorStatusBar` already owns),
+  // so the cell surface no longer carries them — the strip outlives the cell view and is the
+  // right home for a fact the reader needs to know about the handle, not about the cell. The
+  // behaviour each test pinned now lives in `sql-connection-status.spec.tsx`, with a fixture that
+  // renders the same component the workbench wires into the strip.
+
+  it('does not put the in-memory notice above the cells, because the strip is the home for it', async () => {
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
     const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
     await waitFor(() => { expect(picker.options.length).toBeGreaterThan(2) })
     fireEvent.change(picker, { target: { value: ':memory:' } })
     fireEvent.click(harness.view.getByRole('button', { name: labels.connect }))
 
-    expect(await harness.view.findByText(labels.memoryNotice)).toBeTruthy()
+    // The picker change is what triggers the connect; wait for the handle to land before sampling
+    // the surface, otherwise the read races the connect.
+    await harness.view.findByText(labels.memoryDatabase)
+    expect(harness.view.container.textContent).not.toContain(labels.memoryNotice)
   })
 
-  it('warns that a read-only WAL handle leaves sidecar files behind', async () => {
+  it('does not put the WAL sidecar notice above the cells, because the strip is the home for it', async () => {
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), { walExpected: true })
     await harness.connect()
 
-    expect(await harness.view.findByText(labels.walSidecarNotice)).toBeTruthy()
+    // Same reasoning as the memory test: the connect must land before the read.
+    expect(harness.view.container.textContent).not.toContain(labels.walSidecarNotice)
   })
 
   /**
@@ -671,6 +682,35 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(written.cells[0]?.blocks[0]?.rows).toEqual([[7, 'Tokyo']])
     expect(written.cells[0]?.executionCount).toBe(1)
     expect(harness.onSave).toHaveBeenCalled()
+  })
+
+  /**
+   * A cell with a single very long value used to push the whole row's height to a hundred lines,
+   * collapsing every neighbouring column into a sliver and the page along with it. The cell now
+   * carries the value in a clamp container, and the full text rides on the `title` attribute so a
+   * hover surfaces it without forcing the table open again — that is the contract the CSS line-clamp
+   * depends on, and a regression that lost `title` would lose the value as far as the reader is
+   * concerned.
+   */
+  it('clamps a runaway text value to a fixed number of lines and keeps the full text on hover', async () => {
+    const long = '段落文字'.repeat(2000)
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
+      blocks: [block({ columns: [{ label: 'name', name: 'name' }], rows: [[long]] })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+
+    const cell = await harness.view.findByText(long)
+    expect(cell, 'the cell must render the full value, not a summary').toBeTruthy()
+    // The clamp container is a class we can name — a CSS-module hash is no use to a test that has
+    // to assert the value still rides on a hover, and `tagName` would not survive a future change
+    // from `<span>` to anything else. Class is the only name the test can keep while the renderer
+    // does not.
+    expect(cell.className).toMatch(/resultText/u)
+    // The full string must still be reachable: the ellipsis on screen is a presentation, not a
+    // loss. A clamp that forgot to put the value on `title` would be the same as a delete, so
+    // this is the assertion that catches it.
+    expect(cell.getAttribute('title')).toBe(long)
   })
 
   it('keeps NULL, the empty string and the text NULL three different things', async () => {
@@ -1368,5 +1408,82 @@ describe('SqlResultBlockView 结果表', () => {
     const scroll = (stylesheet.match(/\.resultScroll \{[\s\S]*?\n\}/u) ?? [])[0]
     expect(scroll, '.resultScroll must exist').toBeDefined()
     expect(scroll).not.toMatch(/^\s*padding:/mu)
+  })
+
+  /*
+   * A thousand-row answer used to push the pager past the fold: every row sat in the document, so
+   * the block grew until the controls lived below the visible window. The table is now capped at a
+   * height the pager stays under, and the header is glued to the top of that scrollport so the
+   * column names are still there on the row a reader is looking at.
+   *
+   * Asserted against the stylesheet because jsdom does not lay anything out: nothing above can
+   * catch a `max-height: 720px` that was dropped, or a sticky header that lost its `top: 0`.
+   * Whoever widens the answer or the column count has to argue with a failing test.
+   */
+  it('caps the table scrollport, so a long result does not push the pager below the fold', () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
+    const scroll = (stylesheet.match(/\.resultScroll \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(scroll, '.resultScroll must exist').toBeDefined()
+    // `max-height` is what gives a 1000-row answer a height the pager can stay under. An `overflow: auto`
+    // without a height cap would still grow with the content, which is the failure this rule exists
+    // to prevent.
+    expect(scroll).toMatch(/max-height:\s*\d+px/u)
+    // And it must actually scroll, not just clip: a long result on a one-screen window is the
+    // problem, and `overflow: auto` is what makes the rule do that.
+    expect(scroll).toMatch(/overflow:\s*auto/u)
+    /*
+     * And it must not be the half-screen value that was tried first: a 720px scrollport still
+     * pushes a notebook with three results past one screen, and a 1000px one is no scrollport at
+     * all on a small window. The number the rule says is the one the reader sees, so the
+     * contract is on the literal — whoever widens this has to argue that a 16-row table is the
+     * wrong target.
+     */
+    const match = scroll!.match(/max-height:\s*(\d+)px/u)
+    expect(match, '.resultScroll must declare max-height in pixels').toBeTruthy()
+    const captured = match![1]
+    const value = Number(captured)
+    expect(value).toBeGreaterThanOrEqual(360)
+    expect(value).toBeLessThanOrEqual(560)
+  })
+
+  it('sticks the column header to the top of the table scrollport', () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
+    // The `thead th` rule carries the sticky position. It is the one place that has the background
+    // colour hiding the rows sliding under it, so the rule belongs there rather than on `tr` or `td`.
+    const theadTh = (stylesheet.match(/\.resultTable thead th \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(theadTh, '.resultTable thead th must exist').toBeDefined()
+    // The three together — sticky / top / z-index — are what makes a header stay on top and not
+    // render on top of the next row's text. A header that is sticky but transparent reads as a
+    // typo, not as a header.
+    expect(theadTh).toMatch(/position:\s*sticky/u)
+    expect(theadTh).toMatch(/top:\s*0/u)
+    expect(theadTh).toMatch(/z-index:\s*1/u)
+  })
+
+  /*
+   * A single value with no newlines repeated until the row is a hundred lines tall used to push
+   * every neighbouring column into a sliver and the page off the screen. The cell value now sits
+   * in a clamp container that draws the ellipsis itself, not on the `td`, because `td` already
+   * owns `pre-wrap` and `overflow-wrap: anywhere` for content that needs to break. Putting the
+   * clamp there would also cut the header chip, the NULL symbol and the BLOB size, which are
+   * already short and intentionally readable.
+   *
+   * Asserted against the stylesheet because jsdom does not lay anything out: the only fact a
+   * regression can drop is the line-count itself, and an `-webkit-line-clamp` that was widened
+   * to 100 would be a quiet change in the opposite direction — a test that sampled the rendered
+   * height could not catch it. Whoever widens the clamp has to argue with a failing test.
+   */
+  it('clamps a long value to three lines, on the value container rather than the cell', () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
+    const text = (stylesheet.match(/\.resultText \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(text, '.resultText must exist').toBeDefined()
+    // `display: -webkit-box` is the box model `-webkit-line-clamp` reads from. Without it the
+    // line-clamp is ignored, which is the failure this rule exists to prevent: a clamped value
+    // that still grew to the bottom of the viewport because the box was inline.
+    expect(text).toMatch(/display:\s*-webkit-box/u)
+    expect(text).toMatch(/-webkit-line-clamp:\s*3/u)
+    // And the value has to actually be hidden, not just clipped: an `overflow: hidden` missing
+    // here would leak the long value past the line the clamp set.
+    expect(text).toMatch(/overflow:\s*hidden/u)
   })
 })

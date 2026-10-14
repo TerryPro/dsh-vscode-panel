@@ -614,18 +614,15 @@ export function SqlNotebookSurface({
         <div className={css.noticeError} role="alert">{refusalText(runState.connectionProblem, labels)}</div>
       )}
       {/*
-        The two standing facts about the live handle. They are lines here rather than tooltips
-        because they are true for the whole session, not at the moment of a click: an in-memory
-        database is still evaporating while the reader is on their fourth query, and a WAL sidecar
-        is still there after the handle closes. #16 accepted the same reasoning when the panel held
-        them (「做成常驻行」); moving the control moved the warnings, not their conditions.
-      */}
-      {connection !== null && connection.path === SQL_MEMORY_TARGET && (
-        <div className={css.notice} role="status">{labels.memoryNotice}</div>
-      )}
-      {connection?.walSidecarExpected === true && (
-        <div className={css.notice} role="status">{labels.walSidecarNotice}</div>
-      )}
+        The two standing facts about the live handle used to live here as well, on the same
+        reading that #16 accepted for the panel. They do not, any more: a session banner that
+        the reader only sees while the cell surface is on screen reads as "this run's status",
+        not "this handle's standing facts", and the second time the reader opens the same WAL
+        database they would have to remember the banner was even there. `SqlConnectionStatus`
+        carries them in the editor's status strip, which is the one place that lives in both
+        the cell view and the source view. Kept as comments so the next person hunting for
+        "where is the WAL notice rendered" lands on the strip, not on a missing line.
+       */}
       <div className={css.body}>
         <div className={css.cells}>
           {refusal !== null && <div className={css.noticeError} role="alert">{refusal}</div>}

@@ -30,6 +30,7 @@ import {
   IconTrigger16,
   IconView16,
 } from './SqlIcon.tsx'
+import { IconChevronDownOutlineRegular, IconChevronRightOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './sql-panel.module.css'
 
 /**
@@ -99,8 +100,8 @@ interface SqlTreeNodeProps {
   /** All expanded paths in the tree. A path is the slash-joined chain of `node.label`
    *  strings from the root, matching `FileTree`'s convention. */
   expanded: Set<string>
-  /** Active search query, for the `<mark>` highlight. */
-  filterQuery: string
+  /** Active search query, for the `<mark>` highlight. Defaults to '' (no highlight). */
+  filterQuery?: string
   /** The slash-joined path of the *parent* of this node. `undefined` for the root. The
    *  recursion is what threads this; callers that mount the tree itself pass `undefined`
    *  for the root and the recursive children fill it in. */
@@ -176,7 +177,7 @@ function DatabaseNode(props: SqlTreeNodeProps & { path: string }): React.ReactNo
         open={open}
         icon={<IconDatabaseRoot16 size={14} />}
         label={label}
-        filterQuery={filterQuery}
+        filterQuery={filterQuery ?? ''}
         title={label}
         onToggle={() => { onToggle(props.path) }}
         onActivate={undefined}
@@ -197,7 +198,7 @@ function DatabaseNode(props: SqlTreeNodeProps & { path: string }): React.ReactNo
               }}
               depth={depth + 1}
               expanded={expanded}
-              filterQuery={filterQuery}
+              filterQuery={filterQuery ?? ''}
               onToggle={props.onToggle}
               onRequestColumns={props.onRequestColumns}
               onInsertSelect={props.onInsertSelect}
@@ -232,7 +233,7 @@ function TableNode(props: SqlTreeNodeProps & { path: string }): React.ReactNode 
         open={open}
         icon={isView ? <IconView16 size={14} /> : <IconTable16 size={14} />}
         label={node.name}
-        filterQuery={filterQuery}
+        filterQuery={filterQuery ?? ''}
         title={labels.openTable}
         onToggle={() => { onToggle(props.path) }}
         onActivate={() => { onInsertSelect(node.name) }}
@@ -248,7 +249,7 @@ function TableNode(props: SqlTreeNodeProps & { path: string }): React.ReactNode 
               node={category.node}
               depth={depth + 1}
               expanded={expanded}
-              filterQuery={filterQuery}
+              filterQuery={filterQuery ?? ''}
               onToggle={props.onToggle}
               onRequestColumns={props.onRequestColumns}
               onInsertSelect={props.onInsertSelect}
@@ -284,7 +285,7 @@ function CategoryNode(props: SqlTreeNodeProps & { path: string }): React.ReactNo
         open={open}
         icon={icon}
         label={node.label}
-        filterQuery={filterQuery}
+        filterQuery={filterQuery ?? ''}
         title={expandable ? node.label : undefined}
         onToggle={expandable ? () => {
           onToggle(props.path)
@@ -309,7 +310,7 @@ function CategoryNode(props: SqlTreeNodeProps & { path: string }): React.ReactNo
                   node={{ kind: 'column', column, ownerTable: node.ownerTable }}
                   depth={depth + 1}
                   expanded={expanded}
-                  filterQuery={filterQuery}
+                  filterQuery={filterQuery ?? ''}
                   onToggle={props.onToggle}
                   onRequestColumns={props.onRequestColumns}
                   onInsertSelect={props.onInsertSelect}
@@ -337,7 +338,7 @@ function ColumnNode(props: SqlTreeNodeProps & { path: string }): React.ReactNode
         </span>
         <span className={css.columnLeft}>
           <span className={css.columnName}>
-            {filterQuery === ''
+            {filterQuery === '' || filterQuery === undefined
               ? column.name
               : <HighlightedText text={column.name} query={filterQuery} />}
           </span>
@@ -365,7 +366,8 @@ interface RowProps {
   open: boolean
   icon: React.ReactNode
   label: string
-  filterQuery: string
+  /** Defaults to '' (no highlight). */
+  filterQuery?: string
   title: string | undefined
   onToggle: (() => void) | undefined
   onActivate: (() => void) | undefined
@@ -394,10 +396,16 @@ function Row(props: RowProps): React.ReactNode {
         onContextMenu={onContextMenu}
         disabled={!isClickable && onActivate === undefined}
       >
-        <span className={css.treeChevron} aria-hidden="true">{isClickable ? (open ? '▾' : '▸') : ' '}</span>
+        <span className={css.treeChevron} aria-hidden="true">
+          {isClickable
+            ? (open
+                ? <IconChevronDownOutlineRegular size={12} />
+                : <IconChevronRightOutlineRegular size={12} />)
+            : null}
+        </span>
         <span className={css.treeIcon} aria-hidden="true">{icon}</span>
         <span className={css.treeLabel}>
-          {filterQuery === '' ? label : <HighlightedText text={label} query={filterQuery} />}
+          {filterQuery === '' || filterQuery === undefined ? label : <HighlightedText text={label} query={filterQuery ?? ''} />}
         </span>
         {badge !== undefined && (
           <span className={css.treeBadge} title={badgeTitle ?? ''}>{badge}</span>

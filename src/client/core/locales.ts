@@ -463,7 +463,6 @@ export const zh = {
   'sqlnotebook.outline': 'SQL 笔记大纲',
   'sqlnotebook.outlineEmpty': '暂无标题',
   'sqlnotebook.panelNoNotebook': '当前没有打开 SQL 笔记。',
-  'sqlnotebook.panelNotebook': '笔记 {path}',
   // 面板不再持有任何连接控件后，「连接入口在哪」必须有人回答，否则未连接的面板是一句死路。
   'sqlnotebook.connectInToolbar': '在笔记工具栏里选择数据库并连接',
   'sqlnotebook.memoryNotice': '内存库随笔记关闭而消失，里面的表不会留在磁盘上。',
@@ -1093,7 +1092,6 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.outline': 'SQL notebook outline',
   'sqlnotebook.outlineEmpty': 'No headings',
   'sqlnotebook.panelNoNotebook': 'No SQL notebook is open.',
-  'sqlnotebook.panelNotebook': 'Notebook {path}',
   // The panel no longer holds any connection control, so an unconnected panel has to say where the
   // action went rather than ending in a dead end.
   'sqlnotebook.connectInToolbar': 'Pick a database and connect from the notebook toolbar',
