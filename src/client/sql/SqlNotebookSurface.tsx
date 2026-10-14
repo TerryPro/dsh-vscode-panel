@@ -127,6 +127,17 @@ export interface SqlNotebookLabels {
   /** Why the tier cannot be changed while a handle is open. */
   tierLocked: string
   rescan: string
+  /*
+   * The three connection-domain facts the sidebar used to say. They moved with the control they
+   * explain (ADR 0008), which is `ca2296c`'s rule read the other way round: the copy that sits next
+   * to the thing it describes is the one that survives, so when the database list moved here, its
+   * notes had to move here too — otherwise the warning would be floating a column away from the
+   * picker it warns about.
+   */
+  scanTruncated: string
+  disconnectHint: string
+  memoryNotice: string
+  walSidecarNotice: string
   /** A Run All that stopped mid-stretch has to say where, and how many it left. */
   runAllStopped: (index: number, remaining: number) => string
   /** The Host rolls an open transaction back when a handle closes; that is worth saying. */
@@ -237,8 +248,9 @@ export function SqlNotebookSurface({
   const memoryPicked = pickPath === SQL_MEMORY_TARGET
   const connectAccess: SqlAccess = memoryPicked ? 'writable' : pickAccess
 
-  // The workspace walk is what the picker lists. Both the notebook's toolbar and the sidebar panel
-  // list it, so the state around it lives in `useDatabaseScan` rather than in two copies here.
+  // The workspace walk is what the picker lists. The toolbar is the only surface that lists it now
+  // (ADR 0008 moved the sidebar's copy away), so the state around it still lives in `useDatabaseScan`
+  // rather than being re-derived here.
   const { scan, scanning, rescan } = useDatabaseScan(listDirectory)
 
   /**
@@ -515,6 +527,10 @@ export function SqlNotebookSurface({
           <select
             className={css.pickerSelect}
             aria-label={labels.database}
+            // The list's own caveat, said on the list: a short list that claims to be everything the
+            // workspace holds is the failure `scanDatabases` carries `truncated` to prevent, and the
+            // reader is only wondering that while their pointer is here.
+            title={scan?.truncated === true ? labels.scanTruncated : undefined}
             value={pickPath}
             disabled={!canConnect}
             onChange={event => { setPickPath(event.target.value) }}
@@ -564,6 +580,11 @@ export function SqlNotebookSurface({
             <button
               type="button"
               className={css.toolbarButton}
+              // The cost of pressing this is not visible from the word 断开: the handle carries the
+              // notebook's scratch work, and it goes with the handle. `ca2296c` found the sidebar's
+              // button said this while this one did not, and deferred adding it here as out of scope
+              // for a deletion; this is where that debt is paid.
+              title={labels.disconnectHint}
               onClick={() => {
                 void runtime.disconnect(tabId).then((outcome) => {
                   // The Host rolls back an open transaction on the way out; a reader who had
@@ -591,6 +612,19 @@ export function SqlNotebookSurface({
       )}
       {runState?.connectionProblem !== null && runState?.connectionProblem !== undefined && (
         <div className={css.noticeError} role="alert">{refusalText(runState.connectionProblem, labels)}</div>
+      )}
+      {/*
+        The two standing facts about the live handle. They are lines here rather than tooltips
+        because they are true for the whole session, not at the moment of a click: an in-memory
+        database is still evaporating while the reader is on their fourth query, and a WAL sidecar
+        is still there after the handle closes. #16 accepted the same reasoning when the panel held
+        them (「做成常驻行」); moving the control moved the warnings, not their conditions.
+      */}
+      {connection !== null && connection.path === SQL_MEMORY_TARGET && (
+        <div className={css.notice} role="status">{labels.memoryNotice}</div>
+      )}
+      {connection?.walSidecarExpected === true && (
+        <div className={css.notice} role="status">{labels.walSidecarNotice}</div>
       )}
       <div className={css.body}>
         <div className={css.cells}>

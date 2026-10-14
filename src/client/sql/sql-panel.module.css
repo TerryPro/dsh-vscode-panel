@@ -82,70 +82,23 @@
   text-overflow: ellipsis;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.fieldLabel {
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.select {
-  height: 24px;
-  max-width: 100%;
-  padding: 0 4px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 5px;
-  background: var(--dsw-alias-bg-base);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 11.5px;
-}
-
-.primaryButton {
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 5px;
-  background: var(--dsw-alias-bg-base);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-}
-
-.primaryButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.primaryButton:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.readout {
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
-  overflow-wrap: anywhere;
-}
-
 .problem {
   font-size: 11px;
   color: var(--dsw-alias-state-warn-label);
 }
 
 /*
- * The in-memory warning stays on screen for as long as the handle is `:memory:`, rather than being
- * said once at connect time: the fact is true for the whole session, and a line that disappeared
- * after a few seconds is one the reader can miss before the tables it describes matter.
+ * Where the connection control went, said to a reader standing in the column that used to hold it.
+ * A plain `.muted` line would read as another status; this is an instruction, so it gets its own
+ * fill and wraps instead of ellipsising the one sentence the reader needs.
  */
-.memoryNote {
+.pointer {
   font-size: 11px;
-  color: var(--dsw-alias-state-warn-label);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1);
+  border-radius: 6px;
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
 }
 
 .muted {
@@ -165,13 +118,6 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-}
-
-.schemaHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
 }
 
 .schemaNode {

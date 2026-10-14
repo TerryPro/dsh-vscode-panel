@@ -217,8 +217,8 @@ export interface SqlOpenResult {
    * True when opening proved this file is a WAL database.
    *
    * Measured: the first statement on a read-only WAL connection creates `-wal` and `-shm`
-   * beside the file and `close()` does not remove them. The panel must say so up front —
-   * this flag is what makes that sentence honest rather than a footnote.
+   * beside the file and `close()` does not remove them. The notebook's toolbar must say so up
+   * front (ADR 0008) — this flag is what makes that sentence honest rather than a footnote.
    */
   walSidecarExpected: boolean
   rowLimit: number

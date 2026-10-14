@@ -387,5 +387,9 @@ describe('SqlBackend.cancel', () => {
       caught = error
     }
     expect((caught as { code?: string }).code).toBe('SQL_NOT_CONNECTED')
+    // The message reaches the reader verbatim, so where it tells them to look is part of the
+    // contract: ADR 0008 moved connecting from the sidebar to the notebook's toolbar, and this
+    // sentence was still sending readers to a column that no longer holds a database picker.
+    expect((caught as { message?: string }).message).toContain('笔记工具栏')
   })
 })

@@ -313,6 +313,10 @@ export function EditorTabBody({
     writableTier: t('sqlnotebook.writableTier'),
     tierLocked: t('sqlnotebook.tierLocked'),
     rescan: t('sqlnotebook.rescan'),
+    scanTruncated: t('sqlnotebook.scanTruncated'),
+    disconnectHint: t('sqlnotebook.disconnectHint'),
+    memoryNotice: t('sqlnotebook.memoryNotice'),
+    walSidecarNotice: t('sqlnotebook.walSidecarNotice'),
     runAllStopped: (index, remaining) => t('sqlnotebook.runAllStopped', { index: String(index), remaining: String(remaining) }),
     disconnectedRolledBack: t('sqlnotebook.disconnectedRolledBack'),
     runAllNotice: count => t('sqlnotebook.runAllNotice', { count: String(count) }),
@@ -463,7 +467,7 @@ export function EditorTabBody({
       />
     )
     : isSqlNotebookTab
-      ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} />
+      ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} hideReadout={sqlNotebookMode === 'notebook'} />
       : null
   return (
     <div className={css.editorFileArea}>

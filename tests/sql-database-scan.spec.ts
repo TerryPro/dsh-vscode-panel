@@ -82,6 +82,20 @@ describe('scanDatabases', () => {
     expect(result.databases.map(entry => entry.path)).toEqual(['Reports/SALES.DB'])
   })
 
+  /**
+   * A WAL database's sidecars end in `.db-wal`, so they fall out of the extension test rather than
+   * being filtered on purpose — which is why this case exists. The Host would answer one with
+   * `SQL_DATABASE_UNAVAILABLE`, and a picker that offers a file it cannot open reads as a broken
+   * database rather than as a listing that went one suffix too far.
+   */
+  it('leaves the sidecar files a WAL database leaves behind out of the list', async () => {
+    const result = await scan({
+      '': listing('', [file('demo.db'), file('demo.db-wal'), file('demo.db-shm')]),
+    })
+
+    expect(result.databases.map(entry => entry.path)).toEqual(['demo.db'])
+  })
+
   it('says the list is partial when it hits the result cap', async () => {
     const many = Array.from({ length: SQL_SCAN_MAX_RESULTS + 5 }, (_, index) => file(`db-${index}.db`))
     const result = await scan({ '': listing('', many) })

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalBinding, WorkbenchFileTab, WorkbenchState } from '../src/client/model/controller.ts'
+import type { SqlNotebookState } from '../src/client/sql/sql-runtime.ts'
 import { zh } from '../src/client/core/locales.ts'
 import { WorkbenchEditor, type WorkbenchEditorProps } from '../src/client/editor/WorkbenchEditor.tsx'
 
@@ -255,6 +256,33 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const view = renderEditor(controller)
     fireEvent.click(view.getByRole('button', { name: 'SQL 笔记视图' }))
     expect(controller.setSqlNotebookMode).toHaveBeenCalledWith('notebook', 'file:query.sqlnb')
+  })
+
+  /**
+   * Which of the two surfaces says "here is the database this notebook is on" is decided by the
+   * shell, not by the strip (ADR 0008): the toolbar states it while the cell surface is mounted, and
+   * the strip takes over when that surface is gone. Asserted here rather than in the strip's own
+   * spec because `hideReadout` is a *wiring* decision — a strip test can only check that it obeys
+   * the flag, not that anyone passes it.
+   */
+  it('leaves the connection readout to the notebook toolbar in the cell view', () => {
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
+    const controller = controllerFake()
+    controller.sqlRuntime.peek.mockReturnValue(SQL_CONNECTED_STATE)
+    const view = renderEditor(controller)
+
+    expect(view.queryByText('demo.db · 只读 · 1000')).toBeNull()
+  })
+
+  it('carries the whole connection readout over the raw JSON', () => {
+    // The source view has no toolbar, so this is the one place a reader of the bare file can see
+    // which database the notebook is attached to.
+    openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'source')
+    const controller = controllerFake()
+    controller.sqlRuntime.peek.mockReturnValue(SQL_CONNECTED_STATE)
+    const view = renderEditor(controller)
+
+    expect(view.getByText('demo.db · 只读 · 1000')).toBeTruthy()
   })
 
   it('offers the SQL notebook outline in the cell view', () => {
@@ -721,7 +749,9 @@ function controllerFake() {
       cancel: vi.fn(),
       forget: vi.fn(),
       subscribe: vi.fn(() => () => {}),
-      peek: vi.fn(() => null),
+      // Annotated so a case can hand the strip a live handle: `() => null` would pin the literal and
+      // reject mockReturnValue, the same reason `terminalBinding` above carries its return type.
+      peek: vi.fn((): SqlNotebookState | null => null),
     },
   }
 }
@@ -795,6 +825,21 @@ function openNotebookTab(path: string, content: string, notebookMode: NonNullabl
 function openSqlNotebookTab(path: string, content: string, mode: NonNullable<WorkbenchFileTab['sqlNotebookMode']>): void {
   workbenchState.current.tabs.push({ ...tab(path, content, false), sqlNotebookMode: mode })
   focusPrimaryTab(`file:${path}`)
+}
+
+/**
+ * A live handle on `demo.db`, read-only, at the 1000-row cap.
+ *
+ * One object rather than a factory: the strip reads it through `useSyncExternalStore`, which
+ * compares snapshots by identity, so handing back a fresh object per read would spin the component.
+ * The tier and the cap are the two facts the toolbar's readout spells, and they are what the two
+ * cases around `hideReadout` look for.
+ */
+const SQL_CONNECTED_STATE: SqlNotebookState = {
+  connection: { path: 'demo.db', access: 'read-only', sqliteVersion: '3.46.0', rowLimit: 1000, walSidecarExpected: false },
+  connecting: false,
+  connectionProblem: null,
+  cells: {},
 }
 
 function diffTab(path: string) {

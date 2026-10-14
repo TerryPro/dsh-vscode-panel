@@ -1,32 +1,41 @@
 /**
- * The SQL sidebar panel: the connection of the SQL notebook the reader is in.
+ * The SQL sidebar panel: the structure of the database the reader's SQL notebook is on.
  *
  * Which notebook it describes is the *active* `.sqlnb` tab, falling back to the last one still
  * open. A connection belongs to a notebook (ADR 0002), so a panel that described "the connection of
  * this workspace" would be describing something the Host does not have. When no notebook is open it
  * says so instead of guessing.
  *
- * The panel is not a second editor: it holds no draft, no result and no run state of its own. It
- * reads the same per-tab runtime the notebook surface reads, and every button here is one the
- * surface also offers, so the two can never disagree about what is connected.
+ * The split this panel lives inside is ADR 0008's: **connecting** belongs to the notebook's own
+ * toolbar, **browsing** belongs here. The panel therefore holds no picker, no tier, no connect or
+ * disconnect button and no connection readout — not because those facts are unimportant, but
+ * because a second copy of a control is a second place the same rule has to be written, and a
+ * reader facing two identical database dropdowns cannot tell which one is authoritative. What stays
+ * here is the one thing the notebook cannot offer comfortably: the table and column tree, and the
+ * gestures that write out of it into the notebook.
+ *
+ * It is still not a second editor: no draft, no result, no run state of its own. It binds the
+ * runtime and replays the file's connection record because the tree needs a live handle to describe
+ * — and the editor may be showing a `.ts` file right now, which is exactly when nothing else on
+ * screen would have connected.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { SQL_MEMORY_TARGET, type SqlAccess, type SqlColumnEntry, type SqlTablesResult } from '../../shared/sql-protocol.ts'
-import type { WorkbenchController, WorkbenchFileTab, WorkbenchState } from '../model/controller.ts'
+import type { SqlColumnEntry, SqlTablesResult } from '../../shared/sql-protocol.ts'
+import { copyTextToClipboard } from '../core/clipboard.ts'
+import type { WorkbenchController } from '../model/controller.ts'
 import { messageOf } from '../model/tab-model.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
-import { appendSqlCell, parseSqlNotebook } from './sql-notebook-document.ts'
+import { appendSqlCell } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
-import { connectionReadout } from './sql-connection-readout.ts'
-import { selectAllFrom } from './sql-schema-tree.ts'
-import { useDatabaseScan } from './use-database-scan.ts'
+import { quotedSqlIdentifier, selectAllFrom } from './sql-schema-tree.ts'
+import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
 import css from './sql-panel.module.css'
 
 export interface SqlPanelProps {
   controller: WorkbenchController
-  /** Workspace the panel reads databases from; the connection itself is keyed by the notebook. */
+  /** Workspace the panel reads structure from; the connection itself is keyed by the notebook. */
   workspaceId: string | undefined
   t: TranslateNS<'workbench'>
 }
@@ -36,8 +45,6 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const notebook = activeSqlNotebook(state)
   const tabId = notebook?.id ?? null
   const notebookPath = notebook?.path ?? null
-  const [pickPath, setPickPath] = useState('')
-  const [pickAccess, setPickAccess] = useState<SqlAccess>('read-only')
 
   // The editor can be showing another file while this panel is on screen, so the panel binds the
   // runtime itself. `bind` is idempotent for one notebook, and it is what tells the runtime which
@@ -45,9 +52,9 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   useEffect(() => {
     if (workspaceId === undefined || tabId === null || notebookPath === null) return
     controller.sqlRuntime.bind(tabId, workspaceId, notebookPath)
-    // This panel is often the only SQL surface on screen — the editor may be showing a `.ts` — so it
-    // is the one that reopens the notebook's connection when the surface is not mounted. The runtime
-    // makes the call idempotent, so both mounting is not two connections.
+    // Reopening a notebook connects to the database its file records (ADR 0007). That is the
+    // notebook's own rule, not a connection control: the panel replays it because with the surface
+    // unmounted there would otherwise be no handle, and so no tree to read.
     void controller.sqlRuntime.autoConnect(tabId)
   }, [controller, notebookPath, tabId, workspaceId])
 
@@ -62,48 +69,21 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   )
   const runState = useSyncExternalStore(subscribe, readState)
 
-  // Stable identity on purpose: the scan hook re-walks whenever this function changes, and a fresh
-  // closure per render would make it walk on every keystroke elsewhere in the workbench.
-  const listDirectory = useCallback(
-    (directory: string) => workspaceId === undefined
-      ? Promise.resolve({ path: directory, entries: [], truncated: false })
-      : controller.api.listDirectory(workspaceId, directory),
-    [controller, workspaceId],
-  )
-  const { scan, scanning, rescan } = useDatabaseScan(listDirectory)
-
   /**
-   * The connection and its schema.
+   * The connection, and the path it is on.
    *
-   * Every hook here sits above the "no notebook" return, so what the tree needs is derived here
-   * rather than beside the JSX. The effects depend on `connectedPath` and not on the connection
-   * object: that object is rebuilt on every runtime update, and a schema re-read per keystroke in a
-   * cell would make the panel the slowest thing in the workbench.
+   * The effects below depend on `connectedPath` and not on the connection object: that object is
+   * rebuilt on every runtime update, and a schema re-read per keystroke in a cell would make this
+   * panel the slowest thing in the workbench.
    */
   const connection = runState?.connection ?? null
   const connectedPath = connection?.path ?? null
-
-  /**
-   * Seed the pickers from the file's own record, so the panel names the database the notebook is
-   * about even when the auto-connect was refused. A notebook with no record leaves the controls
-   * empty, which is what "pick one" looks like.
-   *
-   * The draft is read inside the effect rather than derived per render. The tab object is rebuilt on
-   * every store change — including a keystroke in another pane — and results now live in the file,
-   * so re-parsing the whole document on each one would make this panel the slowest thing in the
-   * workbench. These three dependencies are the moments the record can differ: a different notebook,
-   * or a connection that put the notebook on another database or tier.
-   */
-  useEffect(() => {
-    const record = notebook === null ? null : parseSqlNotebook(notebook.draft).connection
-    setPickPath(record?.path ?? '')
-    setPickAccess(record?.access ?? 'read-only')
-  }, [notebookPath, connectedPath, connection?.access])
 
   const [tables, setTables] = useState<SqlTablesResult | null>(null)
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
   const [openTable, setOpenTable] = useState<string | null>(null)
   const [columns, setColumns] = useState<Record<string, SqlColumnEntry[]>>({})
+  const [menuTarget, setMenuTarget] = useState<SqlTableMenuTarget | null>(null)
   const lastExecution = useRef('')
 
   const loadSchema = useCallback((): void => {
@@ -153,48 +133,102 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     if (connectedPath !== null) loadSchema()
   }, [connectedPath, controller, loadSchema, state.sidebarAction])
 
+  /**
+   * Read a table's columns once, however often it is opened.
+   *
+   * Shared by the expander and by the menu's copy row, because a reader who right-clicks a table
+   * they never expanded is asking a question the panel can answer — it just has to go get the data
+   * first. The cached read is returned as-is so the caller never re-derives it.
+   */
+  const readColumns = useCallback((name: string): Promise<SqlColumnEntry[]> => {
+    const known = columns[name]
+    if (known !== undefined) return Promise.resolve(known)
+    if (workspaceId === undefined || notebookPath === null) return Promise.resolve([])
+    return controller.api.sqlColumns(workspaceId, notebookPath, name).then(
+      (result) => {
+        setColumns(previous => ({ ...previous, [name]: result.columns }))
+        return result.columns
+      },
+      (error: unknown) => {
+        setSchemaProblem(messageOf(error))
+        throw error
+      },
+    )
+  }, [columns, controller, notebookPath, workspaceId])
+
   const toggleTable = useCallback((name: string): void => {
     if (openTable === name) {
       setOpenTable(null)
       return
     }
     setOpenTable(name)
-    if (columns[name] !== undefined || workspaceId === undefined || notebookPath === null) return
-    void controller.api.sqlColumns(workspaceId, notebookPath, name).then(
-      (result) => { setColumns(previous => ({ ...previous, [name]: result.columns })) },
-      (error: unknown) => { setSchemaProblem(messageOf(error)) },
-    )
-  }, [columns, controller, notebookPath, openTable, workspaceId])
+    if (columns[name] !== undefined) return
+    void readColumns(name).catch(() => {})
+  }, [columns, openTable, readColumns])
 
   /**
-   * Put a `SELECT *` for this table in a new cell of the notebook.
+   * Write a statement into a new cell of the notebook.
    *
-   * The query is written through the same document layer the surface writes through, so a notebook
-   * this build will not rewrite refuses here too and the reader keeps their bytes.
+   * The query goes through the same document layer the surface writes through, so a notebook this
+   * build will not rewrite refuses here too and the reader keeps their bytes.
    */
-  const insertSelect = useCallback((name: string): void => {
+  const insertSql = useCallback((source: string): void => {
     if (notebook === null || tabId === null || connection === null) return
     try {
-      controller.setDraft(appendSqlCell(notebook.draft, selectAllFrom(name, connection.rowLimit)), 'input', tabId)
+      controller.setDraft(appendSqlCell(notebook.draft, source), 'input', tabId)
       setSchemaProblem(null)
-    } catch (error: unknown) {
+    } catch {
       // The document layer refuses rather than re-serializing a file it does not fully understand,
       // so the reader keeps their bytes and is told to fix the file instead.
-      void error
       setSchemaProblem(t('sqlnotebook.treeRefused'))
     }
-  }, [connection, controller, notebook, t, tabId])
+  }, [connection, controller, notebook, tabId, t])
+
+  /**
+   * Copy out of the tree.
+   *
+   * Success is deliberately silent, matching the tab menu's "Copy path": a clipboard write that
+   * worked has nothing to report. Failure is the opposite case — the browser can refuse the write,
+   * and a copy that vanished without a word is a reader pasting nothing and wondering whether the
+   * tree is broken. It lands in the same line the schema reads use, because it is the same kind of
+   * "this panel could not do the thing you asked".
+   */
+  const copyOut = useCallback((text: string): void => {
+    // Success clears only a previous COPY failure, never the line wholesale: a schema read that
+    // failed stays failed just because a copy worked, and blanking it here would hide a real
+    // problem behind an unrelated success.
+    void copyTextToClipboard(text).then(
+      () => {
+        setSchemaProblem(previous => (previous === t('sqlnotebook.copyFailed') ? null : previous))
+      },
+      () => { setSchemaProblem(t('sqlnotebook.copyFailed')) },
+    )
+  }, [t])
+
+  const onMenuSelect = useCallback((action: SqlTableMenuAction, table: string): void => {
+    if (action === 'insert-select') insertSql(selectAllFrom(table, connection?.rowLimit ?? 0))
+    if (action === 'insert-name') insertSql(quotedSqlIdentifier(table))
+    if (action === 'copy-name') copyOut(table)
+    if (action === 'copy-columns') void readColumns(table).then(entries => { copyOut(entries.map(entry => entry.name).join('\n')) }, () => {})
+  }, [connection?.rowLimit, copyOut, insertSql, readColumns])
 
   const header = (
     <header className={css.panelHeader} data-dsh-workbench-panel-header="">
-      <span className={css.panelTitle}>{t('sqlnotebook.panelTitle')}</span>
+      {/*
+        The panel is the structure of a database, so that is its title. The key it uses is the one
+        the tree itself was labelled with: keeping both would have said 结构 twice in one column,
+        once as a heading and once as the heading of the thing under it.
+      */}
+      <span className={css.panelTitle}>{t('sqlnotebook.schema')}</span>
       <button
         type="button"
         className={css.headerAction}
-        aria-label={t('sqlnotebook.rescan')}
-        title={t('sqlnotebook.rescan')}
-        disabled={scanning}
-        onClick={rescan}
+        aria-label={t('sqlnotebook.refreshSchema')}
+        title={t('sqlnotebook.refreshSchema')}
+        // Nothing to re-read until there is a handle: this button reloads the tree, and the tree
+        // belongs to a connected database, not to the workspace.
+        disabled={connectedPath === null}
+        onClick={loadSchema}
       >
         ⟳
       </button>
@@ -210,123 +244,23 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     )
   }
 
-  const chosenTarget = connection?.path ?? pickPath
-  /**
-   * An in-memory database has no tier: there is nothing on disk to protect, so the Host opens it
-   * writable and refuses a request that names a tier. The picker hides the choice rather than
-   * defaulting it, and the connect sends `writable`.
-   */
-  const memoryPicked = chosenTarget === SQL_MEMORY_TARGET
-  const connectAccess: SqlAccess = memoryPicked ? 'writable' : pickAccess
-  const canConnect = runState !== null && !runState.connecting
-  const problem = runState?.connectionProblem ?? null
-  const readout = runState === null || runState.connecting
-    ? t('sqlnotebook.connecting')
-    : connection === null
-      ? t('sqlnotebook.notConnected')
-      : connectionReadout(connection, { readOnly: t('sqlnotebook.readOnlyTier'), writable: t('sqlnotebook.writableTier') })
-
   return (
     <div className={css.panelBody}>
       {header}
       <div className={css.body}>
         <div className={css.notebookLine}>{t('sqlnotebook.panelNotebook', { path: notebookPath })}</div>
-        <label className={css.field}>
-          <span className={css.fieldLabel}>{t('sqlnotebook.database')}</span>
-          <select
-            className={css.select}
-            aria-label={t('sqlnotebook.database')}
-            // Locked while a handle is open, on the Host's own rule: changing tier or database on a
-            // live handle is a close plus reopen (`SQL_RECONNECT_REQUIRED`), and the reader has to
-            // be told that before it happens rather than after. Disconnect is the way through.
-            title={connection === null ? undefined : t('sqlnotebook.tierLocked')}
-            disabled={connection !== null || !canConnect}
-            value={chosenTarget}
-            onChange={event => { setPickPath(event.target.value) }}
-          >
-            <option value="">{t('sqlnotebook.database')}</option>
-            <option value={SQL_MEMORY_TARGET}>{t('sqlnotebook.memoryDatabase')}</option>
-            {(scan?.databases ?? []).map(choice => (
-              <option key={choice.path} value={choice.path}>{choice.path}</option>
-            ))}
-          </select>
-        </label>
-        {!memoryPicked && (
-          <label className={css.field}>
-            <span className={css.fieldLabel}>{t('sqlnotebook.tier')}</span>
-            <select
-              className={css.select}
-              aria-label={t('sqlnotebook.tier')}
-              title={connection === null ? undefined : t('sqlnotebook.tierLocked')}
-              disabled={connection !== null || !canConnect}
-              value={pickAccess}
-              onChange={event => { setPickAccess(event.target.value === 'writable' ? 'writable' : 'read-only') }}
-            >
-              <option value="read-only">{t('sqlnotebook.readOnlyTier')}</option>
-              <option value="writable">{t('sqlnotebook.writableTier')}</option>
-            </select>
-          </label>
-        )}
+        {/*
+          With no handle there is nothing this panel could list, and the action that would change
+          that is no longer here. Saying only 未连接 would strand the reader in a column that offers
+          neither the fact nor the way out, so the second line names where the control went.
+        */}
         {connection === null ? (
-          <button
-            type="button"
-            className={css.primaryButton}
-            disabled={!canConnect || chosenTarget === ''}
-            title={chosenTarget === '' ? t('sqlnotebook.noDatabase') : t('sqlnotebook.connect')}
-            onClick={() => { void controller.sqlRuntime.connect(tabId, chosenTarget, connectAccess) }}
-          >
-            {t('sqlnotebook.connect')}
-          </button>
+          <>
+            <div className={css.muted}>{t('sqlnotebook.notConnected')}</div>
+            <div className={css.pointer}>{t('sqlnotebook.connectInToolbar')}</div>
+          </>
         ) : (
-          <button
-            type="button"
-            className={css.primaryButton}
-            // Disconnecting is also how the reader changes tier or database, and it costs the
-            // connection's scratch work: temporary tables and an uncommitted transaction go with it.
-            title={t('sqlnotebook.disconnectHint')}
-            onClick={() => { void controller.sqlRuntime.disconnect(tabId) }}
-          >
-            {t('sqlnotebook.disconnect')}
-          </button>
-        )}
-        <div className={css.readout}>{readout}</div>
-        {problem !== null && (
-          <div className={css.problem} role="alert">
-            {problem.message === '' ? t('sqlnotebook.notConnectedRefusal') : problem.message}
-          </div>
-        )}
-        {connection?.path === SQL_MEMORY_TARGET && (
-          <div className={css.memoryNote}>{t('sqlnotebook.memoryNotice')}</div>
-        )}
-        {/*
-          Measured: the first statement on a read-only WAL connection creates `-wal` and `-shm`
-          beside the file, and `close()` does not remove them. Said here, up front, because a reader
-          who finds two unexpected files next to their database has no way to trace them back.
-        */}
-        {connection?.walSidecarExpected === true && (
-          <div className={css.muted}>{t('sqlnotebook.walSidecarNotice')}</div>
-        )}
-        {scan?.truncated === true && <div className={css.muted}>{t('sqlnotebook.scanTruncated')}</div>}
-        {/*
-          The schema tree, only while something is connected: it lists the *connected* database, so
-          with no handle there is nothing it could be describing. Tables and their columns are two
-          lazy reads (the Host's tables/columns routes), which is why expanding a table is the only
-          thing that spends a request.
-        */}
-        {connection !== null && (
           <div className={css.schema}>
-            <div className={css.schemaHeader}>
-              <span className={css.fieldLabel}>{t('sqlnotebook.schema')}</span>
-              <button
-                type="button"
-                className={css.headerAction}
-                aria-label={t('sqlnotebook.refreshSchema')}
-                title={t('sqlnotebook.refreshSchema')}
-                onClick={loadSchema}
-              >
-                ⟳
-              </button>
-            </div>
             {tables === null
               ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
               : tables.tables.length === 0
@@ -334,10 +268,12 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
                 : tables.tables.map(entry => (
                   <div key={entry.name} className={css.schemaNode}>
                     {/*
-                      One click expands, two insert a query. The gesture that writes into the file
-                      is the deliberate one, exactly as opening a `.db` from the tree is a double
-                      click: a single click on a row the reader is scanning to read must not edit
-                      anything.
+                      One click expands, two insert a query, right-click lists what else the row can
+                      do. The gesture that writes into the file is the deliberate one, exactly as
+                      opening a `.db` from the tree is a double click: a single click on a row the
+                      reader is scanning to read must not edit anything. The menu is what makes the
+                      write gesture findable — a double-click nobody has been told about is a feature
+                      that does not exist yet.
                     */}
                     <button
                       type="button"
@@ -345,7 +281,11 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
                       aria-expanded={openTable === entry.name}
                       title={t('sqlnotebook.openTable')}
                       onClick={() => { toggleTable(entry.name) }}
-                      onDoubleClick={() => { insertSelect(entry.name) }}
+                      onDoubleClick={() => { insertSql(selectAllFrom(entry.name, connection.rowLimit)) }}
+                      onContextMenu={event => {
+                        event.preventDefault()
+                        setMenuTarget({ table: entry.name, rect: event.currentTarget.getBoundingClientRect() })
+                      }}
                     >
                       <span className={css.tableName}>{entry.name}</span>
                       {entry.kind === 'view' && <span className={css.tableKind}>{t('sqlnotebook.viewLabel')}</span>}
@@ -372,6 +312,18 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
           </div>
         )}
       </div>
+      <SqlTableContextMenu
+        target={menuTarget}
+        labels={{
+          insertSelect: t('sqlnotebook.insertSelect'),
+          insertTableName: t('sqlnotebook.insertTableName'),
+          copyTableName: t('sqlnotebook.copyTableName'),
+          copyColumnNames: t('sqlnotebook.copyColumnNames'),
+        }}
+        columnsKnownEmpty={menuTarget !== null && columns[menuTarget.table]?.length === 0}
+        onClose={() => { setMenuTarget(null) }}
+        onSelect={onMenuSelect}
+      />
     </div>
   )
 }

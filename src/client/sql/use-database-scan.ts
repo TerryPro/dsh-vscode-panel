@@ -1,12 +1,12 @@
 /**
- * The workspace database walk the SQL notebook's pickers list.
+ * The workspace database walk the SQL notebook's picker lists.
  *
- * Two surfaces ask the same question — the notebook's toolbar and the sidebar panel — and the
- * answer has the same lifecycle in both: one walk per mount, then only on request, because the
- * directory budget is what makes it thorough and is not a cost to pay on every render.
+ * One surface asks the question now — the notebook's toolbar has been the only picker since ADR
+ * 0008 moved the sidebar's copy out — but the state around the walk stays here rather than folded
+ * back into the surface: it is the wanted-flag plus the two-state pair that a mount has to get
+ * right, and it is the part worth keeping out of a component already holding a toolbar.
  *
- * The walk itself lives in `sql-database-scan.ts`; this is only the state around it, kept here so
- * neither surface grows its own copy of the wanted-flag and the two-state pair.
+ * The walk itself lives in `sql-database-scan.ts`.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'

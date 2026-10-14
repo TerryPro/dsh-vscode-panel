@@ -300,7 +300,7 @@ export class SqlRuntime {
   /**
    * Open this notebook's connection to one database file.
    *
-   * The tier is what the reader asked for; what the panel shows afterwards is the Host's
+   * The tier is what the reader asked for; what the toolbar shows afterwards is the Host's
    * answer, because a writable request refused as occupied has to read as read-only rather
    * than as the tier nobody granted.
    *
@@ -418,7 +418,7 @@ export class SqlRuntime {
   /**
    * Close the connection now, and report whether a transaction was rolled back on the way out.
    *
-   * The answer is the panel's to show: an open transaction the reader forgot about is exactly
+   * The answer is the toolbar's to show: an open transaction the reader forgot about is exactly
    * the fact that must not be resolved silently underneath them.
    */
   async disconnect(tabId: string): Promise<{ closed: boolean; rolledBack: boolean } | null> {

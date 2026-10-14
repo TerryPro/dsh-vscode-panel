@@ -486,7 +486,7 @@ export class SqlBackend {
 
   private openResult(managed: ManagedConnection): SqlOpenResult {
     const version = managed.handle.prepare('SELECT sqlite_version() AS v').get() as { v?: unknown }
-    // Reading journal_mode is how the panel learns a file is WAL and can warn up front that
+    // Reading journal_mode is how the client learns a file is WAL and can warn up front that
     // querying it will leave -wal/-shm beside the file — residue close() cannot remove (measured).
     const journal = managed.handle.prepare('PRAGMA journal_mode').get() as { journal_mode?: unknown }
     return {
@@ -550,7 +550,11 @@ export class SqlBackend {
   private mustFind(workspaceIdValue: unknown, notebookValue: unknown): ManagedConnection {
     const managed = this.findNotebook(workspaceIdValue, notebookValue)
     if (managed === undefined) {
-      throw new WorkbenchHttpError(409, 'SQL_NOT_CONNECTED', '该笔记还没有连接数据库，请先在侧栏选择一个库。')
+      // The message reaches the reader verbatim (`errorResponse` passes a WorkbenchHttpError's own
+      // text through), so it names where the control actually is: ADR 0008 moved connecting from the
+      // sidebar to the notebook's toolbar, and a sentence telling readers to look in the sidebar now
+      // sends them to a column that no longer holds the picker.
+      throw new WorkbenchHttpError(409, 'SQL_NOT_CONNECTED', '该笔记还没有连接数据库，请先在笔记工具栏选择一个库。')
     }
     return managed
   }

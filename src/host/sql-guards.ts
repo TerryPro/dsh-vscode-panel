@@ -32,7 +32,7 @@ import type { SqlAccess } from '../shared/sql-protocol.ts'
  * read-only connection can no longer `CREATE TEMP TABLE`, which is the core scratch workflow.
  *
  * `journal_mode` is deliberately NOT here. Reading it (`PRAGMA journal_mode`, no argument) is
- * how the panel learns a file is WAL and can therefore warn about `-wal`/`-shm` residue before
+ * how the client learns a file is WAL and can therefore warn about `-wal`/`-shm` residue before
  * the user is surprised by it; refusing the read would be refusing our own diagnostic. Changing
  * it is refused, which the assignment rule below handles.
  */

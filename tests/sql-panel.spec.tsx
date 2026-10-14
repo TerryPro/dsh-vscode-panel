@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { zh } from '../src/client/core/locales.ts'
 import type { WorkbenchFileTab } from '../src/client/model/controller.ts'
-import { WorkbenchApiError } from '../src/client/model/api.ts'
 import { SqlPanel } from '../src/client/sql/SqlPanel.tsx'
 import { parseSqlNotebook } from '../src/client/sql/sql-notebook-document.ts'
 import { SqlRuntime } from '../src/client/sql/sql-runtime.ts'
+import { WorkbenchApiError } from '../src/client/model/api.ts'
 
 // The store package pulls zustand/immer, which are not installed for tests.
 vi.mock('@deepseek-ai/dsh-client-store', () => ({
@@ -31,6 +31,26 @@ vi.mock('@deepseek-ai/dsh-client-store', () => ({
 // A box rather than a fixed object, so one case can put another tab on screen.
 const workbench = vi.hoisted(() => ({ current: {} as Record<string, unknown> }))
 vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => workbench.current }))
+
+/**
+ * The official Menu, stubbed the way the file tree's and the CSV grid's specs stub it.
+ *
+ * The real package pulls `clsx`, which is not installed for the test runtime, so a spec that renders
+ * a menu has to replace it. The stub keeps the contract the case below reads: `role="menu"`, one
+ * `role="menuitem"` button per data row, and `disabled` carried through — and it drops the anchoring
+ * and portal, which are the package's business, not the panel's.
+ */
+vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
+  Menu: ({ open, items, onSelect }: {
+    open: boolean
+    items: Array<{ id: string; label?: React.ReactNode; type?: string; disabled?: boolean }>
+    onSelect: (id: string) => void
+  }) => (open ? (
+    <div role="menu">{items.filter(item => item.type === undefined).map(item => (
+      <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => { onSelect(item.id) }}>{item.label}</button>
+    ))}</div>
+  ) : null),
+}))
 
 afterEach(() => {
   cleanup()
@@ -78,14 +98,20 @@ interface Harness {
   runtime: SqlRuntime
   setDraft: ReturnType<typeof vi.fn>
   consumeSidebarAction: ReturnType<typeof vi.fn>
-  /** Pick a database and press connect, the way a reader does. */
+  /**
+   * Open a handle, now that the panel has no button to press.
+   *
+   * Connecting is the notebook toolbar's job (ADR 0008), so the panel's own cases drive the same
+   * runtime method the toolbar calls. Asserting against `sqlOpen` here would say nothing about the
+   * toolbar — it would only say the fixture managed to connect, which is what the panel needs in
+   * order to have a tree at all.
+   */
   connect: (target?: string) => Promise<void>
   /** Re-render the panel, which is what a workbench store write does in the real app. */
   rerender: () => void
 }
 
 function mount(options: {
-  entries?: Array<{ name: string; path: string; kind: 'file' }>
   refuse?: WorkbenchApiError
   tables?: Array<{ name: string; kind: 'table' | 'view' }>
   tablesTruncated?: boolean
@@ -128,9 +154,9 @@ function mount(options: {
      * The open tab's draft, not a constant.
      *
      * The panel and the runtime both serve whatever notebook is on screen, so a fixture that hands
-     * the runtime a different file from the one rendered would let them disagree — and would make the
-     * auto-connect read a record the panel never showed. `workbench.current` is the same snapshot the
-     * panel itself reads.
+     * the runtime a different file from the one rendered would let them disagree — and would make
+     * the auto-connect read a record the panel never showed. `workbench.current` is the same
+     * snapshot the panel itself reads.
      */
     getDraft: () => {
       const tabs = (workbench.current['tabs'] ?? []) as Array<{ kind?: string; draft?: string }>
@@ -139,23 +165,15 @@ function mount(options: {
     setDraft: vi.fn(),
     save: vi.fn(),
   })
-  const entries = options.entries ?? [
-    { name: 'demo.db', path: 'demo.db', kind: 'file' as const },
-    { name: 'demo.db-wal', path: 'demo.db-wal', kind: 'file' as const },
-    { name: 'archive.sqlite', path: 'archive.sqlite', kind: 'file' as const },
-  ]
   const setDraft = vi.fn()
   const consumeSidebarAction = vi.fn()
   const controller = {
     sqlRuntime: runtime,
     setDraft,
     consumeSidebarAction,
-    api: {
-      ...schemaApi,
-      listDirectory: vi.fn((_workspaceId: string, path: string) => Promise.resolve(
-        path === '' ? { path: '', entries, truncated: false } : { path, entries: [], truncated: false },
-      )),
-    },
+    // No `listDirectory`: the workspace walk fed the panel's database picker, and that picker is
+    // gone. A fixture still offering it would let a regression sneak the scan back in unnoticed.
+    api: { ...schemaApi },
   }
   /**
    * A fresh element each call.
@@ -180,19 +198,11 @@ function mount(options: {
    * unrelated runtime call to trigger a render.
    */
   const rerender = (): void => { view.rerender(panel()) }
-  /**
-   * Connect the way a reader does: pick the database, press connect, wait for the handle.
-   *
-   * The wait for `断开` is what makes the schema assertions about a real connection rather than
-   * about a click that has not come back yet.
-   */
   async function connect(target = 'demo.db'): Promise<void> {
-    const select = await view.findByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
-    await waitFor(() => { expect(select.options.length).toBeGreaterThan(2) })
-    fireEvent.change(select, { target: { value: target } })
-    fireEvent.click(view.getByRole('button', { name: zh['sqlnotebook.connect'] }))
-    await waitFor(() => { expect(api.sqlOpen).toHaveBeenCalled() })
-    await waitFor(() => { expect(view.getByRole('button', { name: zh['sqlnotebook.disconnect'] })).toBeTruthy() })
+    await runtime.connect('file:query.sqlnb', target, 'read-only')
+    // Waited on the handle rather than on a row of the tree: a case whose schema read fails has no
+    // tree to find, and it still needs the connection to be live before it asserts the failure.
+    await waitFor(() => { expect(runtime.state('file:query.sqlnb').connection).not.toBeNull() })
   }
 
   return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, rerender }
@@ -230,7 +240,7 @@ describe('SqlPanel — 结构', () => {
     fireEvent.click(row)
 
     // Lazy means once per table, not once per click: re-asking the Host for a schema that has not
-    // been told to change is a request per gesture.
+    // been changed is a request per gesture.
     await waitFor(() => { expect(harness.view.getByText('id')).toBeTruthy() })
     expect(harness.view.container.querySelectorAll('li')).toHaveLength(1)
   })
@@ -260,6 +270,9 @@ describe('SqlPanel — 结构', () => {
   /**
    * The panel is often the only SQL surface on screen, so it is the one that reopens a notebook's
    * connection when the editor is showing something else (ADR 0007).
+   *
+   * It does that as a *reader* of the file's record, not as a connection control: ADR 0008 left the
+   * toolbar the only place a reader connects, and the tree still needs a handle to describe.
    */
   it('reconnects to the database the notebook file records, without the reader asking', async () => {
     const draft = JSON.stringify({
@@ -273,11 +286,6 @@ describe('SqlPanel — 结构', () => {
     await waitFor(() => { expect(harness.api.sqlOpen).toHaveBeenCalled() })
     expect(harness.api.sqlOpen).toHaveBeenCalledWith({
       workspaceId: 'workspace-1', notebook: 'query.sqlnb', path: 'archive.sqlite', access: 'writable',
-    })
-    // The picker names it too, which is what the reader sees if that open is later refused.
-    await waitFor(() => {
-      const select = harness.view.getByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
-      expect(select.value).toBe('archive.sqlite')
     })
   })
 
@@ -314,17 +322,6 @@ describe('SqlPanel — 结构', () => {
     expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(afterConnect)
   })
 
-  it('says a WAL database leaves sidecar files, since nothing removes them', async () => {
-    // Measured: the first statement on a read-only WAL connection creates -wal and -shm beside the
-    // file and close() does not remove them. The panel is where the reader is told before finding
-    // two unexpected files on disk.
-    openNotebook(notebookTab('query.sqlnb'))
-    const harness = mount({ walExpected: true })
-    await harness.connect()
-
-    expect(harness.view.getByText(zh['sqlnotebook.walSidecarNotice'])).toBeTruthy()
-  })
-
   it('shows why the schema could not be read', async () => {
     openNotebook(notebookTab('query.sqlnb'))
     const harness = mount({ tablesRefuse: new WorkbenchApiError('SQL_NOT_CONNECTED', '该笔记还没有连接数据库。') })
@@ -334,76 +331,54 @@ describe('SqlPanel — 结构', () => {
   })
 })
 
-describe('SqlPanel — 连接', () => {
-  it('says there is no notebook rather than describing a connection it cannot name', () => {
-    workbench.current = { activeTabId: undefined, tabs: [] }
-    const { view } = mount()
-
-    expect(view.getByText(zh['sqlnotebook.panelNoNotebook'])).toBeTruthy()
-    expect(view.queryByLabelText(zh['sqlnotebook.database'])).toBeNull()
-  })
-
-  it('lists the workspace databases, leaving the WAL sidecars out', async () => {
+/**
+ * The ownership fence (ADR 0008).
+ *
+ * These are negative assertions, which is the whole point: the panel used to carry a second copy of
+ * every connection control, and nothing in the suite would notice one creeping back — a duplicated
+ * picker behaves correctly right up to the moment the two copies disagree. What each case pins is
+ * that the *only* thing left in this column is the tree and its own refresh.
+ */
+describe('SqlPanel — 只有结构，没有连接控件', () => {
+  it('offers no database picker, tier or connect button while connected', async () => {
     openNotebook(notebookTab('query.sqlnb'))
-    const { view } = mount()
+    const harness = mount()
+    await harness.connect()
 
-    const select = await view.findByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
-    await waitFor(() => { expect(select.options.length).toBeGreaterThan(2) })
-    const offered = [...select.options].map(option => option.value)
-    // The sidecar files are what a WAL database leaves behind; they are databases' neighbours, not
-    // databases, and the Host would refuse one as SQL_DATABASE_REQUIRED. The walk sorts, so the
-    // order here is the picker's own.
-    expect(offered).toEqual(['', ':memory:', 'archive.sqlite', 'demo.db'])
+    expect(harness.view.queryByLabelText(zh['sqlnotebook.database'])).toBeNull()
+    expect(harness.view.queryByRole('button', { name: zh['sqlnotebook.connect'] })).toBeNull()
+    expect(harness.view.queryByRole('button', { name: zh['sqlnotebook.disconnect'] })).toBeNull()
+    // And it does not keep walking the workspace to fill a list it no longer shows.
+    expect(harness.view.queryByText(zh['sqlnotebook.scanTruncated'])).toBeNull()
   })
 
-  it('connects the picked database, and hides the tier for an in-memory one', async () => {
+  it('titles the panel after what it holds, and says it once', async () => {
     openNotebook(notebookTab('query.sqlnb'))
-    const { view, api } = mount()
+    const harness = mount()
+    await harness.connect()
 
-    const select = await view.findByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
-    await waitFor(() => { expect(select.options.length).toBeGreaterThan(2) })
-    fireEvent.change(select, { target: { value: ':memory:' } })
-    // `:memory:` has no tier: there is no file to protect, so the Host always opens it writable and
-    // refuses a request that names a tier. The choice is hidden rather than defaulted.
-    expect(view.queryByLabelText(zh['sqlnotebook.tier'])).toBeNull()
-
-    fireEvent.click(view.getByRole('button', { name: zh['sqlnotebook.connect'] }))
-    await waitFor(() => { expect(api.sqlOpen).toHaveBeenCalled() })
-    expect(api.sqlOpen).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1', notebook: 'query.sqlnb', path: ':memory:', access: 'writable',
-    })
+    // 「SQL 连接」 described a form that is no longer here. The heading is now the tree's own name,
+    // which is why the section cannot keep a second one of the same word inside the panel.
+    expect(harness.view.getByText(zh['sqlnotebook.schema'])).toBeTruthy()
+    expect(harness.view.getAllByText(zh['sqlnotebook.schema'])).toHaveLength(1)
   })
 
-  it('locks the picker while a handle is open and warns that the memory database goes away', async () => {
+  it('has its one refresh button read the tree, not the workspace', async () => {
     openNotebook(notebookTab('query.sqlnb'))
-    const { view } = mount()
-    const select = await view.findByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
-    await waitFor(() => { expect(select.options.length).toBeGreaterThan(2) })
-    fireEvent.change(select, { target: { value: ':memory:' } })
-    fireEvent.click(view.getByRole('button', { name: zh['sqlnotebook.connect'] }))
+    const harness = mount()
+    await harness.connect()
 
-    // Changing database or tier on a live handle is a close plus reopen on the Host's side, so the
-    // control is locked and 断开 is the way through — stated before it happens, not after.
-    await waitFor(() => { expect((view.getByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement).disabled).toBe(true) })
-    expect(view.getByText(zh['sqlnotebook.memoryNotice'])).toBeTruthy()
-    const disconnect = view.getByRole('button', { name: zh['sqlnotebook.disconnect'] })
-    expect(disconnect.getAttribute('title')).toBe(zh['sqlnotebook.disconnectHint'])
+    const refresh = harness.view.getByRole('button', { name: zh['sqlnotebook.refreshSchema'] })
+    expect(harness.view.getAllByRole('button', { name: zh['sqlnotebook.refreshSchema'] })).toHaveLength(1)
+    const before = harness.schema.sqlTables.mock.calls.length
+    fireEvent.click(refresh)
+
+    await waitFor(() => { expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(before) })
+    // The old header action was 重新扫描工作区: a ⟳ that refreshed something the panel cannot show.
+    expect(harness.view.queryByRole('button', { name: zh['sqlnotebook.rescan'] })).toBeNull()
   })
 
-  it('shows why a connect was refused instead of looking unconnected', async () => {
-    openNotebook(notebookTab('query.sqlnb'))
-    const { view } = mount({ refuse: new WorkbenchApiError('SQL_WRITE_OCCUPIED', '该库文件已被其它笔记的连接占用。') })
-
-    const select = await view.findByLabelText(zh['sqlnotebook.database']) as HTMLSelectElement
-    await waitFor(() => { expect(select.options.length).toBeGreaterThan(2) })
-    fireEvent.change(select, { target: { value: 'demo.db' } })
-    fireEvent.click(view.getByRole('button', { name: zh['sqlnotebook.connect'] }))
-
-    // `未连接` alone would send the reader to try again; the Host's own line says which gate it was.
-    expect((await view.findByRole('alert')).textContent).toContain('该库文件已被其它笔记的连接占用。')
-  })
-
-  it('describes the last opened notebook when the editor is showing something else', async () => {
+  it('names the notebook the tree belongs to when the editor is showing something else', async () => {
     const other = notebookTab('notes.md')
     const first = notebookTab('first.sqlnb')
     const second = notebookTab('second.sqlnb')
@@ -411,7 +386,116 @@ describe('SqlPanel — 连接', () => {
     const { view } = mount()
 
     // Tabs keep their open order, so the last `.sqlnb` is the one the reader most recently opened —
-    // not "the only connection in the workspace", which the Host itself refuses to guess at.
-    expect(view.getByText(zh['sqlnotebook.panelNotebook'].replace('{path}', 'second.sqlnb'))).toBeTruthy()
+    // not "the only connection in the workspace", which is something the Host itself refuses to
+    // guess at. The tree has no connection controls of its own now, so naming its notebook is the
+    // only way this column can say whose structure it is showing.
+    expect(await view.findByText(zh['sqlnotebook.panelNotebook'].replace('{path}', 'second.sqlnb'))).toBeTruthy()
+  })
+
+  it('says it is not connected, and points at the toolbar that can connect', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount()
+
+    // With the connect button gone from this column, an unconnected panel that only said 未连接 would
+    // be a dead end: the reader would have to already know the control moved.
+    expect(harness.view.getByText(zh['sqlnotebook.notConnected'])).toBeTruthy()
+    expect(harness.view.getByText(zh['sqlnotebook.connectInToolbar'])).toBeTruthy()
+    expect(harness.view.queryByText('city')).toBeNull()
+    // And the header's refresh has nothing to re-read yet.
+    expect((harness.view.getByRole('button', { name: zh['sqlnotebook.refreshSchema'] }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('says there is no notebook rather than describing a structure it cannot name', () => {
+    workbench.current = { activeTabId: undefined, tabs: [] }
+    const { view } = mount()
+
+    expect(view.getByText(zh['sqlnotebook.panelNoNotebook'])).toBeTruthy()
+    expect(view.queryByLabelText(zh['sqlnotebook.database'])).toBeNull()
+  })
+})
+
+describe('SqlPanel — 表行右键菜单', () => {
+  /** The menu is the discoverable half of a write gesture nobody would otherwise find. */
+  async function connectedRow(harness: Harness): Promise<HTMLElement> {
+    const row = await harness.view.findByRole('button', { name: /city\b/u })
+    return row
+  }
+
+  it('offers the four rows it promises, and no preview', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount()
+    await harness.connect()
+
+    fireEvent.contextMenu(await connectedRow(harness))
+    const labels = [...(await harness.view.findByRole('menu')).querySelectorAll('button')].map(button => button.textContent)
+    expect(labels).toEqual([
+      zh['sqlnotebook.insertSelect'],
+      zh['sqlnotebook.insertTableName'],
+      zh['sqlnotebook.copyTableName'],
+      zh['sqlnotebook.copyColumnNames'],
+    ])
+  })
+
+  it('inserts the quoted table name when that row is chosen', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({ tables: [{ name: 'ci"ty', kind: 'table' }] })
+    await harness.connect()
+
+    fireEvent.contextMenu(await harness.view.findByRole('button', { name: /ci"ty/u }))
+    fireEvent.click(harness.view.getByRole('menuitem', { name: zh['sqlnotebook.insertTableName'] }))
+
+    const written = harness.setDraft.mock.calls[0]?.[0] as string
+    // A name that contains a quote is exactly what a database is allowed to have, and the only safe
+    // way in is to double it — asserted as the document layer reads it, not as a substring of JSON.
+    expect(parseSqlNotebook(written).cells.map(cell => cell.source)).toEqual(['SELECT 1', '"ci""ty"'])
+  })
+
+  it('copies the column names, reading them first when the table was never expanded', async () => {
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard })
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      columns: [
+        { name: 'id', type: 'INTEGER', notNull: false, primaryKey: true },
+        { name: 'name', type: 'TEXT', notNull: false, primaryKey: false },
+      ],
+    })
+    await harness.connect()
+
+    // The reader right-clicked without expanding, so the panel has not asked for columns at all.
+    expect(harness.schema.sqlColumns).not.toHaveBeenCalled()
+    fireEvent.contextMenu(await connectedRow(harness))
+    fireEvent.click(harness.view.getByRole('menuitem', { name: zh['sqlnotebook.copyColumnNames'] }))
+
+    await waitFor(() => { expect(clipboard.writeText).toHaveBeenCalledWith('id\nname') })
+  })
+
+  it('says when the clipboard refused instead of dropping the copy', async () => {
+    const clipboard = { writeText: vi.fn(() => Promise.reject(new Error('Clipboard unavailable'))) }
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard })
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount()
+    await harness.connect()
+
+    fireEvent.contextMenu(await connectedRow(harness))
+    fireEvent.click(harness.view.getByRole('menuitem', { name: zh['sqlnotebook.copyTableName'] }))
+
+    // A copy that vanished silently is a reader pasting nothing and blaming the tree.
+    const alert = await harness.view.findByRole('alert')
+    expect(alert.textContent).toContain(zh['sqlnotebook.copyFailed'])
+  })
+
+  it('does not offer to copy columns a table provably has none of', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({ columns: [] })
+    await harness.connect()
+
+    const row = await connectedRow(harness)
+    // Expand first, so the empty answer is a read fact and not merely "unread yet".
+    fireEvent.click(row)
+    await waitFor(() => { expect(harness.schema.sqlColumns).toHaveBeenCalled() })
+
+    fireEvent.contextMenu(row)
+    expect((harness.view.getByRole('menuitem', { name: zh['sqlnotebook.copyColumnNames'] }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

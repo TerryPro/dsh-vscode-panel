@@ -11,6 +11,7 @@ import type { SqlResultBlock } from '../src/shared/sql-protocol.ts'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../src/client/sql/SqlNotebookSurface.tsx'
 import type { SqlResultLabels } from '../src/client/sql/SqlResultBlockView.tsx'
 import { SqlRuntime } from '../src/client/sql/sql-runtime.ts'
+import { WorkbenchApiError } from '../src/client/model/api.ts'
 import { sqlBlock } from './sql-block-fixture.ts'
 import { parseSqlNotebook, SQLNB_VERSION } from '../src/client/sql/sql-notebook-document.ts'
 
@@ -111,6 +112,10 @@ const labels: SqlNotebookLabels = {
   writableTier: zh['sqlnotebook.writableTier'],
   tierLocked: zh['sqlnotebook.tierLocked'],
   rescan: zh['sqlnotebook.rescan'],
+  scanTruncated: zh['sqlnotebook.scanTruncated'],
+  disconnectHint: zh['sqlnotebook.disconnectHint'],
+  memoryNotice: zh['sqlnotebook.memoryNotice'],
+  walSidecarNotice: zh['sqlnotebook.walSidecarNotice'],
   runAllStopped: (index, remaining) => zh['sqlnotebook.runAllStopped']
     .replace('{index}', String(index)).replace('{remaining}', String(remaining)),
   disconnectedRolledBack: zh['sqlnotebook.disconnectedRolledBack'],
@@ -174,6 +179,14 @@ function open(draft: string, options: {
   rolledBack?: boolean
   /** Whether the outline panel is open, which the editor's status bar owns. */
   outlineVisible?: boolean
+  /** Whether the Host says a read-only WAL connection will leave -wal/-shm behind. */
+  walExpected?: boolean
+  /** Replaces the open answer entirely, so a case can make the connect refuse. */
+  open?: () => Promise<unknown>
+  /** Whether the workspace walk stopped at its cap, so the picker's list is not everything. */
+  scanTruncated?: boolean
+  /** Overrides the walked entries *and* marks the listing itself truncated. */
+  scanEntries?: WorkspaceEntry[]
 } = {}): Harness {
   const onEdit = vi.fn()
   const onSave = vi.fn()
@@ -189,9 +202,13 @@ function open(draft: string, options: {
    */
   let setDraftIntoHost: (text: string) => void = () => undefined
   const api = {
-    sqlOpen: vi.fn(() => Promise.resolve({
-      path: 'demo.db', access: 'read-only' as const, sqliteVersion: '3.46.0', walSidecarExpected: false, rowLimit: 1000,
-    })),
+    // The handle answers with the target it was asked for. A fake that always said `demo.db` would
+    // make every "is this the in-memory database" assertion below pass for the wrong reason — and
+    // one of them would fail, which is how this was caught.
+    sqlOpen: vi.fn(options.open ?? ((request: { path: string; access?: string }) => Promise.resolve({
+      path: request.path, access: (request.access ?? 'read-only') as 'read-only' | 'writable',
+      sqliteVersion: '3.46.0', walSidecarExpected: options.walExpected ?? false, rowLimit: 1000,
+    }))),
     sqlExecute: vi.fn(options.execute ?? (() => Promise.resolve({
       path: 'demo.db',
       blocks: options.blocks ?? [block()],
@@ -213,7 +230,13 @@ function open(draft: string, options: {
     setDraft: (_tabId, text) => { box.current = text; onEdit(text); setDraftIntoHost(text) },
     save: onSave,
   })
-  const root: DirectoryListing = { path: '', entries: options.entries ?? [{ name: 'demo.db', path: 'demo.db', kind: 'file' }], truncated: false }
+  const root: DirectoryListing = {
+    path: '',
+    entries: options.scanEntries ?? options.entries ?? [{ name: 'demo.db', path: 'demo.db', kind: 'file' }],
+    // Two ways the scan says "this is not everything": its own directory budget, or a listing the
+    // Host already truncated. Either has to reach the picker's title, so the fixture can set it.
+    truncated: options.scanTruncated ?? false,
+  }
   const listDirectory = vi.fn((path: string) => Promise.resolve(path === '' ? root : { path, entries: [], truncated: false }))
   /**
    * The draft held in state, the way the file tab holds it.
@@ -525,6 +548,78 @@ describe('SqlNotebookSurface 连接与执行', () => {
     await harness.connect()
     await waitFor(() => { expect(tier.disabled).toBe(true) })
     expect(tier.title).toBe(labels.tierLocked)
+  })
+
+  /**
+   * The cost of disconnecting, stated before the click rather than after the loss.
+   *
+   * `ca2296c` found this hint sitting on the sidebar's button while the toolbar's said nothing, and
+   * left it alone as out of scope for a deletion. The sidebar's button is gone now (ADR 0008), so
+   * the sentence would have vanished with it if it had not moved here.
+   */
+  it('says what disconnecting costs on the button that does it', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    await harness.connect()
+
+    const disconnect = harness.view.getByRole('button', { name: labels.disconnect })
+    expect(disconnect.getAttribute('title')).toBe(labels.disconnectHint)
+  })
+
+  // The two standing facts about a live handle moved with the control they describe, and stayed
+  // lines rather than becoming tooltips: an in-memory database is still evaporating while the reader
+  // is four queries in, and a WAL sidecar is still there after the handle closes.
+  it('keeps saying an in-memory database goes with the notebook, while that is the handle', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+    await waitFor(() => { expect(picker.options.length).toBeGreaterThan(2) })
+    fireEvent.change(picker, { target: { value: ':memory:' } })
+    fireEvent.click(harness.view.getByRole('button', { name: labels.connect }))
+
+    expect(await harness.view.findByText(labels.memoryNotice)).toBeTruthy()
+  })
+
+  it('warns that a read-only WAL handle leaves sidecar files behind', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), { walExpected: true })
+    await harness.connect()
+
+    expect(await harness.view.findByText(labels.walSidecarNotice)).toBeTruthy()
+  })
+
+  /**
+   * A short database list that claims to be complete is the failure `scanTruncated` exists to
+   * prevent — and the reader is only wondering it while pointing at the picker, which is why the
+   * caveat rides on that control rather than on a line above the cells.
+   */
+  it('marks the picker as holding only part of the workspace when the walk was cut short', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), { scanTruncated: true })
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+    await waitFor(() => { expect(picker.options.length).toBeGreaterThan(1) })
+
+    expect(picker.title).toBe(labels.scanTruncated)
+  })
+
+  it('leaves the picker without that caveat when the walk saw everything', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+    await waitFor(() => { expect(picker.options.length).toBeGreaterThan(1) })
+
+    expect(picker.getAttribute('title')).toBeNull()
+  })
+
+  /**
+   * A refused connect has to say which gate it was, on the surface that did the refusing.
+   *
+   * This case used to live in the panel spec, because the panel was the other place a reader could
+   * connect. ADR 0008 left the toolbar the only one, and 未连接 alone would send the reader to press
+   * the same button again: the Host's own line names the notebook that holds the file writable.
+   */
+  it('shows why a connect was refused instead of looking unconnected', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
+      open: () => Promise.reject(new WorkbenchApiError('SQL_WRITE_OCCUPIED', '该库文件已被其它笔记的连接占用。')),
+    })
+    await harness.connect()
+
+    expect((await harness.view.findByRole('alert')).textContent).toContain('该库文件已被其它笔记的连接占用。')
   })
 
   it('refuses to run a cell until a database is connected', () => {
