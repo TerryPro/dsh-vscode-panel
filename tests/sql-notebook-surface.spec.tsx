@@ -1122,14 +1122,14 @@ describe('SqlNotebookSurface 拖拽与折叠', () => {
 })
 
 /**
- * The result grid carries vertical rules.
+ * The result grid carries column rules, and its outer ring belongs to the cell that holds it.
  *
  * Asserted against the stylesheet because jsdom applies none: a DOM test cannot see a cell's
- * border, so nothing above would have caught this. It is written down because it has already been
- * removed once — the design sheet draws horizontal rules only, which looks right in a mockup whose
- * columns are narrow and wrong against a real result, where column widths follow the values and a
- * value then sits far from the header naming it. Whoever trims the grid again has to argue with a
- * failing test rather than with a screenshot.
+ * border, so nothing above would have caught this. It is written down because the column rules
+ * have already been removed once — the design sheet draws horizontal rules only, which looks right
+ * in a mockup whose columns are narrow and wrong against a real result, where column widths follow
+ * the values and a value then sits far from the header naming it. Whoever trims the grid again has
+ * to argue with a failing test rather than with a screenshot.
  */
 describe('SqlResultBlockView 结果表', () => {
   it('draws a column rule on every cell, not only a row rule', () => {
@@ -1139,5 +1139,20 @@ describe('SqlResultBlockView 结果表', () => {
     // `border: 1px solid` sets all four sides. The horizontal-only form this replaced wrote
     // `border-block-end`, which leaves the columns open — so this is the shape that must hold.
     expect(block).toMatch(/border: 1px solid/u)
+  })
+
+  it('leaves the outer ring to the cell, so the grid is not a panel inside the panel', () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
+    // Every cell draws four sides, then the four outermost ones are switched off: the container's
+    // own border frames the grid. Without these the table floats inside its cell, framed twice.
+    expect(stylesheet).toMatch(/\.resultTable tr > :first-child \{\s*border-inline-start: none;/u)
+    expect(stylesheet).toMatch(/\.resultTable tr > :last-child \{\s*border-inline-end: none;/u)
+    expect(stylesheet).toMatch(/\.resultTable thead th \{[^}]*border-block-start: none;/u)
+    expect(stylesheet).toMatch(/\.resultTable tbody tr:last-child > td \{\s*border-block-end: none;/u)
+    // And nothing insets the table from those borders, or the merge is undone by whitespace. The
+    // assertion is on the shorthand, since that is the form an inset would be written in.
+    const scroll = (stylesheet.match(/\.resultScroll \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(scroll, '.resultScroll must exist').toBeDefined()
+    expect(scroll).not.toMatch(/^\s*padding:/mu)
   })
 })

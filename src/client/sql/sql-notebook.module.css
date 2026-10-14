@@ -445,24 +445,27 @@
  * The scrollport for a wide table — the table's own, not the block's, so the headline above stays
  * put while the columns slide under it.
  *
- * The padding is what keeps the grid's outer rule from landing on the cell's own border, which
- * would read as one line twice as thick. The headline above it stays full-bleed on purpose: it is
- * a strip, and a strip inset from its own block would look like a floating box.
+ * No padding: the grid runs to the block's edges, and the block's own border is what frames it.
+ * Inset by even a few pixels the table stops reading as "this cell's rows" and starts reading as a
+ * panel floating inside the panel.
  */
 .resultScroll {
   overflow-x: auto;
-  padding: 8px 10px 10px;
 }
 
 /*
- * A closed grid: rules on every side of every cell.
+ * A closed grid of *internal* rules: the block's own border is the frame.
  *
  * The design sheet, and this file until now, drew horizontal rules only. That reads well in a
  * mockup whose columns are narrow and rows short; it does not hold against a real result. Column
  * widths follow the values, so one wide column pushes everything after it rightward and a value
  * ends up far from the header that names it. The row hover only half fixes that — it says "these
  * cells are one row", not "this cell is this column". The vertical rules are what make a row
- * readable across, and the trailing one is what closes the grid.
+ * readable across.
+ *
+ * The outer ring is removed below rather than drawn, so the table merges into the cell that holds
+ * it: two borders on the same edge read as one line twice as thick, which is what made the grid
+ * look like a panel floating inside the panel.
  */
 .resultTable {
   width: 100%;
@@ -480,6 +483,24 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-width: 420px;
+}
+
+/* The cell's own left/right border frames the grid; a rule on top of it would double it. */
+.resultTable tr > :first-child {
+  border-inline-start: none;
+}
+
+.resultTable tr > :last-child {
+  border-inline-end: none;
+}
+
+/* The top edge belongs to the strip above (which already closes itself), the bottom to the cell. */
+.resultTable thead th {
+  border-block-start: none;
+}
+
+.resultTable tbody tr:last-child > td {
+  border-block-end: none;
 }
 
 .resultTable thead th {
@@ -540,14 +561,16 @@
  * says how far the block goes: the strip reserves the place the second page will arrive at, so
  * adding it later moves nothing else. It sits outside the table because the sanitizer guarding
  * kernel HTML admits neither `button` nor `class`.
+ *
+ * Its own top rule, because the grid no longer draws a bottom edge to separate it from the rows:
+ * the last row's rule was removed so the table could merge into the cell.
  */
 .resultPager {
   display: flex;
   align-items: center;
   gap: 6px;
-  /* The block itself carries no padding now (the table is full-bleed), so the pager pays for its
-     own. */
   padding: 6px 10px;
+  border-block-start: 1px solid var(--dsw-alias-border-l1);
   font-size: 11px;
 }
 
