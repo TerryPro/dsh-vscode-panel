@@ -423,21 +423,37 @@ describe('skeletons', () => {  it('creates a new notebook as one version and one
     expect(parsed.cells[0]?.source).toBe('')
   })
 
-  it('seeds a double-clicked database with a query that reads it', () => {
+  /**
+   * The reported bug: a notebook opened from a `.db` started with a blank row.
+   *
+   * The seeded notebook carried an extra empty cell in front of the query, so the first thing the
+   * reader saw was a blank line and the query that actually reads their database sat second. It also
+   * contradicted every account of this behaviour: this module's own note ("an empty first cell is
+   * the one start that teaches a reader nothing"), the note that the connection record is what keeps
+   * "the first cell" from being a `SELECT` against nothing, the README in both languages ("its first
+   * cell already lists that database's tables") and N0-P0-2 ("生成一条 SELECT ... LIMIT 首格").
+   */
+  it('seeds a double-clicked database with the query as the first cell, and nothing before it', () => {
     const parsed = parseSqlNotebook(createSqlNotebookForDatabase('orders'))
-    expect(parsed.cells).toHaveLength(2)
-    expect(parsed.cells[1]?.source).toBe('SELECT * FROM "orders" LIMIT 100')
+    expect(parsed.cells).toHaveLength(1)
+    expect(parsed.cells[0]?.source).toBe('SELECT * FROM "orders" LIMIT 100')
   })
 
   it('falls back to listing tables when no table name is known', () => {
     const parsed = parseSqlNotebook(createSqlNotebookForDatabase(undefined))
-    expect(parsed.cells[1]?.source).toContain('sqlite_master')
+    expect(parsed.cells).toHaveLength(1)
+    expect(parsed.cells[0]?.source).toContain('sqlite_master')
   })
 
   it('doubles a quote in a table name so the seeded query stays valid', () => {
     // A schema can legitimately contain a quoted identifier; the first query must not be the
     // thing that looks broken.
     const parsed = parseSqlNotebook(createSqlNotebookForDatabase('we"ird'))
-    expect(parsed.cells[1]?.source).toBe('SELECT * FROM "we""ird" LIMIT 100')
+    expect(parsed.cells[0]?.source).toBe('SELECT * FROM "we""ird" LIMIT 100')
+  })
+
+  it('records the database in the seeded notebook, so reopening it reconnects', () => {
+    const parsed = parseSqlNotebook(createSqlNotebookForDatabase(undefined, 'examples/demo.db'))
+    expect(parsed.connection).toEqual({ path: 'examples/demo.db', access: 'read-only' })
   })
 })

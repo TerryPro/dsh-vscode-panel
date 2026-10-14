@@ -586,10 +586,11 @@ export function createSqlNotebookSkeleton(connection?: SqlNotebookConnectionReco
 /**
  * The notebook a database file gets when the user double-clicks it.
  *
- * Seeded with a query that actually reads something: an empty first cell is the one
- * start that teaches a reader nothing about the file they just opened. The table name
- * is quoted with the doubling SQLite requires, because a name containing a quote is a
- * real thing schemas contain and a broken first query would look like our bug.
+ * One cell, holding the query that actually reads the file: an empty first cell is the one start
+ * that teaches a reader nothing about the database they just opened, and it pushed that query down
+ * to the second row where the reader has to notice it before they learn anything. The table name is
+ * quoted with the doubling SQLite requires, because a name containing a quote is a real thing
+ * schemas contain and a broken first query would look like our bug.
  *
  * The connection record is what makes the seeded query meaningful on the next open: without it the
  * first cell would be a `SELECT` against nothing.
@@ -602,7 +603,7 @@ export function createSqlNotebookForDatabase(tableName: string | undefined, data
     {
       version: SQLNB_VERSION,
       ...(database === undefined ? {} : { connection: { path: database, access: SQL_ACCESS_DEFAULT } }),
-      cells: [sqlCellNode('sql'), sqlCellNode('sql', first)],
+      cells: [sqlCellNode('sql', first)],
     },
     SKELETON_FORMAT,
   )

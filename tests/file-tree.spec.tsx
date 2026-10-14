@@ -420,7 +420,9 @@ describe('文件目录', () => {
     // the menu does not. The file is on disk before the tab opens, so the reader never
     // sees an unsaved notebook they did not write.
     expect(api.saved).toHaveLength(1)
-    expect(parseSqlNotebook(api.saved[0]?.content ?? '').cells[1]?.source).toContain('sqlite_master')
+    // That query is the *first* cell. It used to sit second, behind an empty one, which made the
+    // blank row the first thing the reader saw.
+    expect(parseSqlNotebook(api.saved[0]?.content ?? '').cells[0]?.source).toContain('sqlite_master')
     // A notebook written beside a database connects to *that* database, read-only: its first cell
     // queries this file, and `:memory:` would make that query return nothing.
     await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb', 'sample.db') })

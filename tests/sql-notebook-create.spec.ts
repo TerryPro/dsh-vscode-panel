@@ -83,11 +83,11 @@ describe('createSqlNotebook', () => {
 
     expect(path).toBe('data/query-1.sqlnb')
     const document = parseSqlNotebook(saved[0]?.content ?? '')
-    // The first cell is the reader's, and the second answers the only question worth asking
-    // of a database just opened: what is in it.
-    expect(document.cells.map(cell => cell.kind)).toEqual(['sql', 'sql'])
-    expect(document.cells[0]?.source).toBe('')
-    expect(document.cells[1]?.source).toContain('sqlite_master')
+    // One cell, and it is the query. It used to be preceded by an empty one, which made the first
+    // thing the reader saw a blank row and pushed the query that reads their database down to the
+    // second — against this module's own note, the README in both languages, and N0-P0-2.
+    expect(document.cells.map(cell => cell.kind)).toEqual(['sql'])
+    expect(document.cells[0]?.source).toContain('sqlite_master')
   })
 
   it('stops at the name budget rather than hammering the Host', async () => {
