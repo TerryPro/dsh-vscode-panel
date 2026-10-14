@@ -8,9 +8,16 @@
  * number the database never returned.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { SQL_LIMITS, type SqlResultBlock } from '../../shared/sql-protocol.ts'
-import { declaredTypeOf, describeSqlValue, isNumericColumn, sqlBlockNotices, type SqlWireValue } from './sql-result.ts'
+import {
+  declaredTypeOf,
+  describeSqlValue,
+  isNumericColumn,
+  sqlBlockNotices,
+  sqlPageWindow,
+  type SqlWireValue,
+} from './sql-result.ts'
 import css from './sql-notebook.module.css'
 
 export interface SqlResultLabels {
@@ -28,27 +35,42 @@ export interface SqlResultLabels {
   deadline: (ms: number) => string
   changes: (count: number) => string
   emptyRows: string
-  // --- the paging slot -------------------------------------------------------------------
-  /** Names the group the arrows sit in, and the caption beside them. */
+  // --- the pager -----------------------------------------------------------------------------
+  /** Names the group the arrows sit in; the visible text is `pagerPosition`. */
   pager: string
   previousPage: string
   nextPage: string
-  /** Why both arrows are dark. Paging the rest of a truncated block needs an offset the Host
-   * does not take yet, so a control that promised a second page would promise a lie. */
-  pagerUnavailable: string
+  /** Where the reader is: which page of how many, and which rows of the answer are on screen. */
+  pagerPosition: (page: number, pageCount: number, from: number, to: number) => string
 }
 
 export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; labels: SqlResultLabels }) {
   const notices = sqlBlockNotices(block)
   /**
-   * Decided once per block rather than per cell.
+   * Which page is showing.
    *
-   * A 1000-row table would otherwise ask this 64 columns × 1000 rows over.
+   * Held as an index, not an offset: the rows are already in hand, so a page is a slice of them and
+   * nothing is re-queried — the pager shows the delivered answer, and the row-cap notice above the
+   * table stays the sentence about the rows that were never delivered.
+   *
+   * It does not need to be reset when the answer changes, because the caller keys this view on the
+   * cell's execution count: a re-run mounts a fresh one, at page 1.
+   */
+  const [page, setPage] = useState(1)
+  const pageWindow = sqlPageWindow(block.rows, page)
+  /**
+   * Decided once per block rather than per cell, and from **every delivered row**, not the page.
+   *
+   * A 1000-row table would otherwise ask this 64 columns × 1000 rows over. Reading the whole answer
+   * rather than the visible fifty is what keeps a column standing in the same place when the reader
+   * turns the page: an alignment decided per page would move a column left on the page whose values
+   * happen to be text or NULL, which reads as the data changing underneath them.
    */
   const numeric = useMemo(
     () => block.columns.map((_column, index) => isNumericColumn(block, index)),
     [block],
   )
+  const paged = pageWindow.pageCount > 1
   return (
     <div className={css.result}>
       {block.error !== undefined && (
@@ -118,8 +140,8 @@ export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; l
               </tr>
             </thead>
             <tbody>
-              {block.rows.map((row, rowIndex) => (
-                <tr key={rowIndex}>
+              {pageWindow.rows.map((row, rowIndex) => (
+                <tr key={`${pageWindow.page}-${rowIndex}`}>
                   {block.columns.map((column, columnIndex) => (
                     <td
                       key={`${column.label}-${columnIndex}`}
@@ -136,19 +158,39 @@ export function SqlResultBlockView({ block, labels }: { block: SqlResultBlock; l
         </div>
       )}
       {/*
-        The paging slot, reserved outside the table because the sanitizer that guards kernel HTML
-        allows neither `button` nor `class` — a host-built result page could not put these controls
-        anywhere. It carries no page size and no page number on purpose: paging the rest of the
-        block needs an offset the Host's execute route does not accept yet, and a readout claiming
-        "1000 rows per page" would be describing a page that does not exist.
+        The pager, rendered outside the table because the sanitizer that guards kernel HTML allows
+        neither `button` nor `class` — a host-built result page could not put these controls
+        anywhere.
+
+        It appears when the answer needs one. Not when the row cap was reached: `block.truncated` says
+        rows exist that were never delivered, which is a different fact and is said by its own notice.
+        A pager over the rows that did arrive would offer a third page that cannot exist, which is the
+        lie this control's predecessor reserved a slot to avoid.
       */}
-      {block.truncated && (
+      {paged && (
         <div className={css.resultPager} role="group" aria-label={labels.pager}>
-          <span className={css.pagerReadout}>{labels.pager}</span>
-          <button type="button" className={css.pagerButton} aria-label={labels.previousPage} title={labels.pagerUnavailable} disabled>
+          <button
+            type="button"
+            className={css.pagerButton}
+            aria-label={labels.previousPage}
+            disabled={pageWindow.page === 1}
+            onClick={() => { setPage(current => Math.max(1, current - 1)) }}
+          >
             <span aria-hidden="true">‹</span>
           </button>
-          <button type="button" className={css.pagerButton} aria-label={labels.nextPage} title={labels.pagerUnavailable} disabled>
+          {/* One readout, and it states only numbers this component computed: page, pages, and the
+              1-based span of the rows the reader is looking at. The total delivered count is not
+              repeated here — the bar above the table already owns it. */}
+          <span className={css.pagerReadout}>
+            {labels.pagerPosition(pageWindow.page, pageWindow.pageCount, pageWindow.from, pageWindow.to)}
+          </span>
+          <button
+            type="button"
+            className={css.pagerButton}
+            aria-label={labels.nextPage}
+            disabled={pageWindow.page === pageWindow.pageCount}
+            onClick={() => { setPage(current => Math.min(pageWindow.pageCount, current + 1)) }}
+          >
             <span aria-hidden="true">›</span>
           </button>
         </div>

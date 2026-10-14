@@ -339,7 +339,9 @@ export function EditorTabBody({
     pager: t('sqlnotebook.pager'),
     previousPage: t('sqlnotebook.previousPage'),
     nextPage: t('sqlnotebook.nextPage'),
-    pagerUnavailable: t('sqlnotebook.pagerUnavailable'),
+    pagerPosition: (page, pageCount, from, to) => t('sqlnotebook.pagerPosition', {
+      page: String(page), pageCount: String(pageCount), from: String(from), to: String(to),
+    }),
   }), [t])
   // Stable across renders so the surface can keep it in an effect dependency: a fresh closure
   // every render would restart the workspace scan on each keystroke in a cell.

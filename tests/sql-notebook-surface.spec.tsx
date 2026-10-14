@@ -140,13 +140,33 @@ const resultLabels: SqlResultLabels = {
   pager: zh['sqlnotebook.pager'],
   previousPage: zh['sqlnotebook.previousPage'],
   nextPage: zh['sqlnotebook.nextPage'],
-  pagerUnavailable: zh['sqlnotebook.pagerUnavailable'],
+  pagerPosition: (page, pageCount, from, to) => zh['sqlnotebook.pagerPosition']
+    .replace('{page}', String(page))
+    .replace('{pageCount}', String(pageCount))
+    .replace('{from}', String(from))
+    .replace('{to}', String(to)),
 }
 
 const markdownLabels = {} as never
 
 function block(overrides: Partial<SqlResultBlock> = {}): SqlResultBlock {
   return sqlBlock([{ label: 'x', name: 'x', type: 'INTEGER' }], [[1]], overrides)
+}
+
+/**
+ * The body rows currently rendered.
+ *
+ * Read from the DOM rather than from the block handed to the component: the page a reader is on is
+ * a fact about what is on screen, and an assertion that recomputed the slice in the test would pass
+ * while the view showed something else.
+ */
+function rowsShown(container: HTMLElement): HTMLTableRowElement[] {
+  return [...container.querySelectorAll<HTMLTableRowElement>('tbody tr')]
+}
+
+/** One visible cell's text, addressed by row and column rather than by content. */
+function cellText(container: HTMLElement, rowIndex: number, columnIndex: number): string | undefined {
+  return rowsShown(container)[rowIndex]?.cells[columnIndex]?.textContent ?? undefined
 }
 
 /** A `.sqlnb` written the way the surface writes one: four-space indent, trailing newline. */
@@ -749,35 +769,134 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(heads[1]?.textContent).toBe('who')
   })
 
-  it('reserves the paging slot under a truncated block, with both arrows dark', async () => {
+  it('pages a long answer at fifty rows a page and moves through it', async () => {
+    // The pager exists to keep a thousand-row answer readable, so the assertions are about the rows
+    // on screen: the first page shows rows 1–50, the second shows 51–100, and neither shows the
+    // other's data. A slice bug (dropping or repeating a row at the seam) shows here and nowhere
+    // else, because the underlying answer is the same array either way.
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT * FROM t' }]), {
-      blocks: [block({ truncated: true, rowLimit: 1000 })],
+      blocks: [block({
+        columns: [{ label: 'i', name: 'i', type: 'INTEGER' }],
+        rows: Array.from({ length: 120 }, (_unused, index) => [index + 1]),
+      })],
     })
     await harness.connect()
     fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
 
-    // The slot is there so the second page lands in place rather than pushing the table around
-    // later. Its caption says what it is and nothing about a page size: paging needs an offset the
-    // Host does not take yet, so both arrows are dark and a claim like "1000 rows per page" is not
-    // made anywhere.
     const group = await harness.view.findByRole('group', { name: resultLabels.pager })
-    expect(group.textContent).toContain(resultLabels.pager)
-    const previous = harness.view.getByRole('button', { name: resultLabels.previousPage }) as HTMLButtonElement
-    const next = harness.view.getByRole('button', { name: resultLabels.nextPage }) as HTMLButtonElement
-    expect(previous.disabled).toBe(true)
-    expect(next.disabled).toBe(true)
-    expect(next.getAttribute('title')).toBe(resultLabels.pagerUnavailable)
+    // `toContain`, not `toBe`: the group's text carries the two arrow glyphs as well, and the fact
+    // under test is that the readout states the page and the row span, not what else is in the row.
+    expect(group.textContent).toContain(resultLabels.pagerPosition(1, 3, 1, 50))
+    expect(rowsShown(harness.view.container)).toHaveLength(50)
+    expect(cellText(harness.view.container, 0, 0)).toBe('1')
+    expect(cellText(harness.view.container, 49, 0)).toBe('50')
+
+    const next = harness.view.getByRole('button', { name: resultLabels.nextPage })
+    fireEvent.click(next)
+    await waitFor(() => { expect(cellText(harness.view.container, 0, 0)).toBe('51') })
+    expect(group.textContent).toContain(resultLabels.pagerPosition(2, 3, 51, 100))
+    expect(rowsShown(harness.view.container)).toHaveLength(50)
+    // Row 1 is no longer on screen: the page replaced it rather than appending to it.
+    expect(harness.view.queryByText('1')).toBeNull()
+
+    fireEvent.click(harness.view.getByRole('button', { name: resultLabels.previousPage }))
+    await waitFor(() => { expect(cellText(harness.view.container, 0, 0)).toBe('1') })
+    expect(group.textContent).toContain(resultLabels.pagerPosition(1, 3, 1, 50))
   })
 
-  it('gives a block that reached its end no paging slot', async () => {
+  it('stops the arrows at the ends rather than wrapping past the answer', async () => {
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT * FROM t' }]), {
+      blocks: [block({
+        columns: [{ label: 'i', name: 'i', type: 'INTEGER' }],
+        rows: Array.from({ length: 120 }, (_unused, index) => [index + 1]),
+      })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+    await harness.view.findByRole('group', { name: resultLabels.pager })
+
+    const previous = harness.view.getByRole('button', { name: resultLabels.previousPage }) as HTMLButtonElement
+    const next = harness.view.getByRole('button', { name: resultLabels.nextPage }) as HTMLButtonElement
+    // The first page cannot go back, and the last cannot go forward: wrapping would send a reader
+    // hunting for a row they had already passed, believing the table had more of the answer in it.
+    expect(previous.disabled).toBe(true)
+    expect(next.disabled).toBe(false)
+
+    fireEvent.click(next)
+    fireEvent.click(next)
+    await waitFor(() => { expect(next.disabled).toBe(true) })
+    expect(previous.disabled).toBe(false)
+    // Page 3 holds the twenty rows the answer has left, and says so.
+    expect(harness.view.getByRole('group', { name: resultLabels.pager }).textContent)
+      .toContain(resultLabels.pagerPosition(3, 3, 101, 120))
+    expect(rowsShown(harness.view.container)).toHaveLength(20)
+  })
+
+  it('aligns a column by the whole answer, not by the page showing', async () => {
+    // The trap the pager could have set: alignment decided from the visible fifty rows would call
+    // page 1 a number column and the last page a text one, so the same column would shift under the
+    // reader as they turned the page — data changing, rather than a page being turned.
+    //
+    // One text value anywhere in the answer makes the column not numeric (`isNumericColumn` says
+    // so), so the whole answer decides *no* page of it is numeric. Asserting page 1 is the
+    // discriminating half: per-page arithmetic would have right-aligned it.
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT * FROM t' }]), {
+      blocks: [block({
+        columns: [{ label: 'v', name: 'v', type: 'INTEGER' }],
+        rows: [...Array.from({ length: 119 }, (_unused, index) => [index + 1]), ['n/a']],
+      })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+
+    const head = async (): Promise<HTMLElement> => await harness.view.findByRole('columnheader')
+    expect((await head()).getAttribute('data-numeric')).toBeNull()
+
+    fireEvent.click(harness.view.getByRole('button', { name: resultLabels.nextPage }))
+    await waitFor(() => { expect(cellText(harness.view.container, 0, 0)).toBe('51') })
+    expect((await head()).getAttribute('data-numeric')).toBeNull()
+    // The row carrying the text is on the last page, and it stays with the text columns.
+    fireEvent.click(harness.view.getByRole('button', { name: resultLabels.nextPage }))
+    await waitFor(() => { expect(harness.view.getByText('n/a')).toBeTruthy() })
+    expect((await head()).getAttribute('data-numeric')).toBeNull()
+  })
+
+  it('gives an answer that fits on one page no pager at all', async () => {
+    // The old placeholder appeared on a truncated block, which is a different fact: rows beyond the
+    // cap were never delivered, and the notice above the table says so. Offering a second page for
+    // those would promise a page that cannot exist.
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), {
-      blocks: [block({ truncated: false, rowLimit: 1000 })],
+      blocks: [block({ truncated: true, rowLimit: 1000 })],
     })
     await harness.connect()
     fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
     await harness.view.findByText('In[1]')
 
     expect(harness.view.queryByRole('group', { name: resultLabels.pager })).toBeNull()
+    // The cap's own sentence is still there, which is what carries the truth about undelivered rows.
+    expect(harness.view.getByText(resultLabels.rowsTruncated(1000))).toBeTruthy()
+  })
+
+  it('holds the row count over the whole answer, not the page', async () => {
+    // The headline says how many rows the block holds. Paging changes what is on screen, not what was
+    // delivered, so a count that dropped to 50 would report the answer as shorter than it is.
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT * FROM t' }]), {
+      blocks: [block({
+        columns: [{ label: 'i', name: 'i', type: 'INTEGER' }],
+        rows: Array.from({ length: 120 }, (_unused, index) => [index + 1]),
+      })],
+    })
+    await harness.connect()
+    fireEvent.click(harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLElement)
+
+    await harness.view.findByRole('group', { name: resultLabels.pager })
+    const count = () => harness.view.getByText(resultLabels.resultRows(120)).textContent
+    expect(count()).toBe(resultLabels.resultRows(120))
+    fireEvent.click(harness.view.getByRole('button', { name: resultLabels.nextPage }))
+    await waitFor(() => { expect(rowsShown(harness.view.container)).toHaveLength(50) })
+    // Read as text rather than by node identity: React is free to reuse or replace the span, and the
+    // claim is that the headline still reports the whole answer, not that it is the same element.
+    expect(count()).toBe(resultLabels.resultRows(120))
   })
 
   it('reports rows written by a statement that returned no result set', async () => {

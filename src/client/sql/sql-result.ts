@@ -98,6 +98,64 @@ export function declaredTypeOf(block: SqlResultBlock, index: number): string | n
 const DECIMAL_TEXT = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/u
 
 /**
+ * Rows one result page shows.
+ *
+ * A display boundary, not a transport one: the Host still delivers up to `rowLimit` rows in one
+ * response, and 1000 of them in the DOM is what previously pushed the block's own admissions below
+ * the fold. Paging the delivered rows does not re-run anything, so the warning that lives in the
+ * requirements — that a repeat of the same statement only holds its order with an `ORDER BY` —
+ * does not apply here. Nothing is re-queried; a slice is taken.
+ */
+export const SQL_RESULT_PAGE_SIZE = 50
+
+/** One page of a block, with the numbers a reader needs to be told where they are. */
+export interface SqlPageWindow<Row> {
+  rows: Row[]
+  /** 1-based, inclusive. */
+  from: number
+  /** 1-based, inclusive. Equal to `from` unless the page holds anything. */
+  to: number
+  /** 1-based. */
+  page: number
+  pageCount: number
+  /** Rows the block delivered, which is what the page count was taken from. */
+  rowCount: number
+}
+
+/**
+ * The page a reader asked for, or the nearest one that exists.
+ *
+ * Clamping is part of this function rather than the caller because a stale page index is the normal
+ * case, not the error case: the reader was on page 20 of a thousand-row answer, re-ran the statement,
+ * and the database answered with sixty rows. Rendered literally that is an empty table with arrows
+ * pointing nowhere, and an empty table that is really a full one is the kind of lie a viewer must
+ * not tell.
+ */
+export function sqlPageWindow<Row>(
+  rows: readonly Row[],
+  requestedPage: number,
+  pageSize: number = SQL_RESULT_PAGE_SIZE,
+): SqlPageWindow<Row> {
+  const rowCount = rows.length
+  // A block with no rows still has one page in the sense that matters: `pageCount > 1` is what the
+  // view checks before drawing a pager, and zero would make that read as "no pages exist".
+  const pageCount = Math.max(1, Math.ceil(rowCount / pageSize))
+  // `Number.isFinite` rather than a bare clamp, because `Math.min`/`Math.max` both hand NaN back
+  // unchanged: a NaN index would flow through as a NaN slice, and the reader would get an empty
+  // table whose arrows point at no page — the exact failure this clamp exists to prevent.
+  const requested = Number.isFinite(requestedPage) ? Math.trunc(requestedPage) : 1
+  const page = Math.min(Math.max(1, requested), pageCount)
+  const start = (page - 1) * pageSize
+  return {
+    rows: rows.slice(start, start + pageSize),
+    from: rowCount === 0 ? 0 : start + 1,
+    to: Math.min(start + pageSize, rowCount),
+    page,
+    pageCount,
+    rowCount,
+  }
+}
+/**
  * Whether one column reads as numeric, which decides **only its alignment**.
  *
  * Right-aligned digits with tabular figures are what let a reader compare a column vertically,

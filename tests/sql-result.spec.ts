@@ -7,6 +7,8 @@ import {
   formatBlobSize,
   isNumericColumn,
   sqlBlockNotices,
+  sqlPageWindow,
+  SQL_RESULT_PAGE_SIZE,
 } from '../src/client/sql/sql-result.ts'
 
 function block(overrides: Partial<SqlResultBlock> = {}): SqlResultBlock {
@@ -161,5 +163,65 @@ describe('isNumericColumn', () => {
     // numeric would be a guess dressed up as a decision.
     expect(isNumericColumn(sqlBlock([{ label: 'a', name: 'a' }], []), 0)).toBe(false)
     expect(isNumericColumn(sqlBlock([{ label: 'a', name: 'a' }], [[null]]), 0)).toBe(false)
+  })
+})
+
+describe('sqlPageWindow', () => {
+  const rows = (count: number): number[][] => Array.from({ length: count }, (_unused, index) => [index])
+
+  it('shows fifty rows on a page, which is the number the reader is told', () => {
+    const page = sqlPageWindow(rows(1000), 1)
+    expect(SQL_RESULT_PAGE_SIZE).toBe(50)
+    expect(page.rows).toHaveLength(50)
+    expect(page.rows[0]?.[0]).toBe(0)
+    expect(page.rows.at(-1)?.[0]).toBe(49)
+    expect(page).toMatchObject({ from: 1, to: 50, pageCount: 20 })
+  })
+
+  it('walks the answer without gaps or overlaps between pages', () => {
+    const all = rows(120)
+    const first = sqlPageWindow(all, 1)
+    const second = sqlPageWindow(all, 2)
+    const third = sqlPageWindow(all, 3)
+    // The seam is where a slicing bug shows: an off-by-one would drop row 50 or repeat it, and a
+    // reader comparing two pages would see the table shift by one under them.
+    expect(first.to).toBe(50)
+    expect(second.from).toBe(51)
+    expect(second.rows[0]?.[0]).toBe(50)
+    expect(second.rows.at(-1)?.[0]).toBe(99)
+    expect(third.from).toBe(101)
+    expect(third.rows).toHaveLength(20)
+    expect(third.to).toBe(120)
+    expect(first.pageCount).toBe(3)
+  })
+
+  it('leaves a short answer as one page with both arrows at the ends', () => {
+    const page = sqlPageWindow(rows(30), 1)
+    expect(page).toMatchObject({ page: 1, pageCount: 1, from: 1, to: 30 })
+    expect(page.rows).toHaveLength(30)
+  })
+
+  it('says where it is when there is nothing to show, without inventing a range', () => {
+    const page = sqlPageWindow([], 1)
+    // `pageCount` of 1 rather than 0 is what lets the view ask "more than one page?" without
+    // treating an empty answer as a broken one.
+    expect(page).toMatchObject({ page: 1, pageCount: 1, from: 0, to: 0 })
+    expect(page.rows).toEqual([])
+  })
+
+  it('clamps a page the answer no longer has down to its last page', () => {
+    // The normal path, not the error path: a reader on page 20 re-runs the statement and the
+    // database answers with sixty rows. Rendered literally that is an empty table with arrows
+    // pointing nowhere, on top of a result that is actually full.
+    const page = sqlPageWindow(rows(60), 20)
+    expect(page).toMatchObject({ page: 2, pageCount: 2, from: 51, to: 60 })
+    expect(page.rows).toHaveLength(10)
+  })
+
+  it('clamps a nonsense page index rather than showing nothing', () => {
+    expect(sqlPageWindow(rows(120), 0).page).toBe(1)
+    expect(sqlPageWindow(rows(120), -5).page).toBe(1)
+    expect(sqlPageWindow(rows(120), Number.NaN).page).toBe(1)
+    expect(sqlPageWindow(rows(120), 99).page).toBe(3)
   })
 })

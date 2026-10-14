@@ -945,7 +945,19 @@ function SqlNotebookCell({
             )}
           </div>
           {blocks.map((block, blockIndex) => (
-            <SqlResultBlockView key={`${cell.id}-block-${blockIndex}`} block={block} labels={resultLabels} />
+            /*
+              The execution count is in the key on purpose. A new answer replaces the result view
+              with a fresh one, so the page the reader was on starts over at 1 without the view
+              having to watch for a changed array — a new answer is a new answer, and a table that
+              reopened on page 20 of the previous one would read as data that skipped ahead. The
+              alternative was a second piece of state comparing array identity, which is more moving
+              parts to get the same behaviour and would have had to re-derive it on every render.
+            */
+            <SqlResultBlockView
+              key={`${cell.id}-block-${blockIndex}-${run?.executionCount ?? 'none'}`}
+              block={block}
+              labels={resultLabels}
+            />
           ))}
           {/*
             A refusal the cell itself has nowhere to show. A failed statement is already said by

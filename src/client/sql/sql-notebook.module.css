@@ -557,10 +557,13 @@
 }
 
 /*
- * The paging slot under a truncated block. Both arrows are dark in this build and the readout
- * says how far the block goes: the strip reserves the place the second page will arrive at, so
- * adding it later moves nothing else. It sits outside the table because the sanitizer guarding
- * kernel HTML admits neither `button` nor `class`.
+ * The pager under a result that needs more than one page.
+ *
+ * It sits outside the table because the sanitizer guarding kernel HTML admits neither `button` nor
+ * `class`, so a host-built result page could not place these controls anywhere. It appears only when
+ * the answer has more rows than one page holds: a block that merely hit the row cap shows no pager,
+ * because the rows past the cap were never delivered and a third page that cannot exist would be
+ * offered for them — that fact is the notice above the table's job.
  *
  * Its own top rule, because the grid no longer draws a bottom edge to separate it from the rows:
  * the last row's rule was removed so the table could merge into the cell.
@@ -583,11 +586,17 @@
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  cursor: default;
+  cursor: pointer;
 }
 
+.pagerButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The arrows at the ends of the answer, which is where a reader learns the table has no more pages. */
 .pagerButton:disabled {
   opacity: 0.4;
+  cursor: default;
 }
 
 .pagerReadout {

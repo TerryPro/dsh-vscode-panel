@@ -370,7 +370,12 @@ export class SqlBackend {
       if (typeof name !== 'string' || typeof type !== 'string') continue
       if (tables.length < SQL_LIMITS.maxTreeTables) tables.push({ name, kind: type === 'view' ? 'view' : 'table' })
     }
-    return { path: managed.database, tables, truncated: rows.length > tables.length }
+    return {
+      path: managed.database,
+      databaseKind: managed.database === SQL_MEMORY_TARGET ? 'memory' : 'file',
+      tables,
+      truncated: rows.length > tables.length,
+    }
   }
 
   /**
