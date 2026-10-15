@@ -120,6 +120,13 @@ function mount(options: {
   columnsByTable?: Record<string, Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean; unique?: boolean; foreignKey?: { table: string; column?: string }; autoIncrement?: boolean; stats?: { approxRows?: number; approxDistinct?: number } }>>
   walExpected?: boolean
   databaseKind?: 'file' | 'memory'
+  /**
+   * Directory listings keyed by directory path. The walk issues `''` for the workspace
+   * root and the relative path for any subdirectory it recurses into. Each listing
+   * returns a set of directory/file entries; the panel reads `.sqlnb` files out of
+   * them. A directory the test did not declare reads as empty rather than rejecting.
+   */
+  listings?: Record<string, { entries: Array<{ name: string; path: string; kind: 'file' | 'directory' | 'symlink' }>; truncated?: boolean }>
 } = {}): Harness {
   const api = {
     sqlOpen: vi.fn((request: { path: string; access?: string }) => Promise.resolve({
@@ -497,6 +504,26 @@ describe('SqlPanel — 笔记列表', () => {
     // the panel calls the same one, so the panel's switch is a thin wrapper around the
     // existing seam.
     expect(harness.selectTab).toHaveBeenCalledWith(second.id)
+  })
+
+  it('shows the schema tree for the active notebook, in the "Open" half of the panel', async () => {
+    // The "Open" group carries the active notebook's tree underneath: a panel that
+    // placed the tree below the workspace scan would make the relationship between
+    // "which notebook is open" and "what is being described" harder to see at a
+    // glance. The test pins that the tree is a descendant of the "Open" section
+    // and not of the workspace section.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      tables: [TABLE('city')],
+    })
+    await harness.connect()
+
+    expect(await harness.view.findByRole('button', { name: /city\b/u })).toBeTruthy()
+    const tree = harness.view.getByRole('tree', { name: zh['sqlnotebook.schema'] })
+    const openSection = harness.view.getByText(zh['sqlnotebook.openNotebooks']).closest('section')!
+    const workspaceSection = harness.view.getByText(zh['sqlnotebook.workspaceNotebooks']).closest('section')!
+    expect(openSection.contains(tree)).toBe(true)
+    expect(workspaceSection.contains(tree)).toBe(false)
   })
 
   it('keeps the active row’s tree while showing only labels for inactive ones', async () => {

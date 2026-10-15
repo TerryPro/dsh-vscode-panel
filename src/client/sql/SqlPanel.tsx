@@ -456,6 +456,12 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   // the same panel. The badge is a small tabular-numeral pill, not a button: this group is
   // the read side, and the only way the open set changes is opening and closing tabs in
   // the workbench.
+  //
+  // The schema tree of the *active* notebook is rendered inside this section, immediately
+  // after the row list, so picking a different open row re-roots the tree at that
+  // notebook's connection. A panel that put the tree in its own third section would make
+  // the relationship between "which notebook is open" and "what is being described" harder
+  // to see at a glance.
   const openListBody = (
     <section className={css.openNotebooks} aria-label={t('sqlnotebook.openNotebooks')}>
       <header className={css.openNotebooksHeader}>
@@ -481,6 +487,13 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
             />
           ))}
       </div>
+      {notebooks.length > 1 && activeTabId !== null && treeBody !== null
+        ? <div className={css.notebookTreeSeparator} />
+        : null}
+      {treeBody}
+      {treeBody === null && activeTabId !== null && notebooks.length > 0
+        ? <div className={css.notebookTreePlaceholder}>{t('sqlnotebook.notebookListInactiveBadge')}</div>
+        : null}
     </section>
   )
 
@@ -549,16 +562,6 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       <div className={css.body}>
         {openListBody}
         {workspaceListBody}
-        {treeBody !== null
-          ? (
-            <>
-              {notebooks.length > 1 && activeTabId !== null && <div className={css.notebookTreeSeparator} />}
-              {treeBody}
-            </>
-          )
-          : activeTabId !== null && notebooks.length > 0
-            ? <div className={css.notebookTreePlaceholder}>{t('sqlnotebook.notebookListInactiveBadge')}</div>
-            : null}
       </div>
       <SqlTableContextMenu
         target={menuTarget}
