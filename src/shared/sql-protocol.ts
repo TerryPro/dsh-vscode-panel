@@ -329,6 +329,14 @@ export interface SqlColumnEntry {
    * read the foreign-key list at all (P2); the panel reads `undefined` as "no icon, no claim".
    */
   foreignKey?: SqlForeignKey
+  /**
+   * The column is an `INTEGER PRIMARY KEY AUTOINCREMENT` row. The host decides this strictly
+   * from the column's `sql` definition: a `PRAGMA table_info` row's `sql` is the literal text
+   * the column had in `CREATE TABLE`, so the panel can spot the `AUTOINCREMENT` keyword
+   * without a second query. Absent when the host did not look (older host versions) — the
+   * panel reads `undefined` as "no AUTO pill", not as "no".
+   */
+  autoIncrement?: boolean
   /** Cheap per-column statistics from `sqlite_stat1`, when the host has them. */
   stats?: SqlColumnStats
 }

@@ -16,7 +16,26 @@ import { childWorkspacePath } from '../../shared/path-policy.ts'
 import { SQL_ACCESS_DEFAULT } from '../../shared/sql-protocol.ts'
 import { createSqlNotebookForDatabase, createSqlNotebookSkeleton } from './sql-notebook-document.ts'
 
-/** The stem a tree-created notebook takes; only the counter differs between creations. */
+/**
+ * Derive the name stem for a new `.sqlnb`.
+ *
+ * The stem appears as `<stem>-1.sqlnb`, `<stem>-2.sqlnb`, … in the file tree.
+ * When the notebook is created beside a known database file the stem comes from its
+ * filename (e.g. `sample.db` → `sample-1.sqlnb`); when there is no database context
+ * the generic `query` stem is used as a fallback.
+ *
+ * Rules for the stem:
+ *   - take only the last path component (strip any directory)
+ *   - strip the `.db` suffix if present
+ *   - replace any character that is not alphanum, `_`, or `-` with `-`
+ */
+export function deriveSqlNotebookStem(database: string | undefined): string {
+  if (database === undefined) return 'query'
+  const filename = database.replace(/.*[/\\]/, '').replace(/\.db$/i, '')
+  return filename.replace(/[^a-zA-Z0-9_-]/g, '-')
+}
+
+/** Legacy export kept for consumers that import the old named constant. */
 export const SQL_NOTEBOOK_STEM = 'query'
 
 /**
@@ -56,8 +75,9 @@ export async function createSqlNotebook(args: {
     : createSqlNotebookSkeleton(
       args.database === undefined ? undefined : { path: args.database, access: SQL_ACCESS_DEFAULT },
     )
+  const stem = deriveSqlNotebookStem(args.database)
   for (let attempt = 1; attempt <= SQL_NOTEBOOK_NAME_ATTEMPTS; attempt += 1) {
-    const path = childWorkspacePath(args.directory, `${SQL_NOTEBOOK_STEM}-${attempt}.sqlnb`)
+    const path = childWorkspacePath(args.directory, `${stem}-${attempt}.sqlnb`)
     try {
       await args.api.createFile(args.workspaceId, path)
     } catch (error) {

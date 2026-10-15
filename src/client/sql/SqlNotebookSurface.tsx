@@ -25,7 +25,9 @@ import {
   IconAddCode16,
   IconAddMarkdown16,
   IconClearOutputs16,
+  IconConnect16,
   IconDeleteCell16,
+  IconDisconnect16,
   IconEditCell16,
   IconFold16,
   IconInterrupt16,
@@ -542,48 +544,47 @@ export function SqlNotebookSurface({
             ))}
           </select>
         </label>
-        {/* A `:memory:` target has no tier to choose, so the control is not shown for it. */}
-        {!memoryPicked && (
-          <select
-            className={css.pickerSelect}
-            aria-label={connection === null ? labels.readOnlyTier : labels.tierLocked}
-            title={connection === null ? undefined : labels.tierLocked}
-            value={pickAccess}
-            disabled={!canConnect || connection !== null}
-            onChange={event => { setPickAccess(event.target.value === 'writable' ? 'writable' : 'read-only') }}
-          >
-            <option value="read-only">{labels.readOnlyTier}</option>
-            <option value="writable">{labels.writableTier}</option>
-          </select>
-        )}
+        {/*
+          The tier used to live here as a `select` beside the database picker. It moved down
+          into the status bar: the toolbar already asks "which database", and the tier is
+          standing metadata about the handle that is about to be opened, not another control
+          the reader has to operate to start a run. The status bar carries `只读 / 可写`
+          after the path so the two facts read as a single sentence.
+        */}
         <button type="button" className={css.toolbarAction} aria-label={labels.rescan} title={labels.rescan} disabled={scanning} onClick={rescan}>
           <IconRestartKernel16 />
         </button>
         {/*
-          Connect and disconnect are text, not glyphs. A play triangle already means "run this
-          cell" two buttons to the left of here, and a control that opens a database cannot
-          borrow that mark without a reader pressing it expecting the other effect.
+          Connect / disconnect are icon buttons — the play triangle and the text label were
+          ambiguous next to the run button (a play on the left meant "run this cell", a play
+          on the right meant "open a handle"), and a wire-style plug is the convention the
+          rest of the IDE surface already uses for "this opens a handle". The `aria-label`
+          stays equal to the dictionary word so screen readers and the `getByRole({ name })`
+          tests still find the button by the same name as before; the visible glyph is the
+          plug, the invisible name is the verb.
         */}
         {connection === null
           ? (
             <button
               type="button"
-              className={css.toolbarButton}
+              className={`${css.toolbarAction} ${css.toolbarActionConnect}`}
               disabled={!canConnect || pickPath === ''}
+              aria-label={labels.connect}
               title={pickPath === '' ? labels.noDatabase : labels.connect}
               onClick={() => { void runtime.connect(tabId, pickPath, connectAccess) }}
             >
-              {labels.connect}
+              <IconConnect16 />
             </button>
           )
           : (
             <button
               type="button"
-              className={css.toolbarButton}
-              // The cost of pressing this is not visible from the word 断开: the handle carries the
-              // notebook's scratch work, and it goes with the handle. `ca2296c` found the sidebar's
-              // button said this while this one did not, and deferred adding it here as out of scope
-              // for a deletion; this is where that debt is paid.
+              className={css.toolbarAction}
+              // The cost of pressing this is not visible from the glyph alone: the handle
+              // carries the notebook's scratch work, and it goes with the handle. The hint
+              // is what the disconnect word used to say, kept on the same button so the
+              // reader is told the cost before they pay it.
+              aria-label={labels.disconnect}
               title={labels.disconnectHint}
               onClick={() => {
                 void runtime.disconnect(tabId).then((outcome) => {
@@ -594,18 +595,9 @@ export function SqlNotebookSurface({
                 })
               }}
             >
-              {labels.disconnect}
+              <IconDisconnect16 />
             </button>
           )}
-        <span className={css.connectionReadout} data-connected={connection !== null || undefined}>
-          {runState === null
-            ? labels.connecting
-            : runState.connecting
-            ? labels.connecting
-            : connection === null
-              ? labels.notConnected
-              : connectionReadout(connection, { readOnly: labels.readOnlyTier, writable: labels.writableTier })}
-        </span>
       </div>
       {news !== null && (
         <div className={css.notice} role="status">{news}</div>
@@ -692,6 +684,26 @@ export function SqlNotebookSurface({
             onSelect={scrollToCell}
           />
         )}
+      </div>
+      {/*
+        The connection readout, in the same place it always was: the workbench's own
+        `editorStatusBar`, below the cell body. The strip is what outlives the cell view, and
+        the same one line says it in both source view and notebook view. This surface renders
+        the line itself because the cell view is its own DOM and the status strip in the
+        workbench does not reach into a mounted `SqlNotebookSurface` — `EditorTabBody` keeps
+        the strip empty while this view is on screen, so a single line of text is the one
+        piece of the strip this view claims.
+      */}
+      <div className={css.notebookStatusBar} data-connected={connection !== null || undefined}>
+        <span className={css.notebookStatusBarItem}>
+          {runState === null
+            ? labels.connecting
+            : runState.connecting
+              ? labels.connecting
+              : connection === null
+                ? labels.notConnected
+                : connectionReadout(connection, { readOnly: labels.readOnlyTier, writable: labels.writableTier })}
+        </span>
       </div>
     </div>
   )

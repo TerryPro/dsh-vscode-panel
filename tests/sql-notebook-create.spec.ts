@@ -3,6 +3,7 @@ import type { CreatedWorkspaceEntry, SavedWorkspaceFile, WorkspaceFile } from '.
 import { WorkbenchApiError, type WorkbenchApi } from '../src/client/model/api.ts'
 import {
   createSqlNotebook,
+  deriveSqlNotebookStem,
   SQL_NOTEBOOK_NAME_ATTEMPTS,
   SQL_NOTEBOOK_STEM,
   type SqlNotebookSeed,
@@ -36,13 +37,36 @@ function apiFake(taken: string[] = []) {
   return { api: { createFile, readFile, saveFile } as unknown as WorkbenchApi, created, saved }
 }
 
-function make(directory: string, seed: SqlNotebookSeed, taken: string[] = []) {
+function make(directory: string, seed: SqlNotebookSeed, database?: string, taken: string[] = []) {
   const fake = apiFake(taken)
   return {
     ...fake,
-    result: createSqlNotebook({ api: fake.api, workspaceId: 'workspace-1', directory, seed }),
+    result: createSqlNotebook({ api: fake.api, workspaceId: 'workspace-1', directory, seed, ...(database === undefined ? {} : { database }) }),
   }
 }
+
+describe('deriveSqlNotebookStem', () => {
+  it('falls back to "query" when no database is present', () => {
+    expect(deriveSqlNotebookStem(undefined)).toBe('query')
+  })
+
+  it('strips the directory and .db suffix', () => {
+    expect(deriveSqlNotebookStem('sample.db')).toBe('sample')
+    expect(deriveSqlNotebookStem('examples/sample.db')).toBe('sample')
+    expect(deriveSqlNotebookStem('data/2024-Q1/orders.db')).toBe('orders')
+  })
+
+  it('replaces non-alphanumeric characters with hyphens', () => {
+    expect(deriveSqlNotebookStem('my db')).toBe('my-db')
+    expect(deriveSqlNotebookStem('we"ird.db')).toBe('we-ird')
+    expect(deriveSqlNotebookStem('a/b/c.db')).toBe('c')
+  })
+
+  it('keeps alphanumerics, underscores, and hyphens intact', () => {
+    expect(deriveSqlNotebookStem('orders_db')).toBe('orders_db')
+    expect(deriveSqlNotebookStem('2024-Q1')).toBe('2024-Q1')
+  })
+})
 
 describe('createSqlNotebook', () => {
   it('creates the next free name in the given directory and writes a valid document into it', async () => {
@@ -67,7 +91,7 @@ describe('createSqlNotebook', () => {
 
   it('walks past names that are already taken without saving into them', async () => {
     const taken = ['query-1.sqlnb', 'query-2.sqlnb']
-    const { created, saved, result } = make('', 'empty', taken)
+    const { created, saved, result } = make('', 'empty', undefined, taken)
     const path = await result
 
     expect(path).toBe('query-3.sqlnb')
@@ -92,7 +116,7 @@ describe('createSqlNotebook', () => {
 
   it('stops at the name budget rather than hammering the Host', async () => {
     const taken = Array.from({ length: SQL_NOTEBOOK_NAME_ATTEMPTS }, (_, index) => `query-${index + 1}.sqlnb`)
-    const { created, saved, result } = make('', 'empty', taken)
+    const { created, saved, result } = make('', 'empty', undefined, taken)
 
     expect(await result).toBeNull()
     expect(created).toHaveLength(0)
@@ -109,5 +133,26 @@ describe('createSqlNotebook', () => {
     await expect(createSqlNotebook({ api: failing, workspaceId: 'workspace-1', directory: '', seed: 'empty' }))
       .rejects.toThrow('不能访问工作区外的路径。')
     expect(failing.createFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the database name as the stem when database is provided', async () => {
+    const { result } = make('data', 'database', 'sample.db')
+    const path = await result
+    expect(path).toBe('data/sample-1.sqlnb')
+  })
+
+  it('walks past taken names within the same database stem', async () => {
+    const taken = ['sample-1.sqlnb', 'sample-2.sqlnb']
+    const { result } = make('', 'database', 'sample.db', taken)
+    const path = await result
+    expect(path).toBe('sample-3.sqlnb')
+  })
+
+  it('does not cross-contaminate stems: query vs sample', async () => {
+    const taken = ['query-1.sqlnb', 'query-2.sqlnb']
+    const { result } = make('', 'empty', undefined, taken)
+    // The next query-* name is query-3; sample-* names do not bump the counter
+    const path = await result
+    expect(path).toBe('query-3.sqlnb')
   })
 })

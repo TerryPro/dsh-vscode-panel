@@ -260,18 +260,23 @@ describe('WorkbenchEditor multi-file tabs', () => {
 
   /**
    * Which of the two surfaces says "here is the database this notebook is on" is decided by the
-   * shell, not by the strip (ADR 0008): the toolbar states it while the cell surface is mounted, and
-   * the strip takes over when that surface is gone. Asserted here rather than in the strip's own
-   * spec because `hideReadout` is a *wiring* decision — a strip test can only check that it obeys
-   * the flag, not that anyone passes it.
+   * shell, not by the strip (ADR 0008): the cell view's own bottom strip states it while the cell
+   * surface is mounted, and the workbench status strip takes over when that surface is gone (i.e.
+   * in source view). Asserted here rather than in the strip's own spec because *whether* the
+   * strip is wired up at all is a shell-level decision — a strip test can only check what it
+   * renders when it is asked to render.
    */
-  it('leaves the connection readout to the notebook toolbar in the cell view', () => {
+  it('leaves the connection readout to the cell surface in the cell view; the workbench status strip stays empty', () => {
     openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
     const controller = controllerFake()
     controller.sqlRuntime.peek.mockReturnValue(SQL_CONNECTED_STATE)
     const view = renderEditor(controller)
 
-    expect(view.queryByText('demo.db · 只读 · 1000')).toBeNull()
+    // The cell surface paints the readout in its own bottom strip (`.notebookStatusBar`); the
+    // workbench's `editorStatusBar` does not carry it, because the cell view is on screen and
+    // would otherwise show the same line twice.
+    const statusBar = view.container.querySelector('[class*="editorStatusBar"]')
+    expect(statusBar?.textContent ?? '').not.toContain('demo.db · 只读 · 1000')
   })
 
   it('carries the whole connection readout over the raw JSON', () => {

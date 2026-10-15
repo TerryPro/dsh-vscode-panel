@@ -34,7 +34,7 @@ afterEach(() => { cleanup() })
 const t = (key: string): string => (zh as Record<string, string>)[key] ?? key
 
 /** One notebook and a runtime that answers open with whatever tier it was asked for. */
-function mount(props: { hideReadout?: boolean; walExpected?: boolean; path?: string } = {}): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: Record<string, ReturnType<typeof vi.fn>> } {
+function mount(props: { walExpected?: boolean; path?: string } = {}): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: Record<string, ReturnType<typeof vi.fn>> } {
   const api = {
     sqlOpen: vi.fn((request: { path: string; access?: string }) => Promise.resolve({
       path: request.path,
@@ -55,7 +55,7 @@ function mount(props: { hideReadout?: boolean; walExpected?: boolean; path?: str
   })
   runtime.bind('tab-1', 'workspace-1', 'query.sqlnb')
   // `SqlConnectionStatus` renders nothing until a tab is bound, which the call above does.
-  const view = render(<SqlConnectionStatus runtime={runtime} tabId="tab-1" t={t as never} {...(props.hideReadout === undefined ? {} : { hideReadout: props.hideReadout })} />)
+  const view = render(<SqlConnectionStatus runtime={runtime} tabId="tab-1" t={t as never} />)
   return { runtime, view, api }
 }
 
@@ -92,31 +92,6 @@ describe('SqlConnectionStatus', () => {
     // The dedicated code is what the Host mints when the driver's message named the file's own path —
     // a renamed or deleted database, which nothing watches. The readout is where the reader learns
     // to reconnect rather than reading it as one failed query among many.
-    api['sqlExecute'] = vi.fn(() => Promise.reject(new WorkbenchApiError(SQL_PATH_UNAVAILABLE_CODE, '数据库文件当前不可访问。')))
-    runtime.runCell('tab-1', 'sqlnb-0')
-
-    await waitFor(() => { expect(view.container.textContent).toBe(zh['sqlnotebook.reconnectHint']) })
-  })
-
-  /**
-   * The strip gives up the readout when the notebook toolbar is on screen and already states it
-   * (ADR 0008, following the `hideChip` rule `NotebookKernelStatus` already keeps). Rendering an
-   * empty span would still take a slot in the strip's flex row and read as a missing value rather
-   * than as a fact stated once.
-   */
-  it('goes quiet while the notebook toolbar is the one reporting', async () => {
-    const { runtime, view } = mount({ hideReadout: true })
-    await runtime.connect('tab-1', 'demo.db', 'read-only')
-
-    await waitFor(() => { expect(runtime.state('tab-1').connection).not.toBeNull() })
-    expect(view.container.textContent).toBe('')
-  })
-
-  it('still reports a lost database file while the toolbar reports the handle', async () => {
-    // The one fact the toolbar cannot show: it keeps naming the database it opened, so "that file is
-    // gone" has no other surface on screen, hideReadout or not.
-    const { runtime, view, api } = mount({ hideReadout: true })
-    await runtime.connect('tab-1', 'demo.db', 'read-only')
     api['sqlExecute'] = vi.fn(() => Promise.reject(new WorkbenchApiError(SQL_PATH_UNAVAILABLE_CODE, '数据库文件当前不可访问。')))
     runtime.runCell('tab-1', 'sqlnb-0')
 

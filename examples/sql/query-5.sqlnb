@@ -1,0 +1,140 @@
+{
+  "version": 2,
+  "connection": {
+    "path": "examples/demo.db",
+    "access": "read-only"
+  },
+  "cells": [
+    {
+      "kind": "sql",
+      "source": "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+      "results": [
+        {
+          "columns": [
+            {
+              "label": "name",
+              "name": "name",
+              "type": "TEXT"
+            }
+          ],
+          "rows": [
+            [
+              "city"
+            ],
+            [
+              "country"
+            ]
+          ],
+          "rowLimit": 1000,
+          "truncated": false,
+          "columnsDropped": 0,
+          "valuesTruncated": 0
+        }
+      ],
+      "execution_count": 1,
+      "elapsed_ms": 0
+    },
+    {
+      "kind": "sql",
+      "source": "SELECT * FROM \"city\" LIMIT 1000",
+      "results": [
+        {
+          "columns": [
+            {
+              "label": "id",
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "label": "name",
+              "name": "name",
+              "type": "TEXT"
+            },
+            {
+              "label": "country",
+              "name": "country",
+              "type": "TEXT"
+            },
+            {
+              "label": "population",
+              "name": "population",
+              "type": "INTEGER"
+            }
+          ],
+          "rows": [
+            [
+              1,
+              "Tokyo",
+              "JP",
+              14000000
+            ],
+            [
+              2,
+              "Osaka",
+              "JP",
+              2700000
+            ],
+            [
+              3,
+              "Lyon",
+              "FR",
+              520000
+            ],
+            [
+              4,
+              "Kansascity",
+              "US",
+              510000
+            ]
+          ],
+          "rowLimit": 1000,
+          "truncated": false,
+          "columnsDropped": 0,
+          "valuesTruncated": 0
+        }
+      ],
+      "execution_count": 2,
+      "elapsed_ms": 1
+    },
+    {
+      "kind": "sql",
+      "source": "SELECT * FROM \"country\" LIMIT 1000",
+      "results": [
+        {
+          "columns": [
+            {
+              "label": "code",
+              "name": "code",
+              "type": "TEXT"
+            },
+            {
+              "label": "name",
+              "name": "name",
+              "type": "TEXT"
+            }
+          ],
+          "rows": [
+            [
+              "JP",
+              "Japan"
+            ],
+            [
+              "FR",
+              "France"
+            ],
+            [
+              "US",
+              "United States"
+            ]
+          ],
+          "rowLimit": 1000,
+          "truncated": false,
+          "columnsDropped": 0,
+          "valuesTruncated": 0
+        }
+      ],
+      "execution_count": 3,
+      "elapsed_ms": 1
+    }
+  ]
+}

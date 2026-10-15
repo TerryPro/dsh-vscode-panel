@@ -20,6 +20,12 @@
  * shape is the standard one in DataGrip / DBeaver / TablePlus, and the "every field is a node"
  * rule is what file-management panels already follow here.
  *
+ * Multiple open notebooks: the panel lists every open `.sqlnb` (ADR 0002 — a connection is keyed
+ * by the notebook, so a workspace can hold several), with the active one expanded into the
+ * four-level tree underneath. Picking a different row switches the active tab through the
+ * controller, which is the same action the tab strip already exposes; the list is a navigation
+ * aid, not a second tab strip.
+ *
  * It is still not a second editor: no draft, no result, no run state of its own. It binds the
  * runtime and replays the file's connection record because the tree needs a live handle to describe
  * — and the editor may be showing a `.ts` file right now, which is exactly when nothing else on
@@ -28,14 +34,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { WorkbenchFileTab, WorkbenchState } from '../model/controller.ts'
 import type { SqlColumnEntry, SqlTablesResult, SqlTreeEntry } from '../../shared/sql-protocol.ts'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import type { WorkbenchController } from '../model/controller.ts'
 import { messageOf } from '../model/tab-model.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
+import { isSqlNotebookPath } from './sql-notebook-document.ts'
 import { appendSqlCell } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
 import { quotedSqlIdentifier, selectAllFrom } from './sql-schema-tree.ts'
+import { SqlRuntime, type SqlNotebookState } from './sql-runtime.ts'
 import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
 import {
   SqlTreeNode,
@@ -51,37 +60,122 @@ export interface SqlPanelProps {
   t: TranslateNS<'workbench'>
 }
 
+/**
+ * Snapshot of every SQL notebook tab the workbench has open, plus a single force-render key
+ * bumped by any per-tab subscription. The hook does not own binding — that lives on the
+ * `useEffect` below — it only keeps the panels and rows in sync with the runtimes that are
+ * already up.
+ *
+ * A tab that has not been bound yet (the surface mounted before its binding effect ran) reads as
+ * `null`; the panel renders that as "未连接" so the row never claims a connection that has not
+ * landed.
+ */
+function useNotebookStates(
+  runtime: SqlRuntime,
+  tabs: ReadonlyArray<WorkbenchFileTab>,
+): ReadonlyMap<string, SqlNotebookState | null> {
+  const [version, setVersion] = useState(0)
+  useEffect(() => {
+    const unsubs = tabs.map(tab => runtime.subscribe(tab.id, () => { setVersion(value => value + 1) }))
+    return () => { for (const unsub of unsubs) unsub() }
+  }, [runtime, tabs])
+  return useMemo(() => {
+    void version
+    const map = new Map<string, SqlNotebookState | null>()
+    for (const tab of tabs) map.set(tab.id, runtime.peek(tab.id))
+    return map
+  }, [runtime, tabs, version])
+}
+
+/**
+ * One row in the notebook list. The row is the disclosure target for that tab's tree, so a
+ * click on the row does two things at once: it switches the active tab (so the workbench tab
+ * strip agrees) and it expands the four-level tree beneath it. The component keeps the two
+ * concerns separate at the JSX level: `onActivate` is the tab switch, the rendering of the
+ * tree below it is the parent's responsibility.
+ */
+interface NotebookRowProps {
+  tab: WorkbenchFileTab
+  active: boolean
+  state: SqlNotebookState | null
+  onActivate: (tabId: string) => void
+  t: TranslateNS<'workbench'>
+}
+
+function NotebookRow({ tab, active, state, onActivate, t }: NotebookRowProps) {
+  const className = active ? `${css.notebookRow} ${css.notebookRowActive}` : css.notebookRow
+  const labelClass = active ? css.notebookRowLabel : `${css.notebookRowLabel} ${css.notebookRowInactive}`
+  const connection = state?.connection ?? null
+  const tierLabel = connection === null
+    ? null
+    : connection.access === 'writable'
+      ? t('sqlnotebook.notebookListTierWritable')
+      : t('sqlnotebook.notebookListTierReadOnly')
+  const tierClass = connection === null
+    ? css.notebookRowBadge
+    : connection.access === 'writable'
+      ? `${css.notebookRowBadge} ${css.notebookRowBadgeWritable}`
+      : `${css.notebookRowBadge} ${css.notebookRowBadgeReadOnly}`
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-current={active ? 'true' : undefined}
+      aria-label={tab.path}
+      onClick={() => { onActivate(tab.id) }}
+    >
+      <span className={labelClass}>{tab.path}</span>
+      <span className={css.notebookRowBadges}>
+        {active && <span className={`${css.notebookRowBadge} ${css.notebookRowBadgeActive}`}>{t('sqlnotebook.notebookListActiveBadge')}</span>}
+        {connection !== null && connection.path === ':memory:' && <span className={`${css.notebookRowBadge} ${css.notebookRowBadgeMemory}`}>{t('sqlnotebook.notebookListMemoryBadge')}</span>}
+        {connection !== null && tierLabel !== null && <span className={tierClass}>{tierLabel}</span>}
+        {connection?.walSidecarExpected === true && <span className={`${css.notebookRowBadge} ${css.notebookRowBadgeWal}`}>{t('sqlnotebook.notebookListWalBadge')}</span>}
+      </span>
+    </button>
+  )
+}
+
+/** The SQL notebook tabs in the workbench tab strip, in the order the workbench reports them. */
+function sqlNotebooks(state: WorkbenchState): WorkbenchFileTab[] {
+  return state.tabs.filter(
+    (tab): tab is WorkbenchFileTab => tab.kind === 'file' && isSqlNotebookPath(tab.path),
+  )
+}
+
 export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const state = useWorkbench(controller)
-  const notebook = activeSqlNotebook(state)
-  const tabId = notebook?.id ?? null
-  const notebookPath = notebook?.path ?? null
+  const activeNotebook = activeSqlNotebook(state)
+  const activeTabId = activeNotebook?.id ?? null
+  const activePath = activeNotebook?.path ?? null
+  const notebooks = useMemo(() => sqlNotebooks(state), [state])
+  const notebookStates = useNotebookStates(controller.sqlRuntime, notebooks)
+  const activeState = activeTabId === null ? null : notebookStates.get(activeTabId) ?? null
+  const connection = activeState?.connection ?? null
+  const connectedPath = connection?.path ?? null
 
-  // The editor can be showing another file while this panel is on screen, so the panel binds the
-  // runtime itself. `bind` is idempotent for one notebook, and it is what tells the runtime which
-  // workspace and notebook a tab belongs to.
+  // Bind every SQL notebook the panel can see, not just the active one. ADR 0002 keys a
+  // connection by the notebook, so a panel that asked the runtime to track only one tab would
+  // see the rest of its rows show "not connected" forever, even when each notebook has its
+  // own database file the file system knows about.
   useEffect(() => {
-    if (workspaceId === undefined || tabId === null || notebookPath === null) return
-    controller.sqlRuntime.bind(tabId, workspaceId, notebookPath)
-    // Reopening a notebook connects to the database its file records (ADR 0007). That is the
-    // notebook's own rule, not a connection control: the panel replays it because with the surface
-    // unmounted there would otherwise be no handle, and so no tree to read.
-    void controller.sqlRuntime.autoConnect(tabId)
-  }, [controller, notebookPath, tabId, workspaceId])
+    if (workspaceId === undefined) return
+    const runtime = controller.sqlRuntime
+    for (const tab of notebooks) {
+      runtime.bind(tab.id, workspaceId, tab.path)
+      void runtime.autoConnect(tab.id)
+    }
+  }, [controller, notebooks, workspaceId])
 
   const subscribe = useCallback(
     (notify: () => void): (() => void) =>
-      (tabId === null ? () => {} : controller.sqlRuntime.subscribe(tabId, notify)),
-    [controller, tabId],
+      (activeTabId === null ? () => {} : controller.sqlRuntime.subscribe(activeTabId, notify)),
+    [controller, activeTabId],
   )
   const readState = useCallback(
-    () => (tabId === null ? null : controller.sqlRuntime.peek(tabId)),
-    [controller, tabId],
+    () => (activeTabId === null ? null : controller.sqlRuntime.peek(activeTabId)),
+    [controller, activeTabId],
   )
   const runState = useSyncExternalStore(subscribe, readState)
-
-  const connection = runState?.connection ?? null
-  const connectedPath = connection?.path ?? null
 
   const [tables, setTables] = useState<SqlTablesResult | null>(null)
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
@@ -90,20 +184,23 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const lastExecution = useRef('')
 
   const loadSchema = useCallback((): void => {
-    if (workspaceId === undefined || notebookPath === null) return
+    if (workspaceId === undefined || activePath === null) return
     setSchemaProblem(null)
-    void controller.api.sqlTables(workspaceId, notebookPath).then(
+    void controller.api.sqlTables(workspaceId, activePath).then(
       (result) => { setTables(result) },
       (error: unknown) => { setSchemaProblem(messageOf(error)) },
     )
-  }, [controller, notebookPath, workspaceId])
+  }, [controller, activePath, workspaceId])
 
+  // Schema is per-active-tab. Resetting when the active tab changes matters because a table
+  // list from notebook A is not a table list for notebook B, and a column cache keyed by name
+  // would silently mix the two.
   useEffect(() => {
     setTables(null)
     setColumns({})
     setSchemaProblem(null)
     if (connectedPath !== null) loadSchema()
-  }, [connectedPath, loadSchema])
+  }, [activeTabId, connectedPath, loadSchema])
 
   const executed = runState === null
     ? ''
@@ -136,8 +233,8 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const readColumns = useCallback((name: string): Promise<SqlColumnEntry[]> => {
     const known = columns[name]
     if (known !== undefined) return Promise.resolve(known)
-    if (workspaceId === undefined || notebookPath === null) return Promise.resolve([])
-    return controller.api.sqlColumns(workspaceId, notebookPath, name).then(
+    if (workspaceId === undefined || activePath === null) return Promise.resolve([])
+    return controller.api.sqlColumns(workspaceId, activePath, name).then(
       (result) => {
         setColumns(previous => ({ ...previous, [name]: result.columns }))
         return result.columns
@@ -147,17 +244,17 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
         throw error
       },
     )
-  }, [columns, controller, notebookPath, workspaceId])
+  }, [columns, controller, activePath, workspaceId])
 
   const insertSql = useCallback((source: string): void => {
-    if (notebook === null || tabId === null || connection === null) return
+    if (activeNotebook === null || activeTabId === null || connection === null) return
     try {
-      controller.setDraft(appendSqlCell(notebook.draft, source), 'input', tabId)
+      controller.setDraft(appendSqlCell(activeNotebook.draft, source), 'input', activeTabId)
       setSchemaProblem(null)
     } catch {
       setSchemaProblem(t('sqlnotebook.treeRefused'))
     }
-  }, [connection, controller, notebook, tabId, t])
+  }, [activeNotebook, activeTabId, connection, controller, t])
 
   const copyOut = useCallback((text: string): void => {
     void copyTextToClipboard(text).then(
@@ -193,6 +290,11 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     openTable: t('sqlnotebook.openTable'),
     noColumns: t('sqlnotebook.schemaEmpty'),
     loading: t('sqlnotebook.schemaLoading'),
+    badgePrimaryKey: t('sqlnotebook.badgePrimaryKey'),
+    badgeNotNull: t('sqlnotebook.badgeNotNull'),
+    badgeUnique: t('sqlnotebook.badgeUnique'),
+    badgeForeignKey: t('sqlnotebook.badgeForeignKey'),
+    badgeAutoIncrement: t('sqlnotebook.badgeAutoIncrement'),
   }), [t])
 
   /**
@@ -245,54 +347,86 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     </header>
   )
 
-  if (tabId === null || notebookPath === null) {
-    return (
-      <div className={css.panelBody}>
-        {header}
-        <div className={css.panelEmpty}>{t('sqlnotebook.panelNoNotebook')}</div>
-      </div>
-    )
-  }
+  /**
+   * Pick a row and make the workbench show that notebook. The controller's `selectTab` is the
+   * same action the tab strip's click does, so the panel does not invent a second switch.
+   */
+  const onActivate = useCallback((tabId: string) => {
+    if (tabId === activeTabId) return
+    controller.selectTab(tabId)
+  }, [activeTabId, controller])
 
-  return (
-    <div className={css.panelBody}>
-      {header}
-      <div className={css.body}>
+  const treeBody = activeTabId === null || activePath === null
+    ? null
+    : (
+      <div className={css.schema} role="tree" aria-label={t('sqlnotebook.schema')}>
         {connection === null ? (
           <>
             <div className={css.muted}>{t('sqlnotebook.notConnected')}</div>
             <div className={css.pointer}>{t('sqlnotebook.connectInToolbar')}</div>
           </>
-        ) : (
-          <>
-            <div className={css.schema} role="tree" aria-label={t('sqlnotebook.schema')}>
-              {tables === null
-                ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
-                : tables.tables.length === 0
-                  ? <div className={css.muted}>{t('sqlnotebook.schemaEmpty')}</div>
-                  : rootNode === null
-                    ? null
-                    : (
-                      <SqlTreeNode
-                        node={rootNode}
-                        depth={0}
-                        expanded={expanded}
-                        onToggle={toggle}
-                        onRequestColumns={(table) => { void readColumns(table).catch(() => {}) }}
-                        onInsertSelect={(table) => { insertSql(selectAllFrom(table, connection.rowLimit)) }}
-                        onTableContextMenu={(event, table) => {
-                          event.preventDefault()
-                          setMenuTarget({ table, rect: event.currentTarget.getBoundingClientRect() })
-                        }}
-                        columnsFor={name => columns[name]}
-                        labels={labels}
-                      />
-                    )}
-              {tables?.truncated === true && <div className={css.muted}>{t('sqlnotebook.schemaTruncated')}</div>}
-              {schemaProblem !== null && <div className={css.problem} role="alert">{schemaProblem}</div>}
-            </div>
-          </>
-        )}
+        ) : tables === null
+          ? <div className={css.muted}>{t('sqlnotebook.schemaLoading')}</div>
+          : tables.tables.length === 0
+            ? <div className={css.muted}>{t('sqlnotebook.schemaEmpty')}</div>
+            : rootNode === null
+              ? null
+              : (
+                <SqlTreeNode
+                  node={rootNode}
+                  depth={0}
+                  expanded={expanded}
+                  onToggle={toggle}
+                  onRequestColumns={(table) => { void readColumns(table).catch(() => {}) }}
+                  onInsertSelect={(table) => { insertSql(selectAllFrom(table, connection.rowLimit)) }}
+                  onTableContextMenu={(event, table) => {
+                    event.preventDefault()
+                    setMenuTarget({ table, rect: event.currentTarget.getBoundingClientRect() })
+                  }}
+                  columnsFor={name => columns[name]}
+                  labels={labels}
+                />
+              )}
+        {tables?.truncated === true && <div className={css.muted}>{t('sqlnotebook.schemaTruncated')}</div>}
+        {schemaProblem !== null && <div className={css.problem} role="alert">{schemaProblem}</div>}
+      </div>
+    )
+
+  // The empty-workbench copy: a panel that hides itself the moment its only notebook closes is
+  // the same dead end the workbench would hit on a `panelNoNotebook` zero-state, only reached
+  // via the new list. Reuse the same wording so the two surfaces agree.
+  const listBody = (
+    <div className={css.notebookList} role="list" aria-label={t('sqlnotebook.schema')}>
+      {notebooks.length === 0
+        ? <div className={css.notebookListEmpty}>{t('sqlnotebook.panelNoNotebook')}</div>
+        : notebooks.map(tab => (
+          <NotebookRow
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeTabId}
+            state={notebookStates.get(tab.id) ?? null}
+            onActivate={onActivate}
+            t={t}
+          />
+        ))}
+    </div>
+  )
+
+  return (
+    <div className={css.panelBody}>
+      {header}
+      <div className={css.body}>
+        {listBody}
+        {treeBody !== null
+          ? (
+            <>
+              {notebooks.length > 1 && activeTabId !== null && <div className={css.notebookTreeSeparator} />}
+              {treeBody}
+            </>
+          )
+          : activeTabId !== null && notebooks.length > 0
+            ? <div className={css.notebookTreePlaceholder}>{t('sqlnotebook.notebookListInactiveBadge')}</div>
+            : null}
       </div>
       <SqlTableContextMenu
         target={menuTarget}

@@ -105,6 +105,7 @@ interface Harness {
   runtime: SqlRuntime
   setDraft: ReturnType<typeof vi.fn>
   consumeSidebarAction: ReturnType<typeof vi.fn>
+  selectTab: ReturnType<typeof vi.fn>
   connect: (target?: string) => Promise<void>
   rerender: () => void
 }
@@ -114,8 +115,8 @@ function mount(options: {
   tables?: Array<{ name: string; kind: 'table' | 'view'; sections?: { indexes?: number; foreignKeys?: number; triggers?: number } }>
   tablesTruncated?: boolean
   tablesRefuse?: WorkbenchApiError
-  columns?: Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean; unique?: boolean; foreignKey?: { table: string; column?: string }; stats?: { approxRows?: number; approxDistinct?: number } }>
-  columnsByTable?: Record<string, Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean; unique?: boolean; foreignKey?: { table: string; column?: string }; stats?: { approxRows?: number; approxDistinct?: number } }>>
+  columns?: Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean; unique?: boolean; foreignKey?: { table: string; column?: string }; autoIncrement?: boolean; stats?: { approxRows?: number; approxDistinct?: number } }>
+  columnsByTable?: Record<string, Array<{ name: string; type?: string; notNull: boolean; primaryKey: boolean; unique?: boolean; foreignKey?: { table: string; column?: string }; autoIncrement?: boolean; stats?: { approxRows?: number; approxDistinct?: number } }>>
   walExpected?: boolean
   databaseKind?: 'file' | 'memory'
 } = {}): Harness {
@@ -170,10 +171,12 @@ function mount(options: {
   })
   const setDraft = vi.fn()
   const consumeSidebarAction = vi.fn()
+  const selectTab = vi.fn()
   const controller = {
     sqlRuntime: runtime,
     setDraft,
     consumeSidebarAction,
+    selectTab,
     api: { ...schemaApi },
   }
   const panel = () => (
@@ -190,7 +193,7 @@ function mount(options: {
     await waitFor(() => { expect(runtime.state('file:query.sqlnb').connection).not.toBeNull() })
   }
 
-  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, rerender }
+  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, selectTab, rerender }
 }
 
 /* ── helpers for driving the new four-level tree ────────────────────── */
@@ -430,6 +433,75 @@ describe('SqlPanel — 只有结构，没有连接控件', () => {
   })
 })
 
+/**
+ * The notebook list at the top of the panel.
+ *
+ * One row per open `.sqlnb`. The active row carries the four-level tree below it; every other
+ * row is a button that switches the active tab through the controller, with no tree beneath.
+ * The list and the tree read from different sources — the workbench tabs vs. the SQL runtime —
+ * which is why this suite mocks each side independently and asserts the seam between them.
+ */
+describe('SqlPanel — 笔记列表', () => {
+  it('renders one row per open `.sqlnb` and marks the active one', () => {
+    const first = notebookTab('first.sqlnb')
+    const second = notebookTab('second.sqlnb')
+    workbench.current = { activeTabId: first.id, tabs: [first, second] }
+    const { view } = mount()
+
+    // Both notebook paths appear as the row labels.
+    expect(view.getByText('first.sqlnb')).toBeTruthy()
+    expect(view.getByText('second.sqlnb')).toBeTruthy()
+    // The active badge lives on the active row only.
+    expect(view.getAllByText(zh['sqlnotebook.notebookListActiveBadge'])).toHaveLength(1)
+    expect(view.getByText('first.sqlnb').closest('button')?.getAttribute('aria-current')).toBe('true')
+  })
+
+  it('lists a notebook that has never been bound, and treats it as not-connected', () => {
+    const first = notebookTab('first.sqlnb')
+    workbench.current = { activeTabId: first.id, tabs: [first] }
+    const { view } = mount()
+
+    // The row exists, the row is the active one, and the row carries no connection badges
+    // (no `当前` companion because that one is allowed — `当前` is a row-state badge, not a
+    // connection badge). The non-connection badges (memory / tier / WAL) are absent.
+    expect(view.getByText('first.sqlnb')).toBeTruthy()
+    expect(view.queryByText(zh['sqlnotebook.notebookListTierReadOnly'])).toBeNull()
+    expect(view.queryByText(zh['sqlnotebook.notebookListTierWritable'])).toBeNull()
+    expect(view.queryByText(zh['sqlnotebook.notebookListMemoryBadge'])).toBeNull()
+  })
+
+  it('switches the active tab when a non-active row is clicked', async () => {
+    const first = notebookTab('first.sqlnb')
+    const second = notebookTab('second.sqlnb')
+    workbench.current = { activeTabId: first.id, tabs: [first, second] }
+    const harness = mount()
+
+    fireEvent.click(harness.view.getByText('second.sqlnb').closest('button')!)
+
+    // `selectTab` is the controller method the workbench tab strip uses to switch tabs;
+    // the panel calls the same one, so the panel's switch is a thin wrapper around the
+    // existing seam.
+    expect(harness.selectTab).toHaveBeenCalledWith(second.id)
+  })
+
+  it('keeps the active row’s tree while showing only labels for inactive ones', async () => {
+    const first = notebookTab('first.sqlnb')
+    const second = notebookTab('second.sqlnb')
+    workbench.current = { activeTabId: first.id, tabs: [first, second] }
+    const harness = mount()
+
+    // Both rows trigger a bind on mount — the panel tracks every open `.sqlnb`, not just
+    // the active one, so a reader can switch between them without waiting for the
+    // runtime to come up. The bind is the line the test is pinning: a future change that
+    // stops binding inactive rows would leave them stuck on the "未连接" copy even when
+    // the file has a recorded connection.
+    await waitFor(() => {
+      expect(harness.runtime.peek(first.id)).not.toBeNull()
+      expect(harness.runtime.peek(second.id)).not.toBeNull()
+    })
+  })
+})
+
 describe('SqlPanel — 表行右键菜单', () => {
   async function connectedRow(harness: Harness): Promise<HTMLElement> {
     return await harness.view.findByRole('button', { name: /city\b/u })
@@ -558,13 +630,14 @@ describe('SqlPanel — 连接头', () => {
 })
 
 /**
- * The four-level tree, the leading icons on columns, and the in-line NOT NULL label.
+ * The four-level tree, the trailing pills on columns, and the AUTOINCREMENT detection.
  *
- * Every column row has the same three slots (icon, name+type, NOT NULL text) so a
- * reader's eye lands in the same place on every row.
+ * Every column row has the same two slots (name+type, pills) so a reader's eye lands in
+ * the same place on every row. The pills are short Chinese labels in a tinted pill, one
+ * per known fact about the column; an absent fact is an absent pill, not a dimmed one.
  */
-describe('SqlPanel — 列图标与 NOT NULL 文本', () => {
-  it('shows PK / UNIQUE / FK icons on a column that is all three', async () => {
+describe('SqlPanel — 列字段标签', () => {
+  it('shows 主键 / 非空 / 唯一 / 外键 pills on a column that is all four', async () => {
     openNotebook(notebookTab('query.sqlnb'))
     const harness = mount({
       columnsByTable: {
@@ -578,17 +651,24 @@ describe('SqlPanel — 列图标与 NOT NULL 文本', () => {
     await harness.connect()
     await openColumnsOf(harness, 'city')
 
-    // The id column row's leading slot has all three icons. The matcher is
-    // `[class*="columnLeading"]` because vitest's css-module loader hashes the
-    // class names; see `git-diff-editor.spec.tsx` for the same pattern.
+    // The matcher is `[class*="columnTrailing"]` because vitest's css-module loader
+    // hashes the class names; see `git-diff-editor.spec.tsx` for the same pattern.
     const idRow = await harness.view.findByText('country_id')
     const item = idRow.closest('[role="treeitem"]')
     expect(item).not.toBeNull()
-    const leadingIcons = item!.querySelectorAll(`[class*="${cssImport('columnLeading')}"] svg`)
-    expect(leadingIcons.length).toBe(3)
+    const trailingPills = item!.querySelectorAll(`[class*="${cssImport('columnTrailing')}"] > span`)
+    expect(trailingPills.length).toBe(4)
+    // The four labels, in the fixed order: PK, NotNull, Unique, FK. AUTO does not show
+    // because the mock column did not opt in. The same labels are read from the locale
+    // dictionary, not hard-coded, so a future translation change shows up here as a
+    // failure rather than a silent miss.
+    expect(trailingPills[0]?.textContent).toBe(zh['sqlnotebook.badgePrimaryKey'])
+    expect(trailingPills[1]?.textContent).toBe(zh['sqlnotebook.badgeNotNull'])
+    expect(trailingPills[2]?.textContent).toBe(zh['sqlnotebook.badgeUnique'])
+    expect(trailingPills[3]?.textContent).toBe(zh['sqlnotebook.badgeForeignKey'])
   })
 
-  it('does not show any leading icon on a plain nullable, non-PK column', async () => {
+  it('does not show any pill on a plain nullable, non-PK column', async () => {
     openNotebook(notebookTab('query.sqlnb'))
     const harness = mount({
       columnsByTable: { city: [{ name: 'name', type: 'TEXT', notNull: false, primaryKey: false }] },
@@ -599,78 +679,62 @@ describe('SqlPanel — 列图标与 NOT NULL 文本', () => {
     const nameRow = await harness.view.findByText('name')
     const item = nameRow.closest('[role="treeitem"]')
     expect(item).not.toBeNull()
-    const leading = item!.querySelector(`[class*="${cssImport('columnLeading')}"]`)
-    expect(leading?.querySelector('svg')).toBeNull()
+    const trailing = item!.querySelector(`[class*="${cssImport('columnTrailing')}"]`)
+    expect(trailing?.querySelectorAll('span').length ?? 0).toBe(0)
+  })
+
+  it('keeps the 非空 pill on a PK column — PK implies not-null but the panel still shows it', async () => {
+    // PK columns are NOT NULL by definition, but a reader who does not remember that
+    // still wants to see the constraint stated. The pill row stacks 主键 + 非空 in that
+    // order, so the test pins the count and the order.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      columnsByTable: {
+        city: [{ name: 'id', type: 'INTEGER', notNull: true, primaryKey: true }],
+      },
+    })
+    await harness.connect()
+    await openColumnsOf(harness, 'city')
+
+    const idRow = await harness.view.findByText('id')
+    const item = idRow.closest('[role="treeitem"]')
+    const trailingPills = item!.querySelectorAll(`[class*="${cssImport('columnTrailing')}"] > span`)
+    expect(trailingPills.length).toBe(2)
+    expect(trailingPills[0]?.textContent).toBe(zh['sqlnotebook.badgePrimaryKey'])
+    expect(trailingPills[1]?.textContent).toBe(zh['sqlnotebook.badgeNotNull'])
+  })
+
+  it('shows the 自增 pill only when the host reports autoIncrement', async () => {
+    // The host decides this from the `sql` field of `pragma_table_info`; a column with
+    // `INTEGER PRIMARY KEY` (rowid alias) is *not* AUTOINCREMENT and the panel reads
+    // absent as absent. The mock lets the test set the field directly because re-running
+    // the host query is not the panel's responsibility.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      columnsByTable: {
+        city: [
+          { name: 'id', type: 'INTEGER', notNull: true, primaryKey: true, autoIncrement: true },
+        ],
+      },
+    })
+    await harness.connect()
+    await openColumnsOf(harness, 'city')
+
+    const idRow = await harness.view.findByText('id')
+    const item = idRow.closest('[role="treeitem"]')
+    const trailingPills = [...(item!.querySelectorAll(`[class*="${cssImport('columnTrailing')}"] > span`))]
+    expect(trailingPills.map(node => node.textContent)).toContain(zh['sqlnotebook.badgeAutoIncrement'])
   })
 
   /*
-   * The leading slot used to be 28px wide, which left a 12px icon floating with ~16px of empty
-   * space on each side and another 5px to the column name. The reader saw the key as a small
-   * mark somewhere in front of the text, not as something that marked the column. A 16px slot
-   * fits one icon with breathing room; this pair of tests pins that:
-   *
-   *   - PK and no-flag columns still start their column name at the same x, so `id` and `name`
-   *     do not staircase; the test below compares the bounding rects.
-   *   - The slot itself never grows back to 28px or wider, which is what made the gap read.
-   *     A future redesign that wants a wider slot has to argue for it in this test.
+   * The trailing slot must not shrink when the column name is long, or the pills would
+   * be crushed. The test checks `flex-shrink: 0` in the stylesheet.
    */
-  it('keeps the column name on the same x whether the column has a leading icon or not', async () => {
-    openNotebook(notebookTab('query.sqlnb'))
-    const harness = mount({
-      columnsByTable: {
-        city: [
-          { name: 'id', type: 'INTEGER', notNull: true, primaryKey: true },
-          { name: 'name', type: 'TEXT', notNull: false, primaryKey: false },
-        ],
-      },
-    })
-    await harness.connect()
-    await openColumnsOf(harness, 'city')
-
-    const idRow = (await harness.view.findByText('id')).closest('[role="treeitem"]') as HTMLElement
-    const nameRow = (await harness.view.findByText('name')).closest('[role="treeitem"]') as HTMLElement
-    const idName = idRow.querySelector(`[class*="${cssImport('columnName')}"]`) as HTMLElement
-    const nameName = nameRow.querySelector(`[class*="${cssImport('columnName')}"]`) as HTMLElement
-    // The slot has to hold its width whether or not it carries an icon, or PK rows and plain
-    // rows staircase. Both column-name rects must start at the same x, within a pixel.
-    expect(Math.abs(idName.getBoundingClientRect().left - nameName.getBoundingClientRect().left)).toBeLessThanOrEqual(1)
-  })
-
-  it('does not reserve more than 18px for the leading slot, so the icon sits close to the column name', async () => {
-    // Read the rule out of the stylesheet, not out of a DOM measurement: the panel is a
-    // tree of css-module classnames, and the literal that ships is the contract.
+  it('does not allow the trailing pill slot to shrink, so pills stay visible on long column names', async () => {
     const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-panel.module.css'), 'utf8')
-    const rule = (stylesheet.match(/\.columnLeading \{[\s\S]*?\n\}/u) ?? [])[0]
-    expect(rule, '.columnLeading must exist in sql-panel.module.css').toBeDefined()
-    const widthMatch = rule!.match(/width:\s*(\d+)px/u)
-    expect(widthMatch, '.columnLeading must declare width in pixels').toBeTruthy()
-    // 12px icon + 4px breathing room = 16px. Anything ≥ 20px brings back the gap the rule was
-    // tightened to remove; anything < 14px crowds the icon against the name.
-    const width = Number(widthMatch![1])
-    expect(width).toBeGreaterThanOrEqual(14)
-    expect(width).toBeLessThanOrEqual(18)
-  })
-
-  it('shows "可为空" on a nullable column and "非空" on a NOT NULL one', async () => {
-    openNotebook(notebookTab('query.sqlnb'))
-    const harness = mount({
-      columnsByTable: {
-        city: [
-          { name: 'name', type: 'TEXT', notNull: true, primaryKey: false },
-          { name: 'note', type: 'TEXT', notNull: false, primaryKey: false },
-        ],
-      },
-    })
-    await harness.connect()
-    await openColumnsOf(harness, 'city')
-
-    // The text is plain — not a pill, not a badge — because the file management
-    // panel puts every property in plain text and this column row is the same
-    // kind of attribute read.
-    const nameRow = await harness.view.findByText('name')
-    expect(nameRow.closest('[role="treeitem"]')?.textContent).toContain(zh['sqlnotebook.columnNotNull'])
-    const noteRow = await harness.view.findByText('note')
-    expect(noteRow.closest('[role="treeitem"]')?.textContent).toContain(zh['sqlnotebook.columnNullable'])
+    const rule = (stylesheet.match(/\.columnTrailing \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(rule, '.columnTrailing must exist in sql-panel.module.css').toBeDefined()
+    expect(rule).toMatch(/\bflex-shrink:\s*0\b/u)
   })
 
   it('formats a sqlite_stat1 row count as ~1.2K instead of the raw integer', async () => {

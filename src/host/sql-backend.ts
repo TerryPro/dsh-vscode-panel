@@ -408,11 +408,18 @@ export class SqlBackend {
     for (const row of rows) {
       if (typeof row.name !== 'string') continue
       const type = row.type
+      // `sql` is the column's literal definition from `CREATE TABLE`, e.g.
+      // `"id" INTEGER PRIMARY KEY AUTOINCREMENT`. The `AUTOINCREMENT` keyword only appears
+      // there when the user actually wrote it — `INTEGER PRIMARY KEY` by itself is just the
+      // rowid alias, no auto-increment. A plain `includes('AUTOINCREMENT')` is enough.
+      const sql = row.sql
+      const autoIncrement = typeof sql === 'string' && /\bAUTOINCREMENT\b/iu.test(sql)
       columns.push({
         name: row.name,
         ...(typeof type === 'string' && type !== '' ? { type } : {}),
         notNull: Number(row.notnull ?? 0) === 1,
         primaryKey: Number(row.pk ?? 0) > 0,
+        ...(autoIncrement ? { autoIncrement: true } : {}),
       })
     }
     return { path: managed.database, table: tableValue, columns }

@@ -413,9 +413,9 @@ describe('文件目录', () => {
 
     fireEvent.doubleClick(row)
 
-    await waitFor(() => { expect(controller.openFile).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb') })
+    await waitFor(() => { expect(controller.openFile).toHaveBeenCalledWith('workspace-1', 'sample-1.sqlnb') })
     expect(controller.openFile).not.toHaveBeenCalledWith('workspace-1', 'sample.db')
-    expect(api.createFile).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
+    expect(api.createFile).toHaveBeenCalledWith('workspace-1', 'sample-1.sqlnb')
     // The notebook made beside a database comes with a query that reads it; one made from
     // the menu does not. The file is on disk before the tab opens, so the reader never
     // sees an unsaved notebook they did not write.
@@ -425,7 +425,7 @@ describe('文件目录', () => {
     expect(parseSqlNotebook(api.saved[0]?.content ?? '').cells[0]?.source).toContain('sqlite_master')
     // A notebook written beside a database connects to *that* database, read-only: its first cell
     // queries this file, and `:memory:` would make that query return nothing.
-    await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb', 'sample.db') })
+    await waitFor(() => { expect(controller.connectNewSqlNotebook).toHaveBeenCalledWith('workspace-1', 'sample-1.sqlnb', 'sample.db') })
   })
 
   it('不把已经有文件的笔记自动接到内存库', async () => {
@@ -473,7 +473,7 @@ describe('文件目录', () => {
   })
 
   it('名字被占满时给出原因，而不是静默不建文件', async () => {
-    const taken = Array.from({ length: SQL_NOTEBOOK_NAME_ATTEMPTS }, (_, index) => `query-${index + 1}.sqlnb`)
+    const taken = Array.from({ length: SQL_NOTEBOOK_NAME_ATTEMPTS }, (_, index) => `sample-${index + 1}.sqlnb`)
     const api = notebookApi(taken)
     const root = {
       path: '',

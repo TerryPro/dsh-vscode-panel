@@ -1,10 +1,11 @@
 /**
  * What the SQL notebook tab is attached to, for the editor's status strip.
  *
- * The connection is now stated in exactly one place per view (ADR 0008): the notebook's own toolbar
- * carries it while the cell surface is on screen, and this strip carries it in the source view,
- * which has no toolbar. `hideReadout` is how the two stay out of each other's way — the same rule
- * `NotebookKernelStatus` already follows, that the strip says what nothing else on screen says.
+ * The strip is the only place that says which database a SQL notebook is on, in the
+ * source view of a `.sqlnb`. The cell view of the same notebook paints its own readout
+ * under the body — `EditorTabBody` does not wire this component into the strip while
+ * the cell view is on screen, so the line is never duplicated. The strip outlives both
+ * views, which is the right home for a fact the reader needs to remember between runs.
  *
  * Deliberately not `NotebookKernelStatus`: that chip reports a kernel's phase, and an in-process
  * handle has no phase — a reader told "ready" about a handle would be told about something that
@@ -31,16 +32,9 @@ export interface SqlConnectionStatusProps {
   runtime: SqlRuntime
   tabId: string
   t: TranslateNS<'workbench'>
-  /**
-   * Omit the database/tier/limit line while the notebook toolbar is on screen and already shows it.
-   *
-   * The hint about a vanished database file is *not* hidden: the toolbar keeps naming the database
-   * it is connected to, so "that file is gone" is a fact with no other surface on screen.
-   */
-  hideReadout?: boolean
 }
 
-export function SqlConnectionStatus({ runtime, tabId, t, hideReadout = false }: SqlConnectionStatusProps) {
+export function SqlConnectionStatus({ runtime, tabId, t }: SqlConnectionStatusProps) {
   const subscribe = useCallback((notify: () => void) => runtime.subscribe(tabId, notify), [runtime, tabId])
   const readState = useCallback(() => runtime.peek(tabId), [runtime, tabId])
   const state = useSyncExternalStore(subscribe, readState)
@@ -50,26 +44,19 @@ export function SqlConnectionStatus({ runtime, tabId, t, hideReadout = false }: 
   // no file watcher by design, so the readout is where the reader learns to reconnect rather than
   // wondering why every later cell fails.
   const lostFile = state !== null && Object.values(state.cells).some(run => run.failure?.code === SQL_PATH_UNAVAILABLE_CODE)
-  // Checked before `lostFile` only in the sense that losing the file wins: it is the one thing this
-  // strip is never allowed to go quiet about, whatever else on screen is already reporting.
+  // The lost-file hint wins over everything else: it is the one thing this strip is never
+  // allowed to go quiet about, whatever else on screen is already reporting.
   const text = lostFile
     ? t('sqlnotebook.reconnectHint')
-    : hideReadout
-      ? ''
-      : state === null || state.connecting
+    : state === null || state.connecting
         ? t('sqlnotebook.connecting')
         : connection === null
           ? t('sqlnotebook.notConnected')
           : connectionReadout(connection, { readOnly: t('sqlnotebook.readOnlyTier'), writable: t('sqlnotebook.writableTier') })
 
   /*
-   * The two standing session banners. They are shown in both views — the toolbar view already
-   * makes the connection visible above the cells, but a WAL sidecar is a fact about the handle,
-   * not about what the reader is doing this second. Hiding it while the toolbar is up would
-   * teach the reader that the toolbar is what to watch for handle facts, and that is not
-   * true: the connection line in the toolbar shows the *current* handle, and when the reader
-   * comes back from a different cell the toolbar is still saying the same thing. The strip
-   * outlives the cell surface, so it is the right home for the same fact.
+   * The two standing session banners. The strip outlives the cell surface, so it is the
+   * right home for the same fact regardless of which view the reader has on screen.
    */
   const isMemory = connection !== null && connection.path === ':memory:'
   const leavesSidecar = connection?.walSidecarExpected === true

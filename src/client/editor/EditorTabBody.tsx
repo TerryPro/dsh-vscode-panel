@@ -456,8 +456,11 @@ export function EditorTabBody({
     : null
   /**
    * What the status strip says this tab is attached to: the kernel chip for a notebook, the
-   * connection readout for a SQL notebook. Built here rather than inside either surface because the
-   * strip outlives both views — the chip is also what makes the attachment visible in source view.
+   * connection readout for a SQL notebook in *source* view. Built here rather than inside either
+   * surface because the strip outlives both views — the chip is also what makes the attachment
+   * visible in source view. The cell view of a SQL notebook paints its own readout under the
+   * body, so the strip stays empty in that case; showing the same line in both places would
+   * be a duplicate the reader does not have to look at.
    */
   const attachment = isNotebookTab
     ? (
@@ -468,8 +471,8 @@ export function EditorTabBody({
         hideChip={notebookMode === 'notebook'}
       />
     )
-    : isSqlNotebookTab
-      ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} hideReadout={sqlNotebookMode === 'notebook'} />
+    : isSqlNotebookTab && sqlNotebookMode === 'source'
+      ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} />
       : null
   return (
     <div className={css.editorFileArea}>

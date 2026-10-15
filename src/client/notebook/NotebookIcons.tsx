@@ -159,6 +159,47 @@ export function IconRestartKernel16({ size = 14 }: IconProps) {
   )
 }
 
+/**
+ * Connect: a plug being inserted into a socket. Two flat prongs on the left, a rounded
+ * barrel on the right, so a reader recognises it as "this opens a handle" the same way
+ * they would on a power strip. Deliberately not a link / chain (the same trap SSH clients
+ * fall into, where a "connect" icon reads as "navigate to" instead).
+ */
+export function IconConnect16({ size = 14 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      {/* Prongs on the left, two short verticals. */}
+      <path d="M2.5 5.5v2" />
+      <path d="M5 5.5v2" />
+      {/* Cable / barrel between the prongs and the plug head. */}
+      <path d="M2.5 6.5h2.5v2.5a2 2 0 0 0 2 2h0" />
+      {/* Plug head: a rounded body with the lead-in arc showing it about to seat. */}
+      <path d="M7 7.5h4.2" />
+      <path d="M11.2 6 13.5 8l-2.3 2" />
+    </svg>
+  )
+}
+
+/**
+ * Disconnect: the connect plug, with a diagonal stroke through it. The stroke sits on
+ * top, not under, so the slashed state reads as the live one when the handle is open
+ * and the reader is about to close it. The slash starts on the upper-left and ends on
+ * the lower-right — the same convention the workbench's other "off" states use.
+ */
+export function IconDisconnect16({ size = 14 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M2.5 5.5v2" />
+      <path d="M5 5.5v2" />
+      <path d="M2.5 6.5h2.5v2.5a2 2 0 0 0 2 2h0" />
+      <path d="M7 7.5h4.2" />
+      <path d="M11.2 6 13.5 8l-2.3 2" />
+      {/* The slash: clearly on top, from upper-left to lower-right corner. */}
+      <path d="M2.5 2.5 13.5 13.5" />
+    </svg>
+  )
+}
+
 /** Stop the kernel: a power symbol, distinct from the cell's square stop. */
 export function IconStopKernel16({ size = 14 }: IconProps) {
   return (

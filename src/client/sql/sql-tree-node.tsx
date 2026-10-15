@@ -19,7 +19,7 @@
 
 import type { SqlColumnEntry, SqlTreeEntry } from '../../shared/sql-protocol.ts'
 import { HighlightedText } from './HighlightedText.tsx'
-import { columnLeadingIcons } from './sql-column-icons.tsx'
+import { columnBadges, type SqlColumnBadgeLabels } from './sql-column-badges.tsx'
 import {
   IconCategory16,
   IconDatabaseRoot16,
@@ -136,6 +136,12 @@ export interface SqlTreeNodeLabels {
   openTable: string
   noColumns: string
   loading: string
+  /** Pill labels for the trailing column row. */
+  badgePrimaryKey: string
+  badgeNotNull: string
+  badgeUnique: string
+  badgeForeignKey: string
+  badgeAutoIncrement: string
 }
 
 /**
@@ -330,29 +336,34 @@ function ColumnNode(props: SqlTreeNodeProps & { path: string }): React.ReactNode
   const { node, depth, filterQuery, labels } = props
   if (node.kind !== 'column') return null
   const column = node.column
+  const badgeLabels: SqlColumnBadgeLabels = {
+    primaryKey: labels.badgePrimaryKey,
+    notNull: labels.badgeNotNull,
+    unique: labels.badgeUnique,
+    foreignKey: labels.badgeForeignKey,
+    autoIncrement: labels.badgeAutoIncrement,
+  }
   return (
     <div className={css.treeNode} role="treeitem" aria-level={depth + 1}>
-      <div className={css.columnRow} style={{ paddingInlineStart: depth * 14 }}>
-        <span className={css.columnLeading} aria-hidden="true">
-          {columnLeadingIcons(column)}
+      <div className={css.columnRow} style={{ paddingInlineStart: depth * 22 }}>
+        <span className={css.columnDot} aria-hidden="true" />
+        <span className={css.columnName}>
+          {filterQuery === '' || filterQuery === undefined
+            ? column.name
+            : <HighlightedText text={column.name} query={filterQuery} />}
         </span>
-        <span className={css.columnLeft}>
-          <span className={css.columnName}>
-            {filterQuery === '' || filterQuery === undefined
-              ? column.name
-              : <HighlightedText text={column.name} query={filterQuery} />}
-          </span>
-          {column.type !== undefined && column.type !== '' && (
-            <span className={css.columnType}>{column.type}</span>
-          )}
-        </span>
-        {column.stats?.approxRows !== undefined && (
-          <span className={css.columnStat} title={labels.columnNotNull}>
-            ~{formatStat(column.stats.approxRows)}
-          </span>
+        {column.type !== undefined && column.type !== '' ? (
+          <span className={css.columnType}>{column.type}</span>
+        ) : (
+          <span className={css.columnTypePlaceholder} aria-hidden="true" />
         )}
-        <span className={css.columnNotNull}>
-          {column.notNull ? labels.columnNotNull : labels.columnNullable}
+        <span className={css.columnTrailing} aria-hidden="true">
+          {column.stats?.approxRows !== undefined && (
+            <span className={css.columnStat} title={labels.columnNotNull}>
+              ~{formatStat(column.stats.approxRows)}
+            </span>
+          )}
+          {columnBadges(column, badgeLabels)}
         </span>
       </div>
     </div>

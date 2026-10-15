@@ -561,13 +561,20 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(await harness.view.findByText(labels.disconnectedRolledBack)).toBeTruthy()
   })
 
-  it('locks the tier once a handle is open, because changing it means reconnecting', async () => {
+  it('does not expose the tier as a picker in the toolbar; the status bar carries it instead', async () => {
+    // The toolbar used to hold a `<select>` for the tier, and a separate test used to assert
+    // that the select was disabled while a handle was open. The tier is now a fact about the
+    // handle, not a control: it lives in the status bar alongside the path, and a notebook that
+    // wants a different tier reconnects to a different target. A `<select>` would be one more
+    // thing to scan in a row of icons.
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
-    const tier = harness.view.getByRole('combobox', { name: labels.readOnlyTier }) as HTMLSelectElement
-    expect(tier.disabled).toBe(false)
+    expect(harness.view.queryByRole('combobox', { name: labels.readOnlyTier })).toBeNull()
+    expect(harness.view.queryByRole('combobox', { name: labels.writableTier })).toBeNull()
+
     await harness.connect()
-    await waitFor(() => { expect(tier.disabled).toBe(true) })
-    expect(tier.title).toBe(labels.tierLocked)
+    // After the connect, the status bar reads the path · tier · rowLimit; that one line is the
+    // reader's only way to see the tier, and it changes only when the handle itself does.
+    await harness.view.findByText('demo.db · 只读 · 1000')
   })
 
   /**

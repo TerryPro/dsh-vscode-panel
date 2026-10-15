@@ -1,0 +1,91 @@
+{
+  "version": 2,
+  "connection": {
+    "path": "examples/northwind-lite.db",
+    "access": "read-only"
+  },
+  "cells": [
+    {
+      "kind": "sql",
+      "source": "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+      "results": [
+        {
+          "columns": [
+            {
+              "label": "name",
+              "name": "name",
+              "type": "TEXT"
+            }
+          ],
+          "rows": [
+            [
+              "categories"
+            ],
+            [
+              "customers"
+            ],
+            [
+              "order_items"
+            ],
+            [
+              "orders"
+            ],
+            [
+              "products"
+            ]
+          ],
+          "rowLimit": 1000,
+          "truncated": false,
+          "columnsDropped": 0,
+          "valuesTruncated": 0
+        }
+      ],
+      "execution_count": 1,
+      "elapsed_ms": 1
+    },
+    {
+      "kind": "sql",
+      "source": "SELECT * FROM \"categories\" LIMIT 1000",
+      "results": [
+        {
+          "columns": [
+            {
+              "label": "id",
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "label": "name",
+              "name": "name",
+              "type": "TEXT"
+            }
+          ],
+          "rows": [
+            [
+              1,
+              "Beverages"
+            ],
+            [
+              2,
+              "Condiments"
+            ],
+            [
+              3,
+              "Confections"
+            ],
+            [
+              4,
+              "Dairy Products"
+            ]
+          ],
+          "rowLimit": 1000,
+          "truncated": false,
+          "columnsDropped": 0,
+          "valuesTruncated": 0
+        }
+      ],
+      "execution_count": 1,
+      "elapsed_ms": 2
+    }
+  ]
+}
