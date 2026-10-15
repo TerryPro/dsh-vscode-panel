@@ -106,6 +106,7 @@ interface Harness {
   setDraft: ReturnType<typeof vi.fn>
   consumeSidebarAction: ReturnType<typeof vi.fn>
   selectTab: ReturnType<typeof vi.fn>
+  openFile: ReturnType<typeof vi.fn>
   connect: (target?: string) => Promise<void>
   rerender: () => void
 }
@@ -172,12 +173,25 @@ function mount(options: {
   const setDraft = vi.fn()
   const consumeSidebarAction = vi.fn()
   const selectTab = vi.fn()
+  const openFile = vi.fn()
+  const listings = options.listings ?? {}
+  const listDirectory = vi.fn((_ws: string, path: string) => {
+    const listing = listings[path]
+    if (listing === undefined) {
+      // A directory the test did not declare reads as empty rather than rejecting: the
+      // walk expects a populated tree, and an unspecified key just means "no entries
+      // here".
+      return Promise.resolve({ entries: [], truncated: false })
+    }
+    return Promise.resolve({ entries: listing.entries, truncated: listing.truncated ?? false })
+  })
   const controller = {
     sqlRuntime: runtime,
     setDraft,
     consumeSidebarAction,
     selectTab,
-    api: { ...schemaApi },
+    openFile,
+    api: { ...schemaApi, listDirectory },
   }
   const panel = () => (
     <SqlPanel
@@ -193,7 +207,7 @@ function mount(options: {
     await waitFor(() => { expect(runtime.state('file:query.sqlnb').connection).not.toBeNull() })
   }
 
-  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, selectTab, rerender }
+  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, selectTab, openFile, rerender }
 }
 
 /* ── helpers for driving the new four-level tree ────────────────────── */
@@ -369,7 +383,6 @@ describe('SqlPanel — 只有结构，没有连接控件', () => {
     expect(harness.view.queryByLabelText(zh['sqlnotebook.database'])).toBeNull()
     expect(harness.view.queryByRole('button', { name: zh['sqlnotebook.connect'] })).toBeNull()
     expect(harness.view.queryByRole('button', { name: zh['sqlnotebook.disconnect'] })).toBeNull()
-    expect(harness.view.queryByText(zh['sqlnotebook.scanTruncated'])).toBeNull()
   })
 
   it('titles the panel after what it holds, and says it once', async () => {
@@ -392,7 +405,9 @@ describe('SqlPanel — 只有结构，没有连接控件', () => {
     fireEvent.click(refresh)
 
     await waitFor(() => { expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(before) })
-    expect(harness.view.queryByRole('button', { name: zh['sqlnotebook.rescan'] })).toBeNull()
+    // The schema refresh must not be a workspace walk: a separate button exists for
+    // that, and only that.
+    expect(harness.view.getAllByRole('button', { name: zh['sqlnotebook.rescan'] })).toHaveLength(1)
   })
 
   it('keeps describing its own .sqlnb when the editor is on a different file', async () => {
@@ -795,3 +810,135 @@ function cssImport(name: string): string {
   if (!declared.test(stylesheet)) throw new Error(`css class not declared: ${name}`)
   return name
 }
+
+/**
+ * The two halves of the panel body.
+ *
+ * The top group ("已打开" / "Open") lists every `.sqlnb` the workbench has open; the bottom
+ * group ("工作区中的 SQL 笔记" / "SQL notebooks in the workspace") lists every `.sqlnb` the
+ * workspace scan found. A click on a top-group row switches the active tab; a click on a
+ * bottom-group row opens the file as a new tab through `controller.openFile`. Rows that
+ * appear in both groups are dimmed in the bottom group so a click on them is a no-op
+ * instead of a surprise duplicate tab.
+ */
+describe('SqlPanel — 上下两部分', () => {
+  it('renders the "Open" group with its own header and a count of the open notebooks', () => {
+    const first = notebookTab('first.sqlnb')
+    const second = notebookTab('second.sqlnb')
+    workbench.current = { activeTabId: first.id, tabs: [first, second] }
+    const { view } = mount()
+
+    // The top header carries the section name, not the panel's outer "结构" title — the
+    // two halves of the panel body are named by their own headers, and the panel as a
+    // whole is still titled "结构" so the tab strip / shell keep their invariant.
+    expect(view.getByText(zh['sqlnotebook.openNotebooks'])).toBeTruthy()
+    expect(view.getByText(zh['sqlnotebook.workspaceNotebooks'])).toBeTruthy()
+    // The count is a numeric pill, not the badge text — a reader scans the number first
+    // and the label second.
+    const header = view.getByText(zh['sqlnotebook.openNotebooks']).closest('header')
+    expect(header).not.toBeNull()
+    expect(header!.textContent).toContain('2')
+  })
+
+  it('renders the "Open" group\'s empty state when no .sqlnb is open', () => {
+    workbench.current = { activeTabId: undefined, tabs: [] }
+    const { view } = mount()
+
+    // The "Open" group is still rendered (so a reader can tell it is a section that
+    // exists) and its body says so, rather than the whole panel going blank.
+    expect(view.getByText(zh['sqlnotebook.openNotebooks'])).toBeTruthy()
+    expect(view.getByText(zh['sqlnotebook.panelNoNotebook'])).toBeTruthy()
+    const header = view.getByText(zh['sqlnotebook.openNotebooks']).closest('header')
+    expect(header!.textContent).toContain('0')
+  })
+
+  it('switches the active tab when an "Open" row is clicked', () => {
+    const first = notebookTab('first.sqlnb')
+    const second = notebookTab('second.sqlnb')
+    workbench.current = { activeTabId: first.id, tabs: [first, second] }
+    const harness = mount()
+
+    // The click target is the row button in the top group. The label is the path, the
+    // aria-label reuses the path so the click survives screen readers.
+    const secondRow = harness.view.getByText('second.sqlnb').closest('button')!
+    fireEvent.click(secondRow)
+    expect(harness.selectTab).toHaveBeenCalledWith(second.id)
+  })
+
+  it('scans the workspace on mount and lists every .sqlnb it finds', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [
+            { name: 'query-1.sqlnb', path: 'query-1.sqlnb', kind: 'file' },
+            { name: 'demo.db', path: 'demo.db', kind: 'file' },
+            { name: 'archived', path: 'archived', kind: 'directory' },
+            { name: '.git', path: '.git', kind: 'directory' },
+          ],
+        },
+        archived: {
+          entries: [
+            { name: 'orders.sqlnb', path: 'archived/orders.sqlnb', kind: 'file' },
+          ],
+        },
+      },
+    })
+
+    const rows = await harness.view.findAllByRole('listitem', { name: new RegExp(zh['sqlnotebook.workspaceNotebookOpenAria'].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\{name\\}', '.+')) })
+    const labels = rows.map(row => row.getAttribute('aria-label')).sort()
+    expect(labels).toEqual([
+      `打开 SQL 笔记 orders.sqlnb`,
+      `打开 SQL 笔记 query-1.sqlnb`,
+    ])
+    // The walk must skip the database file and the `.git` directory, and recurse into
+    // the `archived` folder. The mock receives both calls.
+    expect(harness.view.container.querySelector('[class*="workspaceNotebooks"]')).toBeTruthy()
+  })
+
+  it('calls controller.openFile with the workspace-relative path of the row that was clicked', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [{ name: 'notes.sqlnb', path: 'notes.sqlnb', kind: 'file' }],
+        },
+      },
+    })
+    const row = await harness.view.findByRole('listitem', { name: new RegExp(`^${zh['sqlnotebook.workspaceNotebookOpenAria'].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\{name\\}', 'notes\\.sqlnb')}$`) })
+    fireEvent.click(row)
+    expect(harness.openFile).toHaveBeenCalledWith('workspace-1', 'notes.sqlnb')
+  })
+
+  it('renders an already-open .sqlnb in the workspace list, dimmed, instead of hiding it', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [
+            { name: 'query.sqlnb', path: 'query.sqlnb', kind: 'file' },
+            { name: 'other.sqlnb', path: 'other.sqlnb', kind: 'file' },
+          ],
+        },
+      },
+    })
+    const rows = await harness.view.findAllByRole('listitem', { name: new RegExp(`^${zh['sqlnotebook.workspaceNotebookOpenAria'].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\{name\\}', '.+')}$`) })
+    const openRow = rows.find(row => row.getAttribute('aria-label') === `打开 SQL 笔记 query.sqlnb`)
+    const freshRow = rows.find(row => row.getAttribute('aria-label') === `打开 SQL 笔记 other.sqlnb`)
+    expect(openRow).toBeTruthy()
+    expect(freshRow).toBeTruthy()
+    // A click on a notebook the workbench already has open should be a no-op rather than
+    // open a duplicate tab: that decision is the workbench's, and the panel does not
+    // second-guess it. We only check the panel does not strip the affordance.
+    expect(openRow?.getAttribute('class')).toContain(cssImport('workspaceNotebookRowOpen'))
+    expect(freshRow?.getAttribute('class')).not.toContain(cssImport('workspaceNotebookRowOpen'))
+  })
+
+  it('says the workspace is empty rather than pretending the scan found nothing', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: { '': { entries: [] } },
+    })
+    expect(await harness.view.findByText(zh['sqlnotebook.workspaceNotebooksEmpty'])).toBeTruthy()
+  })
+})

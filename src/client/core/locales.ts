@@ -463,6 +463,15 @@ export const zh = {
   'sqlnotebook.outline': 'SQL 笔记大纲',
   'sqlnotebook.outlineEmpty': '暂无标题',
   'sqlnotebook.panelNoNotebook': '当前没有打开 SQL 笔记。',
+  // SQL 面板的下半段：列出工作区目录里所有的 .sqlnb 文件，单击通过 controller.openFile
+  // 打开为新标签页；已打开的那部分在上半段「已打开」里也出现，下半段同名行会灰显。
+  'sqlnotebook.openNotebooks': '已打开',
+  'sqlnotebook.openNotebooksCount': '共 {count} 个',
+  'sqlnotebook.workspaceNotebooks': '工作区中的 SQL 笔记',
+  'sqlnotebook.workspaceNotebookOpen': '打开这个 SQL 笔记',
+  'sqlnotebook.workspaceNotebookOpenAria': '打开 SQL 笔记 {name}',
+  'sqlnotebook.workspaceNotebooksScanning': '正在扫描工作区…',
+  'sqlnotebook.workspaceNotebooksEmpty': '工作区里还没有 SQL 笔记。',
   // 左侧面板顶部的笔记本列表：列出所有打开的 .sqlnb，激活的那条下面挂四层结构。
   'sqlnotebook.notebookListActiveBadge': '当前',
   'sqlnotebook.notebookListInactiveBadge': '点击切换',
@@ -1105,6 +1114,17 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.outline': 'SQL notebook outline',
   'sqlnotebook.outlineEmpty': 'No headings',
   'sqlnotebook.panelNoNotebook': 'No SQL notebook is open.',
+  // The bottom half of the SQL panel: every `.sqlnb` the workspace scan found, click opens it
+  // through controller.openFile as a new tab. Notebooks that are already open appear in the
+  // top half too; the duplicate row down here is dimmed rather than hidden so a click on it
+  // is a no-op instead of opening a second tab.
+  'sqlnotebook.openNotebooks': 'Open',
+  'sqlnotebook.openNotebooksCount': '{count} total',
+  'sqlnotebook.workspaceNotebooks': 'SQL notebooks in the workspace',
+  'sqlnotebook.workspaceNotebookOpen': 'Open this SQL notebook',
+  'sqlnotebook.workspaceNotebookOpenAria': 'Open SQL notebook {name}',
+  'sqlnotebook.workspaceNotebooksScanning': 'Scanning the workspace…',
+  'sqlnotebook.workspaceNotebooksEmpty': 'The workspace has no SQL notebooks yet.',
   // The notebook list at the top of the panel: every open `.sqlnb`, with the active one
   // expanded into the four-level tree underneath.
   'sqlnotebook.notebookListActiveBadge': 'Active',

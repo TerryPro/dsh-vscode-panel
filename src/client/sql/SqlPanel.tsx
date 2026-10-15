@@ -30,11 +30,26 @@
  * runtime and replays the file's connection record because the tree needs a live handle to describe
  * — and the editor may be showing a `.ts` file right now, which is exactly when nothing else on
  * screen would have connected.
+ *
+ * Two groups inside the panel body:
+ *   1. **Open** — every `.sqlnb` the workbench has open, with the active one expanded into the
+ *      four-level tree underneath. A click on a row switches the active tab through the
+ *      controller (the same action the tab strip already exposes); the list is a navigation
+ *      aid, not a second tab strip.
+ *   2. **Workspace** — every `.sqlnb` the workspace scan found, addressed by workspace-relative
+ *      path. A click on a row calls `controller.openFile`, the same seam the file tree uses,
+ *      so a notebook that the scan found opens the same way as one the reader picked from
+ *      the tree. Rows already in the top group are dimmed rather than hidden so a click on
+ *      them is a no-op instead of a surprise duplicate tab.
+ *
+ * The two groups render in a single `body` with a fixed vertical gap, so a reader sees one
+ * panel with two halves — not three different widgets.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchFileTab, WorkbenchState } from '../model/controller.ts'
+import type { DirectoryListing } from '../../shared/contracts.ts'
 import type { SqlColumnEntry, SqlTablesResult, SqlTreeEntry } from '../../shared/sql-protocol.ts'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import type { WorkbenchController } from '../model/controller.ts'
@@ -45,6 +60,7 @@ import { appendSqlCell } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
 import { quotedSqlIdentifier, selectAllFrom } from './sql-schema-tree.ts'
 import { SqlRuntime, type SqlNotebookState } from './sql-runtime.ts'
+import { scanSqlNotebooks, type SqlNotebookScan } from './sql-notebook-scan.ts'
 import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
 import {
   SqlTreeNode,
@@ -181,7 +197,48 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
   const [columns, setColumns] = useState<Record<string, SqlColumnEntry[]>>({})
   const [menuTarget, setMenuTarget] = useState<SqlTableMenuTarget | null>(null)
+  const [workspaceScan, setWorkspaceScan] = useState<SqlNotebookScan | null>(null)
+  const [scanning, setScanning] = useState(false)
   const lastExecution = useRef('')
+
+  /**
+   * Scan the workspace for every `.sqlnb` whenever the panel mounts or the workspace changes.
+   *
+   * A panel that opened before the user opened any notebook would otherwise show no way to
+   * reach the on-disk ones: the "Open" list above is keyed by `tabs`, and a fresh workspace
+   * has no tabs. The walk is the same `/tree`-based budgeted walk the file tree uses, so
+   * the cost has been measured already; the user re-issues it through the ⟳ button.
+   */
+  const listDirectory = useCallback(
+    (directory: string): Promise<DirectoryListing> => {
+      if (workspaceId === undefined) return Promise.reject(new Error('No workspace'))
+      return controller.api.listDirectory(workspaceId, directory)
+    },
+    [controller, workspaceId],
+  )
+  const wantedScan = useRef(false)
+  const rescanWorkspace = useCallback((): void => {
+    if (workspaceId === undefined) return
+    wantedScan.current = true
+    setScanning(true)
+    void scanSqlNotebooks({ list: listDirectory }).then(
+      (result) => {
+        if (!wantedScan.current) return
+        setWorkspaceScan(result)
+        setScanning(false)
+      },
+      (error: unknown) => {
+        if (!wantedScan.current) return
+        setScanning(false)
+        setSchemaProblem(messageOf(error))
+      },
+    )
+  }, [listDirectory, workspaceId])
+  useEffect(() => {
+    wantedScan.current = true
+    rescanWorkspace()
+    return () => { wantedScan.current = false }
+  }, [rescanWorkspace])
 
   const loadSchema = useCallback((): void => {
     if (workspaceId === undefined || activePath === null) return
@@ -392,31 +449,106 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       </div>
     )
 
-  // The empty-workbench copy: a panel that hides itself the moment its only notebook closes is
-  // the same dead end the workbench would hit on a `panelNoNotebook` zero-state, only reached
-  // via the new list. Reuse the same wording so the two surfaces agree.
-  const listBody = (
-    <div className={css.notebookList} role="list" aria-label={t('sqlnotebook.schema')}>
-      {notebooks.length === 0
-        ? <div className={css.notebookListEmpty}>{t('sqlnotebook.panelNoNotebook')}</div>
-        : notebooks.map(tab => (
-          <NotebookRow
-            key={tab.id}
-            tab={tab}
-            active={tab.id === activeTabId}
-            state={notebookStates.get(tab.id) ?? null}
-            onActivate={onActivate}
-            t={t}
-          />
-        ))}
-    </div>
+  // The "Open" group, the top half of the panel. A section header carries the group's name
+  // and a small count badge so a reader can see at a glance how many notebooks are open.
+  // The header mirrors the "Workspace" group's header below it — same font, same uppercase
+  // letter-spacing, same vertical rhythm — so the two halves read as parallel sections of
+  // the same panel. The badge is a small tabular-numeral pill, not a button: this group is
+  // the read side, and the only way the open set changes is opening and closing tabs in
+  // the workbench.
+  const openListBody = (
+    <section className={css.openNotebooks} aria-label={t('sqlnotebook.openNotebooks')}>
+      <header className={css.openNotebooksHeader}>
+        <span className={css.openNotebooksTitle}>{t('sqlnotebook.openNotebooks')}</span>
+        <span
+          className={css.openNotebooksCount}
+          aria-label={t('sqlnotebook.openNotebooksCount', { count: notebooks.length })}
+        >
+          {notebooks.length}
+        </span>
+      </header>
+      <div className={css.notebookList} role="list">
+        {notebooks.length === 0
+          ? <div className={css.notebookListEmpty}>{t('sqlnotebook.panelNoNotebook')}</div>
+          : notebooks.map(tab => (
+            <NotebookRow
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeTabId}
+              state={notebookStates.get(tab.id) ?? null}
+              onActivate={onActivate}
+              t={t}
+            />
+          ))}
+      </div>
+    </section>
+  )
+
+  // The "Workspace" group, the bottom half of the panel. It is a scan: a click on a row
+  // calls `openFile` on the controller, the same path the file tree's click on a `.sqlnb`
+  // takes. Rows already in the top group are dimmed rather than hidden so the same panel
+  // is honest about what's open and what's on disk; a click on a dimmed row is a no-op
+  // because the controller's `openFile` already returns the existing tab.
+  const openPaths = useMemo(() => new Set(notebooks.map(tab => tab.path)), [notebooks])
+  const openNotebookFromDisk = useCallback((path: string) => {
+    if (workspaceId === undefined) return
+    void controller.openFile(workspaceId, path)
+  }, [controller, workspaceId])
+  const workspaceListBody = (
+    <section className={css.workspaceNotebooks} aria-label={t('sqlnotebook.workspaceNotebooks')}>
+      <header className={css.workspaceNotebooksHeader}>
+        <span className={css.workspaceNotebooksTitle}>{t('sqlnotebook.workspaceNotebooks')}</span>
+        <button
+          type="button"
+          className={css.headerAction}
+          aria-label={t('sqlnotebook.rescan')}
+          title={t('sqlnotebook.rescan')}
+          disabled={scanning}
+          onClick={rescanWorkspace}
+        >
+          ⟳
+        </button>
+      </header>
+      {scanning && workspaceScan === null
+        ? <div className={css.muted}>{t('sqlnotebook.workspaceNotebooksScanning')}</div>
+        : workspaceScan === null
+          ? null
+          : workspaceScan.notebooks.length === 0
+            ? <div className={css.notebookListEmpty}>{t('sqlnotebook.workspaceNotebooksEmpty')}</div>
+            : (
+              <div className={css.workspaceNotebookList} role="list">
+                {workspaceScan.notebooks.map((choice) => {
+                  const isOpen = openPaths.has(choice.path)
+                  const rowClass = isOpen
+                    ? `${css.workspaceNotebookRow} ${css.workspaceNotebookRowOpen}`
+                    : css.workspaceNotebookRow
+                  return (
+                    <button
+                      key={choice.path}
+                      type="button"
+                      role="listitem"
+                      className={rowClass}
+                      aria-label={t('sqlnotebook.workspaceNotebookOpenAria', { name: choice.name })}
+                      title={t('sqlnotebook.workspaceNotebookOpen')}
+                      onClick={() => { openNotebookFromDisk(choice.path) }}
+                    >
+                      <span className={css.workspaceNotebookName}>{choice.name}</span>
+                      <span className={css.workspaceNotebookPath}>{choice.path}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+      {workspaceScan?.truncated === true && <div className={css.muted}>{t('sqlnotebook.scanTruncated')}</div>}
+    </section>
   )
 
   return (
     <div className={css.panelBody}>
       {header}
       <div className={css.body}>
-        {listBody}
+        {openListBody}
+        {workspaceListBody}
         {treeBody !== null
           ? (
             <>
