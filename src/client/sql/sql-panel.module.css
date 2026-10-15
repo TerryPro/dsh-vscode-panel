@@ -68,9 +68,42 @@
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  gap: 16px;
+  /* No gap or overflow here — each pane owns its own scroll */
+}
+
+/*
+ * One of two equal-height panes inside the body. Each pane is a self-contained
+ * flex column: its own toolbar header, its own scrollable content area, and a
+ * solid border so the boundary between the two is unambiguous.
+ *
+ * The top pane draws its border on the bottom edge, the bottom pane on the top
+ * edge — one shared dividing rule, not two separate ones.
+ */
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 50%;
+  flex: 0 0 50%;
+  overflow: hidden;
+}
+
+.paneTop {
+  border-bottom: 1px solid var(--dsw-alias-line-border);
+}
+
+.paneBottom {
+  border-top: 1px solid var(--dsw-alias-line-border);
+}
+
+/* Scrollable content area inside a pane. The pane itself clips, not the list. */
+.paneContent {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 10px 12px 16px 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .problem {
@@ -582,25 +615,18 @@
 }
 
 /*
- * The "Open" group, the top half of the panel. The section header pairs with
- * `.workspaceNotebooksHeader` below it so a reader's eye reads the two as parallel
- * halves of the same panel — same font, same letter-spacing, same vertical rhythm.
- * The trailing counter is a small tabular-numeral pill instead of a button, because
- * this group is the read side: nothing on the panel ever *changes* the open set
- * other than opening and closing tabs in the workbench.
+ * The toolbar of the "Open" pane. It is the pane's header, not a container for the
+ * content, so it is fixed-height and never scrolls. The title is uppercase so the
+ * two panes read as parallel siblings rather than as two items in one list.
  */
 .openNotebooks {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.openNotebooksHeader {
-  display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 2px 6px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--dsw-alias-line-border);
+  min-height: 32px;
 }
 
 .openNotebooksTitle {
@@ -623,26 +649,18 @@
 }
 
 /*
- * The "Workspace" group, the bottom half of the panel. Drawn after the open-notebook
- * group so the same panel can show both at once. The two groups are separated by
- * `.body`'s vertical `gap`, not by a top border: a border read as a panel divider
- * was a stronger visual cue than the relationship actually is — both groups are
- * owned by the panel, neither is more important. The header carries a refresh
- * button; the list shows one row per `.sqlnb` the scan found, with the basename
- * and the full path so a row in a nested folder is still recognisable.
+ * The toolbar of the "Workspace" pane. Mirrors the "Open" pane's toolbar in height,
+ * font weight and letter-spacing so the two panes read as equal siblings. The refresh
+ * button is the only interactive element; the pane's content scrolls independently.
  */
 .workspaceNotebooks {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.workspaceNotebooksHeader {
-  display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 2px 6px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--dsw-alias-line-border);
+  min-height: 32px;
 }
 
 .workspaceNotebooksTitle {

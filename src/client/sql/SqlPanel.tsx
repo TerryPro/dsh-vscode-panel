@@ -449,22 +449,11 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       </div>
     )
 
-  // The "Open" group, the top half of the panel. A section header carries the group's name
-  // and a small count badge so a reader can see at a glance how many notebooks are open.
-  // The header mirrors the "Workspace" group's header below it — same font, same uppercase
-  // letter-spacing, same vertical rhythm — so the two halves read as parallel sections of
-  // the same panel. The badge is a small tabular-numeral pill, not a button: this group is
-  // the read side, and the only way the open set changes is opening and closing tabs in
-  // the workbench.
-  //
-  // The schema tree of the *active* notebook is rendered inside this section, immediately
-  // after the row list, so picking a different open row re-roots the tree at that
-  // notebook's connection. A panel that put the tree in its own third section would make
-  // the relationship between "which notebook is open" and "what is being described" harder
-  // to see at a glance.
+  // The top pane: "Open" notebooks. The toolbar is fixed-height (never scrolls); the
+  // content below it scrolls independently so the header is always visible.
   const openListBody = (
-    <section className={css.openNotebooks} aria-label={t('sqlnotebook.openNotebooks')}>
-      <header className={css.openNotebooksHeader}>
+    <div className={`${css.pane} ${css.paneTop}`} aria-label={t('sqlnotebook.openNotebooks')}>
+      <div className={css.openNotebooks} role="toolbar">
         <span className={css.openNotebooksTitle}>{t('sqlnotebook.openNotebooks')}</span>
         <span
           className={css.openNotebooksCount}
@@ -472,44 +461,44 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
         >
           {notebooks.length}
         </span>
-      </header>
-      <div className={css.notebookList} role="list">
-        {notebooks.length === 0
-          ? <div className={css.notebookListEmpty}>{t('sqlnotebook.panelNoNotebook')}</div>
-          : notebooks.map(tab => (
-            <NotebookRow
-              key={tab.id}
-              tab={tab}
-              active={tab.id === activeTabId}
-              state={notebookStates.get(tab.id) ?? null}
-              onActivate={onActivate}
-              t={t}
-            />
-          ))}
       </div>
-      {notebooks.length > 1 && activeTabId !== null && treeBody !== null
-        ? <div className={css.notebookTreeSeparator} />
-        : null}
-      {treeBody}
-      {treeBody === null && activeTabId !== null && notebooks.length > 0
-        ? <div className={css.notebookTreePlaceholder}>{t('sqlnotebook.notebookListInactiveBadge')}</div>
-        : null}
-    </section>
+      <div className={css.paneContent}>
+        <div className={css.notebookList} role="list">
+          {notebooks.length === 0
+            ? <div className={css.notebookListEmpty}>{t('sqlnotebook.panelNoNotebook')}</div>
+            : notebooks.map(tab => (
+              <NotebookRow
+                key={tab.id}
+                tab={tab}
+                active={tab.id === activeTabId}
+                state={notebookStates.get(tab.id) ?? null}
+                onActivate={onActivate}
+                t={t}
+              />
+            ))}
+        </div>
+        {notebooks.length > 1 && activeTabId !== null && treeBody !== null
+          ? <div className={css.notebookTreeSeparator} />
+          : null}
+        {treeBody}
+        {treeBody === null && activeTabId !== null && notebooks.length > 0
+          ? <div className={css.notebookTreePlaceholder}>{t('sqlnotebook.notebookListInactiveBadge')}</div>
+          : null}
+      </div>
+    </div>
   )
 
-  // The "Workspace" group, the bottom half of the panel. It is a scan: a click on a row
-  // calls `openFile` on the controller, the same path the file tree's click on a `.sqlnb`
-  // takes. Rows already in the top group are dimmed rather than hidden so the same panel
-  // is honest about what's open and what's on disk; a click on a dimmed row is a no-op
-  // because the controller's `openFile` already returns the existing tab.
+  // The bottom pane: "Workspace" scan. Identical layout to the top pane — fixed toolbar,
+  // independent scroll — so a reader's eye can freely move between the two without
+  // adjusting to a different pattern.
   const openPaths = useMemo(() => new Set(notebooks.map(tab => tab.path)), [notebooks])
   const openNotebookFromDisk = useCallback((path: string) => {
     if (workspaceId === undefined) return
     void controller.openFile(workspaceId, path)
   }, [controller, workspaceId])
   const workspaceListBody = (
-    <section className={css.workspaceNotebooks} aria-label={t('sqlnotebook.workspaceNotebooks')}>
-      <header className={css.workspaceNotebooksHeader}>
+    <div className={`${css.pane} ${css.paneBottom}`} aria-label={t('sqlnotebook.workspaceNotebooks')}>
+      <div className={css.workspaceNotebooks} role="toolbar">
         <span className={css.workspaceNotebooksTitle}>{t('sqlnotebook.workspaceNotebooks')}</span>
         <button
           type="button"
@@ -521,7 +510,8 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
         >
           ⟳
         </button>
-      </header>
+      </div>
+      <div className={css.paneContent}>
       {scanning && workspaceScan === null
         ? <div className={css.muted}>{t('sqlnotebook.workspaceNotebooksScanning')}</div>
         : workspaceScan === null
@@ -552,8 +542,10 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
                 })}
               </div>
             )}
-      {workspaceScan?.truncated === true && <div className={css.muted}>{t('sqlnotebook.scanTruncated')}</div>}
-    </section>
+      {workspaceScan?.truncated === true
+        && <div className={css.muted}>{t('sqlnotebook.scanTruncated')}</div>}
+      </div>
+    </div>
   )
 
   return (

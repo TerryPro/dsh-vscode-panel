@@ -520,10 +520,10 @@ describe('SqlPanel — 笔记列表', () => {
 
     expect(await harness.view.findByRole('button', { name: /city\b/u })).toBeTruthy()
     const tree = harness.view.getByRole('tree', { name: zh['sqlnotebook.schema'] })
-    const openSection = harness.view.getByText(zh['sqlnotebook.openNotebooks']).closest('section')!
-    const workspaceSection = harness.view.getByText(zh['sqlnotebook.workspaceNotebooks']).closest('section')!
-    expect(openSection.contains(tree)).toBe(true)
-    expect(workspaceSection.contains(tree)).toBe(false)
+    const openPane = harness.view.getByText(zh['sqlnotebook.openNotebooks']).closest('[role="toolbar"]')!.parentElement!
+    const workspacePane = harness.view.getByText(zh['sqlnotebook.workspaceNotebooks']).closest('[role="toolbar"]')!.parentElement!
+    expect(openPane.contains(tree)).toBe(true)
+    expect(workspacePane.contains(tree)).toBe(false)
   })
 
   it('keeps the active row’s tree while showing only labels for inactive ones', async () => {
@@ -861,10 +861,10 @@ describe('SqlPanel — 上下两部分', () => {
     expect(view.getByText(zh['sqlnotebook.openNotebooks'])).toBeTruthy()
     expect(view.getByText(zh['sqlnotebook.workspaceNotebooks'])).toBeTruthy()
     // The count is a numeric pill, not the badge text — a reader scans the number first
-    // and the label second.
-    const header = view.getByText(zh['sqlnotebook.openNotebooks']).closest('header')
-    expect(header).not.toBeNull()
-    expect(header!.textContent).toContain('2')
+    // and the label second. The toolbar div carries both the title and the count.
+    const toolbar = view.getByText(zh['sqlnotebook.openNotebooks']).closest('[role="toolbar"]')
+    expect(toolbar).not.toBeNull()
+    expect(toolbar!.textContent).toContain('2')
   })
 
   it('renders the "Open" group\'s empty state when no .sqlnb is open', () => {
@@ -875,8 +875,8 @@ describe('SqlPanel — 上下两部分', () => {
     // exists) and its body says so, rather than the whole panel going blank.
     expect(view.getByText(zh['sqlnotebook.openNotebooks'])).toBeTruthy()
     expect(view.getByText(zh['sqlnotebook.panelNoNotebook'])).toBeTruthy()
-    const header = view.getByText(zh['sqlnotebook.openNotebooks']).closest('header')
-    expect(header!.textContent).toContain('0')
+    const toolbar = view.getByText(zh['sqlnotebook.openNotebooks']).closest('[role="toolbar"]')
+    expect(toolbar!.textContent).toContain('0')
   })
 
   it('switches the active tab when an "Open" row is clicked', () => {
