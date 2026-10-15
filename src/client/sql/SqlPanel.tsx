@@ -451,9 +451,26 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
 
   // The top pane: "Open" notebooks. The toolbar is fixed-height (never scrolls); the
   // content below it scrolls independently so the header is always visible.
+  //
+  // `.paneTop` carries the panel-rule-section attribute: the visible 1px line at
+  // its bottom is painted by `panel-rule-layout.ts` on the AppFrame rather than
+  // by a CSS border. The shell's `.regionArea` clips 8px short of the column
+  // edge, so any border drawn here would stop short and the line would have a
+  // visible left gap. The frame's overlay sits on top of every column fill and
+  // spans the full column width, which is the only place a line can reach the
+  // edge. We keep the transparent border on the element so its height, and the
+  // overlay's row, are exactly where they were.
   const openListBody = (
-    <div className={`${css.pane} ${css.paneTop}`} aria-label={t('sqlnotebook.openNotebooks')}>
-      <div className={css.openNotebooks} role="toolbar">
+    <div
+      className={`${css.pane} ${css.paneTop}`}
+      aria-label={t('sqlnotebook.openNotebooks')}
+      data-dsh-workbench-panel-rule-section=""
+    >
+      <div
+        className={css.openNotebooks}
+        role="toolbar"
+        data-dsh-workbench-panel-rule-section=""
+      >
         <span className={css.openNotebooksTitle}>{t('sqlnotebook.openNotebooks')}</span>
         <span
           className={css.openNotebooksCount}
@@ -498,7 +515,11 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   }, [controller, workspaceId])
   const workspaceListBody = (
     <div className={`${css.pane} ${css.paneBottom}`} aria-label={t('sqlnotebook.workspaceNotebooks')}>
-      <div className={css.workspaceNotebooks} role="toolbar">
+      <div
+        className={css.workspaceNotebooks}
+        role="toolbar"
+        data-dsh-workbench-panel-rule-section=""
+      >
         <span className={css.workspaceNotebooksTitle}>{t('sqlnotebook.workspaceNotebooks')}</span>
         <button
           type="button"

@@ -879,30 +879,37 @@ describe('SqlPanel — 上下两部分', () => {
     expect(toolbar!.textContent).toContain('0')
   })
 
-  it('draws a visible divider between the two panes, using a real border token', () => {
-    // A previous change used `--dsw-alias-line-border`, a token that does not exist
-    // in the runtime's theme: the variable resolved to nothing, so the divider
-    // silently disappeared. The test pins the divider to `--dsw-alias-border-l1`
-    // — the same token `layout` / `editor` / `terminal` use for their split rules —
-    // and asserts the two panes share exactly one rule between them so we don't
-    // double up and end up with a two-pixel-thick bar.
+  it('draws pane and toolbar dividers via the frame-level overlay, not via CSS borders', () => {
+    // A divider drawn as a CSS border inside `.regionArea` stops 8px short of the
+    // column edge — the visible left gap a reader can spot in a screenshot. The
+    // layout module `panel-rule-layout.ts` paints those lines as overlay elements
+    // appended to the AppFrame, so they reach the full column width. The two
+    // toolbars and the top pane therefore carry
+    // `data-dsh-workbench-panel-rule-section` and a transparent border that
+    // reserves the overlay's row at exactly the right height.
+    //
+    // The previous version of this panel declared real `border-bottom: var(--dsw-alias-border-l1)`
+    // rules, which looked correct in isolation but stopped short of the column
+    // edge in the workbench. The current design has no visible CSS border; the
+    // line is entirely the frame's responsibility.
     const stylesheet = readFileSync(
       resolve(process.cwd(), 'src/client/sql/sql-panel.module.css'),
       'utf8',
     )
-    const openNotebooksBlock = stylesheet.match(/\.openNotebooks\s*\{[\s\S]*?\}/u)
-    const workspaceNotebooksBlock = stylesheet.match(/\.workspaceNotebooks\s*\{[\s\S]*?\}/u)
-    expect(openNotebooksBlock).not.toBeNull()
-    expect(workspaceNotebooksBlock).not.toBeNull()
-    for (const block of [openNotebooksBlock![0], workspaceNotebooksBlock![0]]) {
-      expect(block).toMatch(/border-bottom:\s*1px solid var\(--dsw-alias-border-l1\)/u)
+    const blocks = ['openNotebooks', 'workspaceNotebooks', 'paneTop']
+      .map(name => ({ name, body: stylesheet.match(new RegExp(`\\.${name}\\s*\\{[\\s\\S]*?\\}`, 'u')) }))
+    for (const { name, body } of blocks) {
+      expect(body, `missing .${name} block`).not.toBeNull()
+      expect(body![0]).toMatch(/border-bottom:\s*1px solid transparent/u)
     }
-    // The two panes share a single rule between them: the top pane draws the
-    // bottom border, the bottom pane draws none. Two borders on the same seam
-    // would render as a two-pixel bar, heavier than the other split rules in
-    // the workbench (layout/editor/terminal all draw a single 1px line).
-    const paneTop = stylesheet.match(/\.paneTop\s*\{[\s\S]*?\}/u)
-    expect(paneTop![0]).toMatch(/border-bottom:\s*1px solid var\(--dsw-alias-border-l1\)/u)
+    const panel = readFileSync(
+      resolve(process.cwd(), 'src/client/sql/SqlPanel.tsx'),
+      'utf8',
+    )
+    // Three section attributes: top pane (separator between halves), top toolbar
+    // (separator between toolbar and content), and bottom toolbar (the same).
+    const sectionMatches = panel.match(/data-dsh-workbench-panel-rule-section=""/gu) ?? []
+    expect(sectionMatches.length).toBe(3)
   })
 
   it('switches the active tab when an "Open" row is clicked', () => {
