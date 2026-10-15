@@ -88,11 +88,7 @@
 }
 
 .paneTop {
-  border-bottom: 1px solid var(--dsw-alias-line-border);
-}
-
-.paneBottom {
-  border-top: 1px solid var(--dsw-alias-line-border);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
 /* Scrollable content area inside a pane. The pane itself clips, not the list. */
@@ -625,7 +621,7 @@
   justify-content: space-between;
   flex: 0 0 auto;
   padding: 5px 10px;
-  border-bottom: 1px solid var(--dsw-alias-line-border);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
   min-height: 32px;
 }
 
@@ -659,7 +655,7 @@
   justify-content: space-between;
   flex: 0 0 auto;
   padding: 5px 10px;
-  border-bottom: 1px solid var(--dsw-alias-line-border);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
   min-height: 32px;
 }
 

@@ -879,6 +879,32 @@ describe('SqlPanel — 上下两部分', () => {
     expect(toolbar!.textContent).toContain('0')
   })
 
+  it('draws a visible divider between the two panes, using a real border token', () => {
+    // A previous change used `--dsw-alias-line-border`, a token that does not exist
+    // in the runtime's theme: the variable resolved to nothing, so the divider
+    // silently disappeared. The test pins the divider to `--dsw-alias-border-l1`
+    // — the same token `layout` / `editor` / `terminal` use for their split rules —
+    // and asserts the two panes share exactly one rule between them so we don't
+    // double up and end up with a two-pixel-thick bar.
+    const stylesheet = readFileSync(
+      resolve(process.cwd(), 'src/client/sql/sql-panel.module.css'),
+      'utf8',
+    )
+    const openNotebooksBlock = stylesheet.match(/\.openNotebooks\s*\{[\s\S]*?\}/u)
+    const workspaceNotebooksBlock = stylesheet.match(/\.workspaceNotebooks\s*\{[\s\S]*?\}/u)
+    expect(openNotebooksBlock).not.toBeNull()
+    expect(workspaceNotebooksBlock).not.toBeNull()
+    for (const block of [openNotebooksBlock![0], workspaceNotebooksBlock![0]]) {
+      expect(block).toMatch(/border-bottom:\s*1px solid var\(--dsw-alias-border-l1\)/u)
+    }
+    // The two panes share a single rule between them: the top pane draws the
+    // bottom border, the bottom pane draws none. Two borders on the same seam
+    // would render as a two-pixel bar, heavier than the other split rules in
+    // the workbench (layout/editor/terminal all draw a single 1px line).
+    const paneTop = stylesheet.match(/\.paneTop\s*\{[\s\S]*?\}/u)
+    expect(paneTop![0]).toMatch(/border-bottom:\s*1px solid var\(--dsw-alias-border-l1\)/u)
+  })
+
   it('switches the active tab when an "Open" row is clicked', () => {
     const first = notebookTab('first.sqlnb')
     const second = notebookTab('second.sqlnb')
