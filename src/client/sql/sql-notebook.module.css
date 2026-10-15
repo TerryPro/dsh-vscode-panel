@@ -381,41 +381,15 @@
 }
 
 /*
- * ---------- notebook status bar ----------
+ * ---------- connection readout ----------
  *
- * The same one line the workbench's `editorStatusBar` shows about a SQL notebook's handle,
- * painted under the cells rather than the workbench's strip. The strip's domain is the
- * editor, and a mounted `SqlNotebookSurface` is its own view, not the editor; the cell
- * surface claims the line for itself and the strip stays empty while this view is on
- * screen. Twenty-four pixels tall, `bg-layer-1` background, `border-top` rule, label
- * grey — the same vocabulary the strip uses, so a reader switching between the source
- * view and the cell view reads the same line in the same place.
+ * The connection readout is the workbench's `editorStatusBar` — `EditorTabBody` wires
+ * `SqlConnectionStatus` into the strip for every sqlnb tab, so the same line says the database in
+ * both the source view and the cell view. `SqlNotebookSurface` no longer renders a status bar of
+ * its own: the cell view is the surface's content, and the workbench strip is the one line's
+ * home. The `statusBarNotice` class below still applies to the two standing facts (in-memory,
+ * WAL sidecar) the connection status paints beside the path.
  */
-.notebookStatusBar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 0 0 auto;
-  height: 24px;
-  padding: 0 12px;
-  box-sizing: border-box;
-  border-top: 1px solid var(--dsw-alias-border-l1);
-  background-color: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11.5px;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  user-select: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notebookStatusBarItem {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /*
  * ---------- results ----------

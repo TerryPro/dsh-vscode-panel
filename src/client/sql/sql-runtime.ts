@@ -152,8 +152,28 @@ export interface SqlRunAllOutcome {
   stoppedAt: string | null
 }
 
-function initialSqlState(): SqlNotebookState {
-  return { connection: null, connecting: false, connectionProblem: null, cells: {} }
+function initialSqlState(recorded: SqlNotebookConnection | null = null): SqlNotebookState {
+  return { connection: recorded, connecting: false, connectionProblem: null, cells: {} }
+}
+
+/**
+ * Lift the file's `connection` record into the `SqlNotebookConnection` shape the store uses.
+ *
+ * `rowLimit: 0` is the marker `connectionReadout` reads as "Host has not answered yet" and
+ * drops the cap segment for; the live `connect` overwrites this with the real number. A file
+ * with no record, or a build that will not rewrite the file, lifts to `null`.
+ */
+function recordedConnectionOf(draft: string): SqlNotebookConnection | null {
+  if (draft === '') return null
+  const record = parseSqlNotebook(draft).connection
+  if (record === null) return null
+  return {
+    path: record.path,
+    access: record.access,
+    sqliteVersion: '',
+    rowLimit: 0,
+    walSidecarExpected: false,
+  }
 }
 
 function emptyRun(status: SqlCellStatus): SqlCellRun {
@@ -198,14 +218,24 @@ export class SqlRuntime {
     private readonly bridge: SqlDraftBridge,
   ) {}
 
-  /** Attach a tab to a workspace and notebook. A change of identity releases the old handle. */
+  /**
+   * Attach a tab to a workspace and notebook. A change of identity releases the old handle.
+   *
+   * The store is seeded with the connection the file records, if any, so the first render after
+   * mount already knows what database the notebook is about. Without that seed `peek` would
+   * return a state with `connection: null` until the bind effect re-renders, and the reader
+   * would see "未连接" under tables the file just loaded. `rowLimit: 0` is the marker
+   * `connectionReadout` reads as "Host has not answered yet" and drops the cap segment for; the
+   * live `connect` overwrites this with the real answer.
+   */
   bind(tabId: string, workspaceId: string, notebook: string): void {
     const existing = this.tabs.get(tabId)
     if (existing !== undefined && existing.workspaceId === workspaceId && existing.notebook === notebook) return
     if (existing !== undefined) this.releaseToGrace(existing)
+    const recorded = recordedConnectionOf(this.bridge.getDraft(tabId))
     this.tabs.set(tabId, {
       tabId,
-      store: createSnapshotStore(initialSqlState()),
+      store: createSnapshotStore(initialSqlState(recorded)),
       workspaceId,
       notebook,
       // A rebind to the same notebook is a page reload or a reopened tab, so the record is read
@@ -379,7 +409,6 @@ export class SqlRuntime {
     const tab = this.tabs.get(tabId)
     if (tab === undefined || tab.autoConnectTried) return false
     tab.autoConnectTried = true
-    if (tab.store.getSnapshot().connection !== null) return false
     const document = parseSqlNotebook(this.bridge.getDraft(tabId))
     // A document this build does not understand is not acted on at all: its `connection` field may
     // mean something else in that version, and opening a database on a guess is the one mistake
@@ -387,6 +416,13 @@ export class SqlRuntime {
     if (document.readOnly) return false
     const record = document.connection
     if (record === null) return false
+    /**
+     * The store may already hold a seed from `bind` (the file's recorded path and tier, with
+     * `rowLimit: 0` as a placeholder). That seed is what lets the first paint show the right
+     * database; the call to the Host here refines it with `sqliteVersion`, `rowLimit` and
+     * `walSidecarExpected`. The `record = false` flag stops the connect path from rewriting the
+     * file for a value the file already has.
+     */
     return this.connect(tabId, record.path, record.access, false)
   }
 

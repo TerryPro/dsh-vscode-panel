@@ -42,6 +42,32 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 
 afterEach(() => { cleanup() })
 
+/**
+ * A baseline terminal-panel state. Every required `WorkbenchState` field has to
+ * be present so the spec satisfies the type after `WorkbenchState` grew; the
+ * panel only ever reads terminal-related fields, so the rest stays inert.
+ */
+function terminalState(overrides: Partial<WorkbenchState> = {}): WorkbenchState {
+  return {
+    sidebarMode: 'terminal',
+    editorExpanded: true,
+    conversationExpanded: true,
+    workspaceId: 'workspace-1',
+    tabs: [],
+    diffViewMode: 'split',
+    gitView: 'changes',
+    gitChangeLayout: 'list',
+    gitGraphFileLayout: 'list',
+    gitDecorations: {},
+    editorSplit: false,
+    editorSplitOrientation: 'horizontal',
+    editorSplitRatio: 0.5,
+    activePane: 'primary',
+    panes: { primary: { tabIds: [] }, secondary: { tabIds: [] } },
+    ...overrides,
+  }
+}
+
 describe('终端左栏', () => {
   /**
    * The regression this whole change exists for: a terminal opened under one
@@ -50,13 +76,11 @@ describe('终端左栏', () => {
    * still driven through the Session that owns its process.
    */
   it('属于其他会话的终端仍报告真实阶段，而不是变成惰性占位', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'running', shellName: 'pwsh.exe', shellPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', ownerSessionId: 'session-1' },
       ],
-    }
+    })
     const view = renderPanel(controllerFixture(undefined, 'ready'))
 
     expect(view.getByText('正在运行')).toBeTruthy()
@@ -67,13 +91,11 @@ describe('终端左栏', () => {
   })
 
   it('没有会话可寻址的终端报告未分配，而不是伪造一个阶段', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'connecting' },
       ],
-    }
+    })
     const view = renderPanel(controllerFixture(undefined, 'noSession'))
 
     expect(view.getByText('尚未分配会话')).toBeTruthy()
@@ -81,14 +103,13 @@ describe('终端左栏', () => {
   })
 
   it('管理当前工作区的多个终端并显示运行状态', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', activeTabId: 'terminal:1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
+      activeTabId: 'terminal:1',
       tabs: [
         { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'running' },
         { id: 'terminal:2', kind: 'terminal', sequence: 2, contentId: 'wbterm:workspace-1:terminal:2', status: 'exited' },
       ],
-    }
+    })
     const controller = controllerFixture()
     const view = renderPanel(controller)
 
@@ -101,9 +122,7 @@ describe('终端左栏', () => {
   })
 
   it('状态栏报告宿主解析的 Shell、网格与启动目录', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         {
           id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1',
@@ -111,7 +130,7 @@ describe('终端左栏', () => {
         },
         { id: 'terminal:2', kind: 'terminal', sequence: 2, contentId: 'wbterm:workspace-1:terminal:2', status: 'connecting' },
       ],
-    }
+    })
     const view = renderPanel(controllerFixture())
 
     // Every segment is a Host-reported fact, labelled as such.
@@ -128,16 +147,14 @@ describe('终端左栏', () => {
   })
 
   it('进程退出后状态栏补充退出码', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         {
           id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1',
           status: 'exited', shellName: 'cmd.exe', runtime: { cwd: 'F:\\repo', cols: 80, rows: 24, exitCode: 3 },
         },
       ],
-    }
+    })
     const view = renderPanel(controllerFixture())
 
     expect(view.getByText('退出码 3')).toBeTruthy()
@@ -145,14 +162,12 @@ describe('终端左栏', () => {
   })
 
   it('使用用户起的名字，没有名字时才回落到编号', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'running', title: '构建服务' },
         { id: 'terminal:2', kind: 'terminal', sequence: 2, contentId: 'wbterm:workspace-1:terminal:2', status: 'running' },
       ],
-    }
+    })
     const view = renderPanel(controllerFixture())
 
     expect(view.getByText('构建服务')).toBeTruthy()
@@ -162,13 +177,11 @@ describe('终端左栏', () => {
   })
 
   it('重命名对话框把新名字交给控制器', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'running' },
       ],
-    }
+    })
     const controller = controllerFixture()
     const view = renderPanel(controller)
 
@@ -186,13 +199,11 @@ describe('终端左栏', () => {
   })
 
   it('名字没变或为空时不提交重命名', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split',
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
+    current.state = terminalState({
       tabs: [
         { id: 'terminal:1', kind: 'terminal', sequence: 1, contentId: 'wbterm:workspace-1:terminal:1', status: 'running', title: '构建服务' },
       ],
-    }
+    })
     const controller = controllerFixture()
     const view = renderPanel(controller)
 
@@ -210,14 +221,11 @@ describe('终端左栏', () => {
   })
 
   it('新建按钮展开 Shell 列表，选中后记住该 Shell 并按它开终端', async () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split', tabs: [],
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
-    }
+    current.state = terminalState()
     const controller = controllerFixture()
     const view = renderPanel(controller)
 
-    fireEvent.click(view.getByRole('button', { name: '新建终端' }))
+    fireEvent.click(view.getByRole('button', { name: '选择 Shell' }))
     await waitFor(() => { expect(controller.listShells).toHaveBeenCalled() })
     const pwsh = await view.findByRole('button', { name: 'pwsh' })
     fireEvent.click(pwsh)
@@ -227,14 +235,11 @@ describe('终端左栏', () => {
   })
 
   it('列表中的默认项不指定 Shell，交回官方模型选择', async () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split', tabs: [],
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
-    }
+    current.state = terminalState()
     const controller = controllerFixture()
     const view = renderPanel(controller)
 
-    fireEvent.click(view.getByRole('button', { name: '新建终端' }))
+    fireEvent.click(view.getByRole('button', { name: '选择 Shell' }))
     fireEvent.click(await view.findByRole('button', { name: '默认 Shell' }))
 
     expect(controller.selectShell).not.toHaveBeenCalled()
@@ -244,24 +249,54 @@ describe('终端左栏', () => {
   })
 
   it('探测不到 Shell 时仍保留一个可用的新建入口', async () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split', tabs: [],
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
-    }
+    current.state = terminalState()
     const controller = controllerFixture({ shells: [] })
     const view = renderPanel(controller)
 
-    fireEvent.click(view.getByRole('button', { name: '新建终端' }))
+    fireEvent.click(view.getByRole('button', { name: '选择 Shell' }))
     const only = await view.findByRole('button', { name: '默认 Shell' })
     fireEvent.click(only)
     expect(lastOpen(controller)).toEqual(['workspace-1'])
   })
 
+  /**
+   * The split this whole change exists for: the + button is the common gesture
+   * and must not require a shell choice, so a single tap should start a
+   * terminal with no argument and never trigger the (Session-gated) shell
+   * discovery. Without that, a Workspace with no Session would silently fail
+   * to open the most common path the workbench offers.
+   */
+  it('+ 按钮只开默认终端，不触发 Shell 列表探测', () => {
+    current.state = terminalState()
+    const controller = controllerFixture()
+    const view = renderPanel(controller)
+
+    // The auto-create on first entry already called openTerminal once; reset so
+    // the next call is unambiguously the + button's.
+    controller.openTerminal.mockClear()
+    fireEvent.click(view.getByRole('button', { name: '新建终端' }))
+
+    expect(controller.openTerminal).toHaveBeenCalledTimes(1)
+    expect(controller.openTerminal).toHaveBeenCalledWith('workspace-1')
+    expect(controller.listShells).not.toHaveBeenCalled()
+  })
+
+  it('+ 与下拉是两个独立按钮，互不触发对方', () => {
+    current.state = terminalState()
+    const controller = controllerFixture()
+    const view = renderPanel(controller)
+
+    // The chevron must be addressable on its own — a 盲 chevron that only
+    // responds inside the + button would be a regression to the merged
+    // affordance we just split apart.
+    expect(view.getAllByRole('button', { name: '选择 Shell' })).toHaveLength(1)
+    // And the + must keep its original key so the workbench rail — which uses
+    // the same string — stays aligned.
+    expect(view.getAllByRole('button', { name: '新建终端' })).toHaveLength(1)
+  })
+
   it('首次进入空终端视图时创建一个终端，但关闭最后一个后不循环重建', () => {
-    current.state = {
-      sidebarMode: 'terminal', editorExpanded: true, workspaceId: 'workspace-1', diffViewMode: 'split', tabs: [],
-      gitView: 'changes', gitChangeLayout: 'list', gitGraphFileLayout: 'list',
-    }
+    current.state = terminalState()
     const controller = controllerFixture()
     const view = renderPanel(controller)
     expect(controller.openTerminal).toHaveBeenCalledTimes(1)
@@ -304,7 +339,7 @@ function renderPanelArgs(controller: ReturnType<typeof controllerFixture>) {
     <TerminalPanel
       controller={controller as never}
       workspaceId="workspace-1"
-      t={(key, values) => interpolate(zh[key], values as Record<string, string> | undefined)}
+      t={(key, values) => interpolate(zh[key as keyof typeof zh], values as Record<string, string> | undefined)}
     />
   )
 }

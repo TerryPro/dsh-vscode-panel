@@ -449,6 +449,35 @@ describe('SqlNotebookSurface 文档层', () => {
     expect(harness.view.getByText(labels.elapsed(1))).toBeTruthy()
   })
 
+  /**
+   * The notebook whose file already records a database must not flash a "connecting…"
+   * placeholder on the first paint (ADR 0007): the file is the only thing that can answer
+   * before the auto-connect lands, and the status bar must answer from it. The earlier
+   * version of this surface routed `runState === null` to the placeholder, which read as
+   * a "not connected" line sitting under tables the file had just loaded — the user
+   * reported it as "disconnected while loading". The auto-connect still races, but the bar
+   * says the path and tier the file recorded for the whole stretch, and the Host's answer
+   * (which carries the row cap) only refines it.
+   *
+   * The case holds `sqlOpen` so the auto-connect is paused on the wire: without the
+   * fallback the bar would have nowhere to look but `runState`, which is `null` until
+   * `bind` runs in the effect.
+   */
+  it('does not flash a connecting placeholder on first paint when the file already records a database', () => {
+    const draft = JSON.stringify({
+      version: 2,
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+      connection: { path: 'demo.db', access: 'read-only' },
+    })
+    const held = new Promise<{ path: string; access: 'read-only'; sqliteVersion: string; walSidecarExpected: boolean; rowLimit: number }>(() => undefined)
+    const harness = open(draft, { open: () => held })
+    // The file recorded `demo.db` as read-only, so the very first synchronous render should
+    // already say so — no "connecting…" placeholder, no "not connected" line.
+    expect(harness.view.queryByText(labels.connecting)).toBeNull()
+    expect(harness.view.queryByText(labels.notConnected)).toBeNull()
+    expect(harness.view.getByText(/demo\.db/)).toBeTruthy()
+  })
+
   it('opens a file that records no database without connecting anything', async () => {
     // A notebook created from nothing has no database to return to, and `:memory:` must not be
     // guessed for it: its first query would then run against an empty database.

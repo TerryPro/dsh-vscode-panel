@@ -185,18 +185,57 @@ function RenameTerminalDialog({ tab, onClose, onConfirm, t }: {
 }
 
 /**
- * New-terminal action whose list offers the shells the Host verifies for the
- * current Session. Without that choice the workbench could only ever start the
- * execution environment's default — `ComSpec`, i.e. CMD, on Windows — even
- * though the official terminal service also accepts `pwsh` and `powershell`.
+ * Two-button affordance for starting a terminal.
+ *
+ * The plus is the common gesture: one tap, the Host's default shell, no menu
+ * noise. The chevron sits next to it as an explicit "I want a specific shell"
+ * route and opens a list of every shell the Host verifies for the current
+ * Session. Without that split, every "new terminal" required choosing a shell
+ * even when the user just wanted a fresh prompt in the workbench's default,
+ * which is the case the Host already covers (e.g. `ComSpec` → CMD on Windows).
  *
  * Discovery needs a Session, so the list is fetched when the menu opens rather
  * than on mount: a Workspace without a Session has no execution environment to
  * probe, and a stale list would offer shells the Host has since stopped
- * verifying. If discovery yields nothing, the menu keeps a single default row so
- * the action never dead-ends into "you cannot open a terminal".
+ * verifying. If discovery yields nothing, the menu keeps a single default row
+ * so the chevron never dead-ends into "you cannot pick a shell".
  */
 function NewTerminalMenu({ controller, workspaceId, t }: {
+  controller: WorkbenchController
+  workspaceId: string
+  t: TranslateNS<'workbench'>
+}) {
+  return (
+    <span className={css.newTerminalSeat}>
+      <DefaultTerminalButton controller={controller} workspaceId={workspaceId} t={t} />
+      <ShellPickerButton controller={controller} workspaceId={workspaceId} t={t} />
+    </span>
+  )
+}
+
+/** + button that opens one terminal with no shell argument, leaving the choice to the Host. */
+function DefaultTerminalButton({ controller, workspaceId, t }: {
+  controller: WorkbenchController
+  workspaceId: string
+  t: TranslateNS<'workbench'>
+}) {
+  return (
+    <Tooltip label={t('terminal.new')} side="bottom" delayMs={500}>
+      <button
+        type="button"
+        className={css.newTerminalDefault}
+        aria-label={t('terminal.new')}
+        onClick={() => { controller.openTerminal(workspaceId) }}
+      >
+        <IconPlusOutlineMedium size={16} />
+      </button>
+    </Tooltip>
+  )
+}
+
+/** Chevron that opens the shell list. The plus and the chevron share a 52px seat so the
+ *  panel header does not grow noticeably; the chevron is the only entry point to a non-default shell. */
+function ShellPickerButton({ controller, workspaceId, t }: {
   controller: WorkbenchController
   workspaceId: string
   t: TranslateNS<'workbench'>
@@ -235,44 +274,41 @@ function NewTerminalMenu({ controller, workspaceId, t }: {
     ]
 
   return (
-    <span className={css.newTerminalSeat}>
-      <Menu
-        open={open}
-        onClose={() => { setOpen(false) }}
-        items={items}
-        selectedId={selectedShell}
-        onSelect={(id) => {
-          setOpen(false)
-          // The default row passes nothing, leaving the choice to the official
-          // model; every other row is a verified path this browser now remembers.
-          if (id === DEFAULT_SHELL) controller.openTerminal(workspaceId)
-          else {
-            controller.selectShell(id)
-            controller.openTerminal(workspaceId, id)
-          }
-        }}
-        align="end"
-        dense
-        portal
-        anchor={(
-          <Tooltip label={t('terminal.new')} side="bottom" delayMs={500}>
-            <button
-              type="button"
-              className={css.newTerminalButton}
-              aria-label={t('terminal.new')}
-              aria-expanded={open}
-              onClick={() => {
-                if (!open) load()
-                setOpen(value => !value)
-              }}
-            >
-              <IconPlusOutlineMedium size={16} />
-              <IconChevronDownOutlineRegular size={11} />
-            </button>
-          </Tooltip>
-        )}
-      />
-    </span>
+    <Menu
+      open={open}
+      onClose={() => { setOpen(false) }}
+      items={items}
+      selectedId={selectedShell}
+      onSelect={(id) => {
+        setOpen(false)
+        // The default row passes nothing, leaving the choice to the official
+        // model; every other row is a verified path this browser now remembers.
+        if (id === DEFAULT_SHELL) controller.openTerminal(workspaceId)
+        else {
+          controller.selectShell(id)
+          controller.openTerminal(workspaceId, id)
+        }
+      }}
+      align="end"
+      dense
+      portal
+      anchor={(
+        <Tooltip label={t('terminal.shellHeading')} side="bottom" delayMs={500}>
+          <button
+            type="button"
+            className={css.newTerminalChevron}
+            aria-label={t('terminal.shellHeading')}
+            aria-expanded={open}
+            onClick={() => {
+              if (!open) load()
+              setOpen(value => !value)
+            }}
+          >
+            <IconChevronDownOutlineRegular size={11} />
+          </button>
+        </Tooltip>
+      )}
+    />
   )
 }
 

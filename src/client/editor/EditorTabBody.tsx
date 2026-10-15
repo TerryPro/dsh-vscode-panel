@@ -456,11 +456,12 @@ export function EditorTabBody({
     : null
   /**
    * What the status strip says this tab is attached to: the kernel chip for a notebook, the
-   * connection readout for a SQL notebook in *source* view. Built here rather than inside either
-   * surface because the strip outlives both views — the chip is also what makes the attachment
-   * visible in source view. The cell view of a SQL notebook paints its own readout under the
-   * body, so the strip stays empty in that case; showing the same line in both places would
-   * be a duplicate the reader does not have to look at.
+   * connection readout for a SQL notebook in either view. Built here rather than inside either
+   * surface because the strip outlives both views — the same line says the database in source
+   * view (where the cell surface is not on screen) and in cell view (where it is). The runtime's
+   * store is seeded with the file's recorded connection in `bind`, so the first paint after the
+   * surface mounts already reports the right database rather than flashing "未连接" under tables
+   * the file just loaded.
    */
   const attachment = isNotebookTab
     ? (
@@ -471,7 +472,7 @@ export function EditorTabBody({
         hideChip={notebookMode === 'notebook'}
       />
     )
-    : isSqlNotebookTab && sqlNotebookMode === 'source'
+    : isSqlNotebookTab
       ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} />
       : null
   return (

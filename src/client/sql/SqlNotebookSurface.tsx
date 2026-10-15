@@ -55,7 +55,7 @@ import {
   type SqlNotebookDocument,
   type SqlNotebookEdit,
 } from './sql-notebook-document.ts'
-import type { SqlCellRun, SqlRuntime } from './sql-runtime.ts'
+import type { SqlCellRun, SqlNotebookConnection, SqlRuntime } from './sql-runtime.ts'
 
 export interface SqlNotebookLabels {
   save: string
@@ -686,25 +686,13 @@ export function SqlNotebookSurface({
         )}
       </div>
       {/*
-        The connection readout, in the same place it always was: the workbench's own
-        `editorStatusBar`, below the cell body. The strip is what outlives the cell view, and
-        the same one line says it in both source view and notebook view. This surface renders
-        the line itself because the cell view is its own DOM and the status strip in the
-        workbench does not reach into a mounted `SqlNotebookSurface` — `EditorTabBody` keeps
-        the strip empty while this view is on screen, so a single line of text is the one
-        piece of the strip this view claims.
+        The connection readout now lives in the workbench's `editorStatusBar` below this surface.
+        `EditorTabBody` wires `SqlConnectionStatus` into the strip for every sqlnb tab, so the
+        same line says the database in both the source view and the cell view — one strip rather
+        than two stacked ones. The runtime's store is seeded with the file's recorded connection
+        in `bind`, so the first paint after mount already reports the right database rather than
+        flashing "未连接" under the tables the file just loaded.
       */}
-      <div className={css.notebookStatusBar} data-connected={connection !== null || undefined}>
-        <span className={css.notebookStatusBarItem}>
-          {runState === null
-            ? labels.connecting
-            : runState.connecting
-              ? labels.connecting
-              : connection === null
-                ? labels.notConnected
-                : connectionReadout(connection, { readOnly: labels.readOnlyTier, writable: labels.writableTier })}
-        </span>
-      </div>
     </div>
   )
 }

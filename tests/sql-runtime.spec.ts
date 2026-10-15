@@ -58,7 +58,13 @@ function held(count: number): Held {
 
 interface Fixture {
   runtime: SqlRuntime
-  drafts: string[]
+  /**
+   * The text the runtime reads as the file. Backed by a one-element array so a test that wants to
+   * `drafts[0] = ...` outside the bridge (the way many cases do) still mutates the same string
+   * `getDraft` returns; without a shared ref the runtime would keep reading the draft it bound
+   * with while the test thinks it has been replaced.
+   */
+  drafts: [string]
   /** Every draft the runtime handed to the save path, in order. */
   saves: string[]
   api: {
@@ -70,6 +76,8 @@ interface Fixture {
   }
   /** The next request the runtime put on the wire, in the order they were made. */
   request: () => Held
+  /** Register a draft for a notebook so the next `bind` to that path sees it. */
+  addNotebook: (notebook: string, text: string) => void
 }
 
 /**
@@ -81,12 +89,12 @@ interface Fixture {
  * `bind`, so a test that swapped the text later would be testing a runtime that never saw the file.
  */
 function createRuntime(cells: Array<{ kind: string; source: string }>, draft = notebookDraft(cells)): Fixture {
-  const drafts = [draft]
+  const drafts: [string] = [draft]
   const saves: string[] = []
   const bridge: SqlDraftBridge = {
-    getDraft: () => drafts[0] ?? '',
+    getDraft: () => drafts[0],
     setDraft: (_tabId, text) => { drafts[0] = text },
-    save: () => { saves.push(drafts[0] ?? '') },
+    save: () => { saves.push(drafts[0]) },
   }
   const inFlight: Held[] = []
   let issued = 0
@@ -105,13 +113,34 @@ function createRuntime(cells: Array<{ kind: string; source: string }>, draft = n
     sqlCancel: vi.fn(() => Promise.resolve({ cancelled: true })),
   }
   const runtime = new SqlRuntime(api as never, { info: vi.fn(), warn: vi.fn() }, bridge)
+  const notebooks = new Map<string, string>([['query-1.sqlnb', draft]])
+  /**
+   * The bridge always reads `drafts[0]`, so switching notebooks means pointing `drafts[0]` at the
+   * new file's text first. In the workbench each notebook has its own draft; this fixture
+   * collapses that to one slot and rebinds it on every `bind` to the notebook the case names.
+   */
+  const originalBind = runtime.bind.bind(runtime)
+  runtime.bind = ((tabId: string, workspaceId: string, notebook: string): void => {
+    if (notebooks.has(notebook)) drafts[0] = notebooks.get(notebook) ?? ''
+    originalBind(tabId, workspaceId, notebook)
+  }) as typeof runtime.bind
   runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
+  return {
+    runtime,
+    drafts,
+    saves,
+    api,
+    request,
+    /** Register a draft for a notebook so the next `bind` to that path sees it. */
+    addNotebook(notebook: string, text: string): void {
+      notebooks.set(notebook, text)
+    },
+  }
   function request(): Held {
     const next = inFlight.shift()
     if (next === undefined) throw new Error('expected a request on the wire')
     return next
   }
-  return { runtime, drafts, saves, api, request }
 }
 
 /** Let the runtime's outstanding request finish, then run its continuation. */
@@ -664,6 +693,10 @@ describe('SqlRuntime', () => {
   it('a tab that moves to another notebook abandons the handle it leaves behind', async () => {
     const fixture = createRuntime([{ kind: 'sql', source: 'SELECT 1' }])
     await connect(fixture)
+    // query-2 is a fresh notebook with no recorded connection, mirroring the workbench where each
+    // notebook has its own file. Without this the fixture's single-slot `drafts[0]` would still
+    // hold query-1's recorded connection and seed it into the new binding.
+    fixture.addNotebook('query-2.sqlnb', notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
     fixture.runtime.bind('tab-1', 'workspace-1', 'query-2.sqlnb')
 
     expect(fixture.api.sqlAbandon).toHaveBeenCalledWith('workspace-1', 'query-1.sqlnb')
