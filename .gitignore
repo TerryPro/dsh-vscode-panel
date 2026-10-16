@@ -7,3 +7,5 @@ coverage/
 # a junction and would commit a second copy of every skill file.
 .claude/
 .qoder/
+# examples/ 只作本地调试素材，不再随仓库提交。
+examples/
