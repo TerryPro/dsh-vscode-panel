@@ -478,6 +478,7 @@ export const zh = {
   'sqlnotebook.filterDatabases': '工作区里的库',
   'sqlnotebook.databaseNotebooksEmpty': '该库还没有笔记。',
   'sqlnotebook.newNotebookOnDatabase': '在此库上新建笔记',
+  'sqlnotebook.newNotebookShort': '新建',
   // 上半段列表自己的「没列全」声明。扫描一直带着 truncated，但此前没有消费方：
   // 被上限截断的工作区和扫完的工作区画出同一份列表，找不到笔记的读者没有任何线索。
   'sqlnotebook.scanNotebooksTruncated': '工作区较大，只列出了前面一部分笔记；用刷新重扫，或从文件树直接打开。',
@@ -1142,6 +1143,7 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.filterDatabases': 'Databases in this workspace',
   'sqlnotebook.databaseNotebooksEmpty': 'This database has no notebooks yet.',
   'sqlnotebook.newNotebookOnDatabase': 'New notebook on this database',
+  'sqlnotebook.newNotebookShort': 'New',
   'sqlnotebook.scanNotebooksTruncated': 'The workspace is large; only the first part of its notebooks is listed. Rescan, or open one from the file tree.',
   // The notebook list at the top of the panel: every open `.sqlnb`, with the active one
   // expanded into the four-level tree underneath.

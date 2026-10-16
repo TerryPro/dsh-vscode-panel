@@ -541,7 +541,8 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
           all: t('sqlnotebook.filterAllDatabases'),
           unassociated: t('sqlnotebook.filterUnassociated'),
           databases: t('sqlnotebook.filterDatabases'),
-          create: t('sqlnotebook.newNotebookOnDatabase'),
+          create: t('sqlnotebook.newNotebookShort'),
+          createTitle: t('sqlnotebook.newNotebookOnDatabase'),
         }}
       />
       {workspaceScan === null || scanning && workspaceScan.notebooks.length === 0

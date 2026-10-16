@@ -590,69 +590,70 @@
 }
 
 /*
- * The list's own header: which database to show, and the one thing to do with it.
+ * The list's own header: which database to show, and creating a notebook on it.
  *
  * Inside the list rather than in the panel header above, because that header is shared with the
  * schema tree — a control there reads as scoping the whole panel, and this one only narrows the
  * list.
  *
- * It paints no box. The first version framed it like a form field and it read as a second header
- * competing with the panel's own; a list's header should be quieter than the list. So the trigger
- * is a bare button that tints on hover — the same treatment `DisclosureRow`'s title gets — and the
- * only chrome on the row is the create action, which appears on hover of the row.
+ * One box with two segments split by a hairline. They are the same question asked twice ("which
+ * database am I working on", then "make a notebook there"), and the create half is only meaningful
+ * for the database the picker half is showing — so they share an outline rather than floating as
+ * two controls that happen to sit next to each other.
+ *
+ * Sticky, and opaque because of it: entries pass beneath this row as the list scrolls, and a
+ * transparent background would let them show through.
  */
 .databaseFilter {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  /* Sticky so the filter stays reachable while a long list scrolls under it. Opaque background is
-     not decoration: entries pass beneath this row, and a transparent one would let them show
-     through. `bg-base` is the pane's own colour, so the row looks like the list rather than a
-     floating bar. */
+  align-items: stretch;
   position: sticky;
   top: 0;
   z-index: 1;
+  /* The card's own 8px, so the row belongs to the same family as the entries below it. */
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
   background: var(--dsw-alias-bg-base);
-  /* Matches the notebook rows' inset, so the trigger's text starts on the same column as the
-     entries' status dots and their paths below. */
-  padding: 0 0 0 4px;
-  min-height: 24px;
+  overflow: hidden;
+  min-height: 28px;
 }
 
-/* The trigger: full width, no border, no fill until hovered.
- *
- * It is the row the reader aims at, so the whole width is clickable rather than just the text —
- * a small target on a quiet row is a control that looks nicer than it is usable. */
-.filterTrigger {
+/* The picker half: fills its side, so the whole area is the target rather than just the text. */
+.filterPicker {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex: 1 1 auto;
   min-width: 0;
-  height: 22px;
-  padding: 0 4px;
+  padding: 0 6px 0 8px;
   border: none;
-  border-radius: 5px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 
-.filterTrigger:hover:not(:disabled) {
+.filterPicker:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
-.filterTrigger:disabled {
+.filterPicker:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-/* A database path: the official `PathLabel` dims the directories and keeps the filename primary,
-   and fades the left edge instead of clipping the tail — so a deep path still ends in the name of
-   the file the reader is filtering by. `min-width: 0` is what lets it shrink inside the flex row. */
+/* The database mark. Brand-coloured rather than grey because it is what the control is *about* —
+   the same reason the file tree paints a `.sqlnb` row with it — and `brand-text` is the token this
+   repository already uses for brand-coloured glyphs and text. */
+.filterMark {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-brand-text);
+}
+
+/* A database path: `PathLabel` dims the directories and keeps the filename primary, and fades the
+   left edge instead of clipping the tail — so a deep path still ends in the file's own name.
+   `min-width: 0` is what lets it shrink inside the flex row. */
 .filterTriggerPath {
   flex: 1 1 auto;
   min-width: 0;
@@ -672,39 +673,40 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* The create action. Quiet until the row is hovered or it is focused, so a control the reader
-   cannot use yet does not read as the row's primary action. */
+/* The create half. Separated by a hairline rather than a gap: one control, two segments. */
 .filterCreate {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  padding: 0;
+  padding: 0 9px;
   border: none;
-  border-radius: 5px;
+  border-inline-start: 1px solid var(--dsw-alias-border-l1);
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-brand-text);
+  font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
-  opacity: 0;
-}
-
-/* Revealed on hover of the row, on its own hover, and on keyboard focus — the last one because a
-   control that only appears for pointers is unreachable for anyone tabbing through the panel. */
-.databaseFilter:hover .filterCreate,
-.filterCreate:hover:not(:disabled),
-.filterCreate:focus-visible {
-  opacity: 1;
 }
 
 .filterCreate:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
+/* Disabled dims the whole segment, text included: a brand-coloured label beside a control that
+   cannot be used would still read as the row's call to action. */
 .filterCreate:disabled {
+  color: var(--dsw-alias-label-tertiary);
   cursor: default;
+}
+
+.filterCreateGlyph {
+  flex: 0 0 auto;
+}
+
+.filterCreateText {
+  flex: 0 0 auto;
 }
 
 /*
