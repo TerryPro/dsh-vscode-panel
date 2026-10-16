@@ -34,6 +34,7 @@
     "tests/notebook-kernel-protocol.spec.ts",
     "tests/notebook-kernel-launch.spec.ts",
     "tests/notebook-output-theme.spec.ts",
+    "tests/theme-colour-contract.spec.ts",
     "tests/kernel-registry.spec.ts",
     "tests/kernel-panel.spec.tsx",
     "tests/notebook-kernel-status.spec.tsx",

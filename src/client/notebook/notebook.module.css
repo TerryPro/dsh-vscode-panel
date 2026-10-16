@@ -370,18 +370,25 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * Same two pills, same defect as the SQL notebook's `.cellBadge`: a saturated amber fill
+ * behind a saturated amber ink measured 1.46:1, and the interrupted pair measured 1.00:1 in
+ * the dark theme because `state-error-primary` and `state-error-secondary` are the same
+ * rgb(242, 90, 90) there. The chip tokens are the tone layer DSH's palette does not ship;
+ * see `styles/global.module.css`.
+ */
 .cellRunning,
 .cellInterrupted {
   padding: 1px 6px;
   border-radius: 999px;
   font-size: 10.5px;
-  background: var(--dsw-alias-state-warn-secondary);
-  color: var(--dsw-alias-state-warn-label);
+  background: var(--dsh-workbench-chip-warn-bg);
+  color: var(--dsh-workbench-chip-warn-fg);
 }
 
 .cellInterrupted {
-  background: var(--dsw-alias-state-error-secondary);
-  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsh-workbench-chip-error-bg);
+  color: var(--dsh-workbench-chip-error-fg);
 }
 
 .cellActions {

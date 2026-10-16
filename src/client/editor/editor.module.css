@@ -5,8 +5,14 @@
   margin: 4px 10px 8px;
   padding: 8px 10px;
   border-radius: 9px;
-  background: var(--dsw-alias-state-error-secondary);
-  color: var(--dsw-alias-state-error-primary);
+  /*
+   * Was `state-error-secondary` behind `state-error-primary`: 1.37:1 in the light theme and
+   * 1.00:1 in the dark one, where both tokens are the same rgb(242, 90, 90) — a failed Git
+   * operation or a refused write printed its own error message invisibly. The chip tokens
+   * carry the tone layer DSH's palette does not ship; see `styles/global.module.css`.
+   */
+  background: var(--dsh-workbench-chip-error-bg);
+  color: var(--dsh-workbench-chip-error-fg);
   font: var(--dsw-font-xxs-12);
   line-height: 1.45;
 }

@@ -160,9 +160,16 @@
   text-transform: uppercase;
 }
 
+/*
+ * The writable tier is the one state the panel paints green, and it used to name
+ * `--dsw-alias-state-confirm-bg` / `-confirm-label` — tokens DSH's palette has never shipped.
+ * A custom property that does not exist makes the whole declaration invalid at computed-value
+ * time, so the pill arrived with no background and inherited ink: "writable" and "read-only"
+ * looked identical. The chip tokens are built from `state-success-primary`, which does exist.
+ */
 .tierBadgeWritable {
-  background: color-mix(in srgb, var(--dsw-alias-state-confirm-bg) 20%, transparent);
-  color: var(--dsw-alias-state-confirm-label);
+  background: var(--dsh-workbench-chip-success-bg);
+  color: var(--dsh-workbench-chip-success-fg);
 }
 
 .tierBadgeReadonly {
@@ -198,8 +205,13 @@
 }
 
 .filterInput:focus {
-  border-color: var(--dsw-alias-focus-ring);
-  box-shadow: 0 0 0 1px var(--dsw-alias-focus-ring);
+  /*
+   * `--dsw-alias-focus-ring` is not a token DSH ships and was used with no fallback, so both
+   * declarations were invalid at computed-value time and the field gave no sign of having
+   * focus. The border is the whole treatment, matching DSH's own `Input` primitive — which
+   * also sets `outline: none` and lets the border carry focus.
+   */
+  border-color: var(--dsw-alias-state-business-primary);
 }
 
 .filterClear {
@@ -338,7 +350,14 @@
 }
 
 .tableNameMark {
-  background: var(--dsw-alias-state-selection-bg);
+  /*
+   * The search-hit mark. It used to name `--dsw-alias-state-selection-bg`, a token from the
+   * design sheet's GitHub-flavoured palette that DSH never shipped — the declaration was
+   * invalid at computed-value time, so a filtered match arrived unmarked and the reader could
+   * not see *why* a table had survived the filter. `specific-bubble-highlight` is DSH's own
+   * "this text is picked out" fill (14.5:1 / 9.2:1 under `label-primary`, light/dark).
+   */
+  background: var(--dsw-specific-bubble-highlight);
   border-radius: 2px;
   color: inherit;
 }
@@ -431,52 +450,56 @@
 }
 
 /*
- * Tints borrow the five semantic state hues from the workbench theme — the same families the
- * toolbar's connection badge uses — so the pills read as part of the panel instead of an
- * imported palette. `color-mix` is used twice per pill: the foreground is the deep state
- * colour, the background is the same colour washed to ~22% so the text stays legible on both
- * dark and light themes without the panel having to special-case either. The border is a
- * slightly stronger mix of the same colour, kept at 1px so it never reads as a box.
+ * Five marks, and DSH's state palette has four hues: blue, green, amber, red. The first cut of
+ * this rule answered that by reaching outside the theme for a GitHub-flavoured set
+ * (`state-confirm-*`, `state-info-*`, `state-error-*`, `state-warn-bg`) — none of which DSH
+ * ships — and putting the real colours in `var()` fallbacks. So the tokens never resolved, the
+ * fallbacks never flipped with the theme, and in the dark theme every pill sat at 1.9–2.4:1:
+ * dark-green ink on a dark-green wash.
+ *
+ * The five are now told apart by *treatment* as well as hue. PK is the column's identity and
+ * the only mark that earns the platform's solid tone — `label-primary` behind `bg-layer-3`,
+ * the same pairing `Tag[data-tone='solid']` uses — which frees business blue for FK and leaves
+ * the four tinted marks at ≥69° from each other. The rest take the shared chip tokens; see
+ * `styles/global.module.css`.
  */
 
-/* PK: business / primary blue. The strongest pill on the row, since PK is the column's
- * identity — it gets the panel's primary action colour, full saturation. */
+/* PK: the solid tone. Nothing else on the row is opaque, so the identity reads first. */
 .columnBadgePk {
-  color: var(--dsw-alias-state-business-primary, #2f6fb0);
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #2f6fb0) 22%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #2f6fb0) 55%, transparent);
+  color: var(--dsw-alias-bg-layer-3);
+  background: var(--dsw-alias-label-primary);
+  border-color: transparent;
 }
 
-/* NotNull: confirm / success green. Distinct hue from PK, louder than the muted text it
- * replaced, and the same green the rest of the workbench uses for "yes / on" semantics. */
+/* NotNull: success green — the same green the rest of the workbench uses for "yes / on". */
 .columnBadgeNotNull {
-  color: var(--dsw-alias-state-confirm-label, #1a7f37);
-  background: color-mix(in srgb, var(--dsw-alias-state-confirm-bg, #2da44e) 24%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-confirm-bg, #2da44e) 55%, transparent);
+  color: var(--dsh-workbench-chip-success-fg);
+  background: var(--dsh-workbench-chip-success-bg);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent);
 }
 
-/* Unique: warn / amber. UNIQUE is an index property, not a constraint, so it gets the
- * warn hue — the same family the panel already uses for "pay attention" callouts. */
+/* Unique: warn amber. UNIQUE is an index property, not a constraint, so it gets the warn hue —
+ * the same family the panel already uses for "pay attention" callouts. */
 .columnBadgeUnique {
-  color: var(--dsw-alias-state-warn-label, #9a6700);
-  background: color-mix(in srgb, var(--dsw-alias-state-warn-bg, #d4a72c) 26%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-warn-bg, #d4a72c) 55%, transparent);
+  color: var(--dsh-workbench-chip-warn-fg);
+  background: var(--dsh-workbench-chip-warn-bg);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);
 }
 
-/* Foreign key: info / cyan. A slightly different blue from PK so the two pills can be
- * told apart at a glance when they sit side by side on the same row. */
+/* Foreign key: business blue. It no longer needs to be a *different* blue from PK, because PK
+ * is no longer blue at all. */
 .columnBadgeForeignKey {
-  color: var(--dsw-alias-state-info-label, #0969da);
-  background: color-mix(in srgb, var(--dsw-alias-state-info-bg, #54aeff) 24%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-info-bg, #54aeff) 55%, transparent);
+  color: var(--dsh-workbench-chip-info-fg);
+  background: var(--dsh-workbench-chip-info-bg);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 40%, transparent);
 }
 
-/* AutoIncrement: error / magenta. The only column-shape pill on the row, so it gets a
- * hue that does not collide with PK / NN / UQ / FK. */
+/* AutoIncrement: error red. The hue is borrowed, not a claim of failure — it is the one
+ * remaining hue, and a counter is the least constraint-like thing on the row. */
 .columnBadgeAutoIncrement {
-  color: var(--dsw-alias-state-error-label, #cf222e);
-  background: color-mix(in srgb, var(--dsw-alias-state-error-bg, #ff8182) 22%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-error-bg, #ff8182) 55%, transparent);
+  color: var(--dsh-workbench-chip-error-fg);
+  background: var(--dsh-workbench-chip-error-bg);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent);
 }
 
 /*
@@ -493,7 +516,7 @@
 }
 
 .columnNameMark {
-  background: var(--dsw-alias-state-selection-bg);
+  background: var(--dsw-specific-bubble-highlight);
   border-radius: 2px;
   color: inherit;
 }
@@ -532,8 +555,10 @@
 
 /*
  * The row-count hint pill. Lives inside the right-aligned marks column, immediately to the
- * left of the PK / NN / UQ / FK / AUTO pills. Same treatment as the marks (info-hue tint,
- * 14px height) so it reads as a mark, not a stray annotation.
+ * left of the PK / NN / UQ / FK / AUTO pills. Same geometry as the marks so it reads as one of
+ * them, but the platform's *neutral* tone — `bg-module-platform` behind `label-secondary`, what
+ * `Tag[data-tone='neutral']` uses — because a row count is a fact with no status meaning, and
+ * FK on the same row already owns the blue.
  */
 .columnStat {
   padding: 0 5px;
@@ -541,8 +566,8 @@
   display: inline-flex;
   align-items: center;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--dsw-alias-state-info-bg, #54aeff) 18%, transparent);
-  color: var(--dsw-alias-state-info-label, #0969da);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
   font-size: 10px;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
@@ -830,7 +855,9 @@
 }
 
 .workspaceNotebookRow:hover {
-  background: var(--dsw-alias-control-hover);
+  /* `--dsw-alias-control-hover` is not a DSH token and had no fallback, so the row never
+   * lit up under the pointer. The rest of the panel already hovers with this one. */
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .workspaceNotebookRowOpen {
@@ -840,7 +867,7 @@
 }
 
 .workspaceNotebookRowOpen:hover {
-  background: var(--dsw-alias-control-hover);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .workspaceNotebookName {
@@ -874,8 +901,8 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--dsw-alias-state-confirm-label, #57ab5a);
-  box-shadow: 0 0 3px var(--dsw-alias-state-confirm-label, #57ab5a);
+  background: var(--dsw-alias-state-success-primary);
+  box-shadow: 0 0 3px var(--dsw-alias-state-success-primary);
 }
 
 /* Directory neighbour: same shape, hollow centre. A reader can tell at a
@@ -966,8 +993,8 @@
 }
 
 .pairDbDotConnected {
-  background: var(--dsw-alias-state-confirm-label, #57ab5a);
-  box-shadow: 0 0 3px var(--dsw-alias-state-confirm-label, #57ab5a);
+  background: var(--dsw-alias-state-success-primary);
+  box-shadow: 0 0 3px var(--dsw-alias-state-success-primary);
 }
 
 .pairDbUnlinked {
@@ -1048,7 +1075,7 @@
 }
 
 .notebookStatusDotConnected {
-  background: var(--dsw-alias-state-confirm-label, #57ab5a);
+  background: var(--dsw-alias-state-success-primary);
 }
 
 .notebookStatusDotDisconnected {
@@ -1080,8 +1107,8 @@
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  background: color-mix(in srgb, var(--dsw-alias-state-confirm-bg) 20%, transparent);
-  color: var(--dsw-alias-state-confirm-label);
+  background: var(--dsh-workbench-chip-success-bg);
+  color: var(--dsh-workbench-chip-success-fg);
 }
 
 /* Second line: the database the notebook is on. Its left inset equals the name row's
@@ -1116,8 +1143,8 @@
   font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
-/* Memory badge variant */
+/* Memory badge variant — same hue family as the info chip, see `.tierBadgeWritable`. */
 .tierBadgeMemory {
-  background: color-mix(in srgb, var(--dsw-alias-state-info-bg) 25%, transparent);
-  color: var(--dsw-alias-state-info-label);
+  background: var(--dsh-workbench-chip-info-bg);
+  color: var(--dsh-workbench-chip-info-fg);
 }

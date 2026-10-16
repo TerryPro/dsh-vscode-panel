@@ -178,12 +178,21 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * The header's state pills — a cell this build cannot edit, a cell whose results are folded
+ * away, and a run that has not finished — are one object, so they are one rule.
+ *
+ * They used to be `state-warn-secondary` behind `state-warn-label`: two saturated ambers that
+ * measure 1.46:1 against each other, which is why "已折叠 1 个结果块" arrived as unreadable
+ * orange-on-orange. The chip tokens carry the tone layer DSH's palette does not ship; see
+ * `styles/global.module.css`.
+ */
 .cellBadge {
   padding: 1px 6px;
   border-radius: 999px;
   font-size: 10.5px;
-  background: var(--dsw-alias-state-warn-secondary);
-  color: var(--dsw-alias-state-warn-label);
+  background: var(--dsh-workbench-chip-warn-bg);
+  color: var(--dsh-workbench-chip-warn-fg);
 }
 
 .cellActions {
@@ -272,8 +281,8 @@
 }
 
 .noticeError {
-  background: var(--dsw-alias-state-error-secondary);
-  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsh-workbench-chip-error-bg);
+  color: var(--dsh-workbench-chip-error-fg);
 }
 
 .empty {
@@ -699,8 +708,8 @@
   font-family: var(--dsw-font-family-code, ui-monospace, monospace);
   font-size: 12px;
   white-space: pre-wrap;
-  background: var(--dsw-alias-state-error-secondary);
-  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsh-workbench-chip-error-bg);
+  color: var(--dsh-workbench-chip-error-fg);
 }
 
 /*
@@ -757,8 +766,8 @@
   gap: 6px;
   padding: 4px 10px;
   border-block-end: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-state-warn-secondary);
-  color: var(--dsw-alias-state-warn-label);
+  background: var(--dsh-workbench-chip-warn-bg);
+  color: var(--dsh-workbench-chip-warn-fg);
   font-size: 11.5px;
 }
 

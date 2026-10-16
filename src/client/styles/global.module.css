@@ -1,3 +1,37 @@
+/*
+ * ---------- legible state chips ----------
+ *
+ * DSH ships `--dsw-alias-state-*-primary` and `-secondary` as two *saturated*
+ * fills, and `-label` as a mid-tone ink. There is no low-alpha chip background
+ * in that set, and the workbench filled the gap by pairing two of the saturated
+ * ones — `background: state-warn-secondary` with `color: state-warn-label`,
+ * which measures 1.46:1, and for the error chip `state-error-primary` on
+ * `state-error-secondary`, which measures 1.00:1 in the dark theme because both
+ * tokens are the same rgb(242, 90, 90) there. So "已折叠 1 个结果块" arrived as
+ * orange-on-orange, and the pill naming a cell's failure vanished outright.
+ *
+ * These tokens are the missing tone layer, built only from tokens DSH ships so a
+ * palette change moves fill and ink together: a 14% wash of the state's own
+ * colour over whatever is behind it, and that same colour pulled 55% of the way
+ * to `label-primary` for the text. Measured on every surface a chip here lands
+ * on (`bg-layer-1`, `bg-base`, `bg-module-platform`) in both themes, that is
+ * 5.9:1 to 9.9:1 — and it keeps each state's hue instead of inventing a palette.
+ *
+ * The geometry stays with the consuming rule. Only the tone lives here, so the
+ * 10.5px cell badge and the 12px error banner can differ in size and still agree
+ * on what "warning" looks like.
+ */
+:global(body) {
+  --dsh-workbench-chip-warn-bg: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+  --dsh-workbench-chip-warn-fg: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 55%, var(--dsw-alias-label-primary));
+  --dsh-workbench-chip-error-bg: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+  --dsh-workbench-chip-error-fg: color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, var(--dsw-alias-label-primary));
+  --dsh-workbench-chip-success-bg: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
+  --dsh-workbench-chip-success-fg: color-mix(in srgb, var(--dsw-alias-state-success-primary) 55%, var(--dsw-alias-label-primary));
+  --dsh-workbench-chip-info-bg: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+  --dsh-workbench-chip-info-fg: color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-label-primary));
+}
+
 /* The official footer keeps its native top-to-bottom order: the
    `sidebar.footer.action` seat (a contributed widget, e.g. a quota reader)
    stacks above the Settings/account seat. The workbench owns neither row — its

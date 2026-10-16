@@ -57,14 +57,22 @@
   border: none;
   border-radius: 8px;
   background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-button-primary-foreground);
+  /*
+   * `--dsw-alias-button-primary-foreground` and `-fill-hover` are not tokens DSH ships, so both
+   * declarations were invalid at computed-value time: the label fell back to the inherited
+   * `label-primary`, which is the *same colour* as `button-primary-fill` in each theme — near
+   * black on near black in the light one, near white on near white in the dark one. The save
+   * button rendered as a blank pill. `label-primary-foreground` is the shipped ink for a
+   * `label-primary` fill, and it inverts with the theme.
+   */
+  color: var(--dsw-alias-label-primary-foreground);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
 
 .save:hover:not(:disabled) {
-  background: var(--dsw-alias-button-primary-fill-hover);
+  background: var(--dsw-alias-button-primary-hover);
 }
 
 .save:disabled {
@@ -82,7 +90,12 @@
 }
 
 .saved {
-  color: var(--dsw-alias-state-success-label);
+  /*
+   * `--dsw-alias-state-success-label` is not a token DSH ships, so the declaration was invalid
+   * at computed-value time and "已保存" inherited the strip's grey — the confirmation looked
+   * exactly like the label beside it. The chip ink is the legible green on a plain surface.
+   */
+  color: var(--dsh-workbench-chip-success-fg);
 }
 
 .errorState {

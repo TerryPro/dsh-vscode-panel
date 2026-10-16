@@ -176,8 +176,9 @@
   margin: 4px 10px 8px;
   padding: 8px 10px;
   border-radius: 9px;
-  background: var(--dsw-alias-state-error-secondary);
-  color: var(--dsw-alias-state-error-primary);
+  /* See `editor.module.css`: the solid error pair was 1.37:1 / 1.00:1 (light/dark). */
+  background: var(--dsh-workbench-chip-error-bg);
+  color: var(--dsh-workbench-chip-error-fg);
   font: var(--dsw-font-xxs-12);
   line-height: 1.45;
 }
