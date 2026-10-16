@@ -3,13 +3,6 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
   DraftChangeSource,
-  CsvViewMode,
-  HtmlViewMode,
-  NotebookViewMode,
-  SqlNotebookViewMode,
-  StructuredViewMode,
-  MarkdownViewMode,
-  MermaidViewMode,
   WorkbenchFileTab,
   WorkbenchLogger,
   WorkbenchState,
@@ -109,8 +102,14 @@ export class WorkbenchEdits {
     this.logger.info(`workbench-layout: kept current draft over external file change ${JSON.stringify(selected.path)}`)
   }
 
-  setMarkdownMode(mode: MarkdownViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.markdownMode = mode })
+  /**
+   * Switch one file tab's view mode.
+   *
+   * Which modes a file has is the view registry's business, not the store's: the mode is
+   * stored as the reader's choice and re-validated against that view on the way out.
+   */
+  setFileViewMode(mode: string, tabId = this.store.getSnapshot().activeTabId): void {
+    this.patchFileTab(tabId, (tab) => { tab.mode = mode })
   }
 
   /** Toggle word wrap for one file tab, independent of any sibling split pane. */
@@ -126,44 +125,5 @@ export class WorkbenchEdits {
   /** Toggle the inline Git diff overlay for one file tab. */
   setEditorInlineDiff(tabId: string, inlineDiff: boolean): void {
     this.patchFileTab(tabId, (tab) => { tab.inlineDiff = inlineDiff })
-  }
-
-  setHtmlMode(mode: HtmlViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.htmlMode = mode })
-  }
-
-  /** Switch one Mermaid file tab between preview, split and source views. */
-  setMermaidMode(mode: MermaidViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.mermaidMode = mode })
-  }
-
-  /** Switch one CSV/TSV file tab between table, split and source views. */
-  setCsvMode(mode: CsvViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.csvMode = mode })
-  }
-
-  /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
-  setStructuredMode(mode: StructuredViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.structuredMode = mode })
-  }
-
-  /**
-   * Switch one `.ipynb` file tab between the cell surface and its raw JSON source.
-   *
-   * No kernel teardown happens here: closing the cell surface must not interrupt a
-   * run, so the runtime keeps its connection until the tab itself closes.
-   */
-  setNotebookMode(mode: NotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.notebookMode = mode })
-  }
-
-  /**
-   * Switch one `.sqlnb` file tab between its cell surface and the file's JSON text.
-   *
-   * Nothing is written back on the way out: the draft is the file text in both views, so
-   * the switch only chooses which projection of it the reader sees.
-   */
-  setSqlNotebookMode(mode: SqlNotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.patchFileTab(tabId, (tab) => { tab.sqlNotebookMode = mode })
   }
 }

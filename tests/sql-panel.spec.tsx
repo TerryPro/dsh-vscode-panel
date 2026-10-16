@@ -99,7 +99,7 @@ function notebookTab(path: string, draft = NOTEBOOK_DRAFT): WorkbenchFileTab {
     image: null,
     draft,
     dirty: false,
-    markdownMode: 'source',
+    // 没有存下来的视图与模式：读取时由文件视图注册表按 `.sqlnb` 认领，模式取默认。
     wrap: true,
     externalChange: null,
     gitBaseline: null,

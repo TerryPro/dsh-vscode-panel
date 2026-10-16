@@ -36,7 +36,9 @@ describe('WorkbenchController', () => {
     const controller = createController(api)
     await controller.openFile('workspace-1', 'README.md')
 
-    expect(activeTab(controller)).toMatchObject({ path: 'README.md', markdownMode: 'preview', dirty: false, draft: '# Title' })
+    // 模式不持久化：打开时不写模式，由视图注册表在读取时给出该视图的默认（Markdown 是 preview）。
+    expect(activeTab(controller)).toMatchObject({ path: 'README.md', dirty: false, draft: '# Title' })
+    expect(activeTab(controller)?.mode).toBeUndefined()
     controller.setDraft('# Title!')
     expect(activeTab(controller)?.dirty).toBe(true)
     await controller.save()
@@ -44,7 +46,7 @@ describe('WorkbenchController', () => {
     expect(activeTab(controller)).toMatchObject({ dirty: false, saving: false, file: { version: 'v2' } })
   })
 
-  it('opens JSON and YAML in the structured graph, and switches modes per tab', async () => {
+  it('opens JSON and YAML without a stored mode, and switches modes per tab', async () => {
     const api = {
       readFile: vi.fn(((_workspace: string, path: string) => Promise.resolve(
         file(path, path.endsWith('.yaml') ? 'a: 1\n' : '{"a": 1}', 'v1'),
@@ -52,15 +54,18 @@ describe('WorkbenchController', () => {
     }
     const controller = createController(api)
     await controller.openFile('workspace-1', 'cfg.yaml')
-    expect(activeTab(controller)).toMatchObject({ path: 'cfg.yaml', structuredMode: 'graph' })
+    expect(activeTab(controller)).toMatchObject({ path: 'cfg.yaml' })
+    expect(activeTab(controller)?.mode).toBeUndefined()
 
-    controller.setStructuredMode('source')
-    expect(activeTab(controller)?.structuredMode).toBe('source')
+    controller.setFileViewMode('source')
+    expect(activeTab(controller)?.mode).toBe('source')
 
     await controller.openFile('workspace-1', 'cfg.json')
-    expect(activeTab(controller)).toMatchObject({ path: 'cfg.json', structuredMode: 'graph' })
+    expect(activeTab(controller)).toMatchObject({ path: 'cfg.json' })
+    // 换一个标签打开也不带模式：模式是每个标签自己的选择，缺席就取默认。
+    expect(activeTab(controller)?.mode).toBeUndefined()
     // Each tab keeps its own mode choice.
-    expect(controller.store.getSnapshot().tabs.find(tab => tab.path === 'cfg.yaml')?.structuredMode).toBe('source')
+    expect(controller.store.getSnapshot().tabs.find(tab => tab.path === 'cfg.yaml')?.mode).toBe('source')
   })
 
   it('loads image files through the binary endpoint without a text read', async () => {
@@ -372,7 +377,7 @@ describe('WorkbenchController', () => {
 
     controller.setEditorWrap('file:first.ts', false)
     controller.setEditorInlineDiff('file:second.ts', true)
-    controller.setMarkdownMode('source', 'file:doc.md')
+    controller.setFileViewMode('source', 'file:doc.md')
 
     const state = controller.store.getSnapshot()
     const [first, second, doc] = state.tabs
@@ -381,7 +386,7 @@ describe('WorkbenchController', () => {
     expect(first?.kind === 'file' && first.inlineDiff).toBe(false)
     expect(second?.kind === 'file' && second.wrap).toBe(true)
     expect(second?.kind === 'file' && second.inlineDiff).toBe(true)
-    expect(doc?.kind === 'file' && doc.markdownMode).toBe('source')
+    expect(doc?.kind === 'file' && doc.mode).toBe('source')
     // The active tab is untouched by these targeted toggles.
     expect(activeTab(controller)?.path).toBe('doc.md')
   })
@@ -417,11 +422,12 @@ describe('WorkbenchController', () => {
     await controller.openFile('workspace-1', 'data.csv')
     await controller.openFile('workspace-1', 'other.csv')
 
-    expect(fileTab(controller, 'data.csv')).toMatchObject({ csvMode: 'table' })
-    controller.setCsvMode('source', 'file:data.csv')
+    expect(fileTab(controller, 'data.csv')).toMatchObject({ path: 'data.csv' })
+    controller.setFileViewMode('source', 'file:data.csv')
     const [first, second] = controller.store.getSnapshot().tabs
-    expect(first?.kind === 'file' && first.csvMode).toBe('source')
-    expect(second?.kind === 'file' && second.csvMode).toBe('table')
+    expect(first?.kind === 'file' && first.mode).toBe('source')
+    // 没动过的那个标签没有存下来的模式，读取时才取它那个视图的默认（CSV 是 table）。
+    expect(second?.kind === 'file' && second.mode).toBeUndefined()
   })
 
   it('routes drafts to the pane that owns the edited tab while split is active', async () => {

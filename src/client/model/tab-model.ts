@@ -11,10 +11,6 @@ export function diffTabId(kind: GitFileDiff['kind'], path: string, revision = ''
   return `diff:${kind}:${revision}:${path}`
 }
 
-export function tabRequestKey(workspaceId: string | undefined, tabId: string): string {
-  return `${workspaceId ?? ''}\0${tabId}`
-}
-
 export function tabIdentity(tab: WorkbenchTab): string {
   return tab.kind === 'terminal' ? `terminal-${tab.sequence}` : tab.path
 }
@@ -60,7 +56,6 @@ export function emptyFileTab(path: string): WorkbenchFileTab {
     image: null,
     draft: '',
     dirty: false,
-    markdownMode: 'source',
     wrap: true,
     // Open a file showing its plain contents; the inline Git diff overlay stays
     // off until the reader turns it on from the status bar.

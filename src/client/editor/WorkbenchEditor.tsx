@@ -6,6 +6,7 @@ import type { EditorGroup, EditorPaneId, WorkbenchController, WorkbenchState, Wo
 import { tabsForCloseScope } from '../model/tab-model.ts'
 import { EditorEmpty } from './EditorShared.tsx'
 import { EditorPane } from './EditorPane.tsx'
+import { fileViewOf } from './view-registry.ts'
 import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import type { EditorTabMenuAction } from './EditorTabContextMenu.tsx'
 import { SplitDivider } from './SplitDivider.tsx'
@@ -64,9 +65,9 @@ export function WorkbenchEditor({ sessionId, useSessions, useWorkspaces, control
   const sqlRunOutstanding = (candidate: WorkbenchTab | undefined): boolean =>
     candidate !== undefined && candidate.kind === 'file' && isSqlNotebookPath(candidate.path) &&
     controller.sqlRuntime.busy(candidate.id)
-  // A pane's Git baseline only tracks an editable file buffer (not a Markdown preview).
+  // A pane's Git baseline only tracks a file whose editable buffer is on screen.
   const baselineFor = (active: WorkbenchTab | undefined) => ({
-    tabId: active?.kind === 'file' && active.file !== null && active.markdownMode !== 'preview' ? active.id : undefined,
+    tabId: active?.kind === 'file' && active.file !== null && fileViewOf(active).mode.editor ? active.id : undefined,
     fileVersion: active?.kind === 'file' ? active.file?.version : undefined,
     lineVersion: active?.kind === 'file' ? state.gitLineVersions?.[active.path] : undefined,
   })

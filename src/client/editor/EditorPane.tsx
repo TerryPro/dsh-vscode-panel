@@ -19,6 +19,7 @@ import type { WorkbenchKey } from '../core/locales.ts'
 import { EditorTabs } from './EditorTabs.tsx'
 import type { EditorTabMenuAction } from './EditorTabContextMenu.tsx'
 import { EditorTabBody } from './EditorTabBody.tsx'
+import { fileViewOf } from './view-registry.ts'
 import { IconBoldOutline16, IconBulletListOutline16, IconInlineCodeOutline16, IconItalicOutline16, IconLinkOutline16, IconRevertOutline16, IconSplitHorizontalOutline16, IconSplitVerticalOutline16, IconTableOutline16 } from './EditorViewIcons.tsx'
 import { runMarkdownCommand, type MarkdownCommandKind } from '../markdown/markdown-format.ts'
 import { TerminalSurface } from '../terminal/TerminalSurface.tsx'
@@ -85,7 +86,7 @@ export function EditorPane({
         />
         {tab !== undefined && tab.kind === 'file' && tab.file !== null && (
           <div className={css.editorActions}>
-            {tab.file.markdown && tab.markdownMode !== 'preview' && (
+            {tab.file.markdown && fileViewOf(tab).mode.editor && (
               <div className={css.markdownToolbar} role="group" aria-label={t('editor.markdownFormat')}>
                 {MARKDOWN_FORMAT_COMMANDS.map(({ kind, Icon, labelKey }) => (
                   <button

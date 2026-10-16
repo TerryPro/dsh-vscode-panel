@@ -13,13 +13,6 @@ import type {
   EditorPaneId,
   EditorSplitOrientation,
   GitView,
-  CsvViewMode,
-  HtmlViewMode,
-  NotebookViewMode,
-  SqlNotebookViewMode,
-  StructuredViewMode,
-  MarkdownViewMode,
-  MermaidViewMode,
   SidebarMode,
   TerminalBinding,
   TerminalStatus,
@@ -585,8 +578,15 @@ export class WorkbenchController {
     return this.data.refreshOpenFiles()
   }
 
-  setMarkdownMode(mode: MarkdownViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setMarkdownMode(mode, tabId)
+  /**
+   * Switch the active file tab's view mode.
+   *
+   * Which modes a file has is the view registry's business; the tab only records the
+   * reader's choice, and the registry falls back to the view's default when the stored
+   * mode no longer exists.
+   */
+  setFileViewMode(mode: string, tabId = this.store.getSnapshot().activeTabId): void {
+    this.edits.setFileViewMode(mode, tabId)
   }
 
   /** Toggle word wrap for one file tab, independent of any sibling split pane. */
@@ -602,36 +602,6 @@ export class WorkbenchController {
   /** Toggle the inline Git diff overlay for one file tab. */
   setEditorInlineDiff(tabId: string, inlineDiff: boolean): void {
     this.edits.setEditorInlineDiff(tabId, inlineDiff)
-  }
-
-  setHtmlMode(mode: HtmlViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setHtmlMode(mode, tabId)
-  }
-
-  /** Switch one Mermaid file tab between preview, split and source views. */
-  setMermaidMode(mode: MermaidViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setMermaidMode(mode, tabId)
-  }
-
-  /** Switch one CSV/TSV file tab between table, split and source views. */
-  setCsvMode(mode: CsvViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setCsvMode(mode, tabId)
-  }
-
-  /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
-  /** Switch one structured (JSON/YAML) file tab between graph, split and source views. */
-  setStructuredMode(mode: StructuredViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setStructuredMode(mode, tabId)
-  }
-
-  /** Switch one `.ipynb` file tab between the cell surface and its raw JSON source. */
-  setNotebookMode(mode: NotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setNotebookMode(mode, tabId)
-  }
-
-  /** Switch one `.sqlnb` file tab between its cell surface and the file's JSON text. */
-  setSqlNotebookMode(mode: SqlNotebookViewMode, tabId = this.store.getSnapshot().activeTabId): void {
-    this.edits.setSqlNotebookMode(mode, tabId)
   }
 
   /**

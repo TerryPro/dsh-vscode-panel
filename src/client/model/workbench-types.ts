@@ -7,29 +7,6 @@ import type { GitFileLayout } from '../git/git-tree.ts'
 
 export type SidebarMode = 'sessions' | 'files' | 'git' | 'terminal' | 'sql' | 'kernels'
 export type DiffViewMode = 'split' | 'unified' | 'inline'
-export type MarkdownViewMode = 'preview' | 'source' | 'split'
-export type HtmlViewMode = 'preview' | 'interactive' | 'source'
-export type MermaidViewMode = 'preview' | 'source' | 'split'
-export type CsvViewMode = 'table' | 'source' | 'split'
-export type StructuredViewMode = 'graph' | 'source' | 'split'
-/**
- * How an `.ipynb` file is shown.
- *
- * `notebook` is the cell surface; `source` is the raw JSON in the text editor. There
- * is no split view: the two representations of a notebook are the same content, and a
- * reader who wants to see the JSON edits the JSON.
- */
-export type NotebookViewMode = 'notebook' | 'source'
-/**
- * How a `.sqlnb` file is shown: the SQL notebook's own cell surface, or its JSON text.
- *
- * A separate type from `NotebookViewMode` even though both are two-state. The two formats now agree
- * that a run's results belong in the file (ADR 0007, which replaced ADR 0003's opposite rule for
- * SQL), but they are still different documents with different fields, different runtimes and
- * different actions on the status bar; one type per format keeps those from being collapsed by a
- * shared union.
- */
-export type SqlNotebookViewMode = 'notebook' | 'source'
 export type GitView = 'changes' | 'graph'
 export type TerminalStatus = 'connecting' | 'running' | 'exited' | 'error'
 /**
@@ -82,18 +59,15 @@ export interface WorkbenchFileTab {
   image: WorkspaceImageFile | null
   draft: string
   dirty: boolean
-  markdownMode: MarkdownViewMode
-  htmlMode?: HtmlViewMode
-  /** Mermaid diagram view state; only meaningful for `.mmd`/`.mermaid` files. */
-  mermaidMode?: MermaidViewMode
-  /** Tabular view state; only meaningful for `.csv`/`.tsv` files. */
-  csvMode?: CsvViewMode
-  /** Structured graph view state; only meaningful for JSON and YAML files. */
-  structuredMode?: StructuredViewMode
-  /** Cell surface versus raw JSON; only meaningful for `.ipynb` files. */
-  notebookMode?: NotebookViewMode
-  /** Cell surface versus the file's JSON text; only meaningful for `.sqlnb` files. */
-  sqlNotebookMode?: SqlNotebookViewMode
+  /**
+   * 这份文件此刻归哪个文件视图，以及它在用哪个模式。
+   *
+   * 视图与模式的集合由 `editor/view-registry.ts` 声明，这里只记读者的选择：视图缺席就按路径
+   * 重新认领，模式缺席（或已不在该视图的集合里）就退回默认。模式不持久化——每次打开一份
+   * 文件都回到该视图的默认模式。
+   */
+  view?: string
+  mode?: string
   /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
   wrap: boolean
   inlineDiff: boolean

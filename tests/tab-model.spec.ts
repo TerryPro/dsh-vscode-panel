@@ -7,7 +7,6 @@ import {
   isSameOrDescendantPath,
   messageOf,
   tabIdentity,
-  tabRequestKey,
   tabsForCloseScope,
 } from '../src/client/model/tab-model.ts'
 
@@ -16,8 +15,6 @@ describe('tab-model', () => {
     expect(fileTabId('src/a.ts')).toBe('file:src/a.ts')
     expect(diffTabId('staged', 'a.ts')).toBe('diff:staged::a.ts')
     expect(diffTabId('commit', 'a.ts', 'deadbeef')).toBe('diff:commit:deadbeef:a.ts')
-    expect(tabRequestKey(undefined, 'x')).toBe('\0x')
-    expect(tabRequestKey('ws', 'x')).toBe('ws\0x')
   })
 
   it('identifies a tab for logging without leaking terminal internals', () => {

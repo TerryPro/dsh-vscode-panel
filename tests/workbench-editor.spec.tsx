@@ -161,7 +161,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(view.getByRole('contentinfo')).toBeTruthy()
     // The source toggle lives in the status bar so preview can switch back.
     fireEvent.click(view.getByRole('button', { name: '源码' }))
-    expect(controller.setMarkdownMode).toHaveBeenCalledWith('source', 'file:README.md')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('source', 'file:README.md')
     // No editable surface in preview, so no wrap toggle.
     expect(view.queryByRole('button', { name: '自动换行' })).toBeNull()
   })
@@ -182,7 +182,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
   })
 
   it('hides the outline toggle while Markdown is in source mode', () => {
-    fileTab(1).markdownMode = 'source'
+    fileTab(1).mode = 'source'
     const controller = controllerFake()
     const view = renderEditor(controller)
     expect(view.queryByRole('button', { name: '大纲' })).toBeNull()
@@ -238,7 +238,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const controller = controllerFake()
     const view = renderEditor(controller)
     fireEvent.click(view.getByRole('button', { name: '源码' }))
-    expect(controller.setSqlNotebookMode).toHaveBeenCalledWith('source', 'file:query.sqlnb')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('source', 'file:query.sqlnb')
   })
 
   it('shows the file editor, not the cells, while a .sqlnb is in source mode', () => {
@@ -255,7 +255,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const controller = controllerFake()
     const view = renderEditor(controller)
     fireEvent.click(view.getByRole('button', { name: 'SQL 笔记视图' }))
-    expect(controller.setSqlNotebookMode).toHaveBeenCalledWith('notebook', 'file:query.sqlnb')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('notebook', 'file:query.sqlnb')
   })
 
   /**
@@ -447,11 +447,11 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(view.getByRole('button', { name: '分栏' })).toBeTruthy()
     expect(view.getByRole('button', { name: '源码' })).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: '分栏' }))
-    expect(controller.setMarkdownMode).toHaveBeenCalledWith('split', 'file:README.md')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('split', 'file:README.md')
   })
 
   it('renders source and preview together with the format toolbar in split mode', () => {
-    fileTab(1).markdownMode = 'split'
+    fileTab(1).mode = 'split'
     const controller = controllerFake()
     const view = renderEditor(controller)
     expect(view.getByRole('textbox', { name: 'README.md' })).toBeTruthy()
@@ -475,7 +475,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
   })
 
   it('renders an independent tab bar per split pane with a draggable divider', () => {
-    fileTab(1).markdownMode = 'source'
+    fileTab(1).mode = 'source'
     workbenchState.current.activeTabId = 'file:src/a.ts'
     workbenchState.current.editorSplit = true
     workbenchState.current.activePane = 'primary'
@@ -498,7 +498,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
   })
 
   it('routes a secondary-pane tab click to that pane', () => {
-    fileTab(1).markdownMode = 'source'
+    fileTab(1).mode = 'source'
     workbenchState.current.activeTabId = 'file:src/a.ts'
     workbenchState.current.editorSplit = true
     workbenchState.current.activePane = 'primary'
@@ -515,7 +515,7 @@ describe('WorkbenchEditor multi-file tabs', () => {
   })
 
   it('moves a dragged tab into the drop target pane', () => {
-    fileTab(1).markdownMode = 'source'
+    fileTab(1).mode = 'source'
     workbenchState.current.activeTabId = 'file:src/a.ts'
     workbenchState.current.editorSplit = true
     workbenchState.current.activePane = 'primary'
@@ -559,9 +559,9 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(view.queryByRole('textbox', { name: 'index.html' })).toBeNull()
 
     fireEvent.click(view.getByRole('button', { name: '交互' }))
-    expect(controller.setHtmlMode).toHaveBeenCalledWith('interactive', 'file:index.html')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('interactive', 'file:index.html')
     fireEvent.click(view.getByRole('button', { name: '源码' }))
-    expect(controller.setHtmlMode).toHaveBeenCalledWith('source', 'file:index.html')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('source', 'file:index.html')
   })
 
   it('edits and previews a Mermaid file side by side and switches views on demand', () => {
@@ -577,9 +577,9 @@ describe('WorkbenchEditor multi-file tabs', () => {
     expect(view.getByRole('separator', { name: '拖拽调整分栏大小' })).toBeTruthy()
 
     fireEvent.click(view.getByRole('button', { name: '预览' }))
-    expect(controller.setMermaidMode).toHaveBeenCalledWith('preview', 'file:diagram.mmd')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('preview', 'file:diagram.mmd')
     fireEvent.click(view.getByRole('button', { name: '源码' }))
-    expect(controller.setMermaidMode).toHaveBeenCalledWith('source', 'file:diagram.mmd')
+    expect(controller.setFileViewMode).toHaveBeenCalledWith('source', 'file:diagram.mmd')
   })
 
   it('shows only the diagram in Mermaid preview mode and hides the wrap toggle', () => {
@@ -721,11 +721,8 @@ function controllerFake() {
     save: vi.fn(() => Promise.resolve(true)),
     selectTab: vi.fn(),
     closeTab: vi.fn(() => true),
-    setMarkdownMode: vi.fn(),
+    setFileViewMode: vi.fn(),
     toggleMarkdownOutline: vi.fn(),
-    setSqlNotebookMode: vi.fn(),
-    setHtmlMode: vi.fn(),
-    setMermaidMode: vi.fn(),
     setEditorWrap: vi.fn(),
     setEditorInlineDiff: vi.fn(),
     revert: vi.fn(),
@@ -796,7 +793,7 @@ function fileTab(index: number): WorkbenchFileTab {
   return candidate
 }
 
-function tab(path: string, content: string, markdown: boolean, mermaidMode?: WorkbenchFileTab['mermaidMode']) {
+function tab(path: string, content: string, markdown: boolean, mode?: string) {
   return {
     id: `file:${path}`,
     kind: 'file' as const,
@@ -805,8 +802,9 @@ function tab(path: string, content: string, markdown: boolean, mermaidMode?: Wor
     image: null,
     draft: content,
     dirty: false,
-    markdownMode: (markdown ? 'preview' : 'source') as WorkbenchFileTab['markdownMode'],
-    ...(mermaidMode === undefined ? {} : { mermaidMode }),
+    // 视图与模式由文件视图注册表按路径（加 markdown 标记）认领，所以这里只在用例
+    // 想要一个非默认模式时才写上；缺席就取该视图的默认模式。
+    ...(mode === undefined ? {} : { mode }),
     wrap: true,
     inlineDiff: true,
     loading: false,
@@ -819,16 +817,16 @@ function tab(path: string, content: string, markdown: boolean, mermaidMode?: Wor
 /**
  * Open a notebook in the primary pane and make it active. `isNotebookPath` matches on the
  * `.ipynb` extension, so the tab needs nothing beyond the shape a normal file tab has,
- * plus the view mode the shell reads to decide between notebook and source.
+ * plus the mode that decides between the cell surface and the source view.
  */
-function openNotebookTab(path: string, content: string, notebookMode: NonNullable<WorkbenchFileTab['notebookMode']>): void {
-  workbenchState.current.tabs.push({ ...tab(path, content, false), notebookMode })
+function openNotebookTab(path: string, content: string, mode: string): void {
+  workbenchState.current.tabs.push({ ...tab(path, content, false), mode })
   focusPrimaryTab(`file:${path}`)
 }
 
 /** The same for a `.sqlnb`: the shell decides from the extension plus the tab's view mode. */
-function openSqlNotebookTab(path: string, content: string, mode: NonNullable<WorkbenchFileTab['sqlNotebookMode']>): void {
-  workbenchState.current.tabs.push({ ...tab(path, content, false), sqlNotebookMode: mode })
+function openSqlNotebookTab(path: string, content: string, mode: string): void {
+  workbenchState.current.tabs.push({ ...tab(path, content, false), mode })
   focusPrimaryTab(`file:${path}`)
 }
 

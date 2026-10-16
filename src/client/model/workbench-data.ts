@@ -4,12 +4,8 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { GitCommit, GitFileDiff, GitStatus } from '../../shared/contracts.ts'
 import { imageMimeTypeForPath } from '../../shared/contracts.ts'
 import type { WorkbenchApi } from './api.ts'
-import { isHtmlPath } from '../editor/html-preview.ts'
-import { isCsvPath } from '../csv/csv-path.ts'
-import { isStructuredPath } from '../json/json-path.ts'
-import { isMermaidPath } from '../mermaid/mermaid-path.ts'
-import { isNotebookPath } from '../notebook/notebook-path.ts'
 import { buildGitDecorations } from '../git/git-decorations.ts'
+import { isNotebookPath } from '../notebook/notebook-path.ts'
 import { RequestFence } from '../core/request-fence.ts'
 import { cloneState, INITIAL_STATE, stripWorkspaceEphemera } from './workbench-snapshot.ts'
 import {
@@ -193,24 +189,14 @@ export class WorkbenchData {
       const file = await this.api.readFile(workspaceId, path)
       if (!this.fence.isLatest(request)) return
       this.updateFileTabState(workspaceId, tabId, (tab) => {
-        const isMarkdown = file.markdown
-        const nextMarkdownMode = tab.markdownMode === 'source' && isMarkdown
-          ? 'preview'
-          : tab.markdownMode === 'preview' && !isMarkdown
-            ? 'source'
-            : tab.markdownMode
         tab.file = file
         tab.draft = file.content
         tab.dirty = false
         tab.externalChange = null
-        tab.markdownMode = nextMarkdownMode
-        tab.htmlMode = isHtmlPath(path) ? 'preview' : 'source'
-        tab.mermaidMode = isMermaidPath(path) ? 'split' : 'source'
-        tab.csvMode = isCsvPath(path) ? 'table' : 'source'
-        tab.structuredMode = isStructuredPath(path) ? 'graph' : 'source'
-        // A notebook opens as cells, which is the only view where its outputs are
-        // readable; Source stays one click away for the raw JSON.
-        tab.notebookMode = isNotebookPath(path) ? 'notebook' : 'source'
+        // 视图与模式每次打开都重新定：视图按这份文件重新认领，模式回到该视图的默认模式。
+        // 每种格式开在哪个模式、一个笔记本为什么开成单元格，是各视图自己声明的事。
+        delete tab.view
+        delete tab.mode
         tab.loading = false
         tab.error = null
       })

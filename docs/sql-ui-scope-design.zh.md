@@ -146,7 +146,7 @@
 **落点**
 
 - [src/client/sql/SqlConnectionStatus.tsx](../src/client/sql/SqlConnectionStatus.tsx) 第 19–27 行加一个 `hideReadout?: boolean`（照 [`NotebookKernelStatus.tsx:35`](../src/client/notebook/NotebookKernelStatus.tsx) 的 `hideChip` 先例命名与写法）；`text` 的推导（第 35–41 行）在 `hideReadout === true` 时**不再回落到 `connectionReadout(...)`**，只保留 `lostFile`（第 34 行）那一支：库文件失联时必须照旧说 `sqlnotebook.reconnectHint`，因为那是工具条不会说的事（工具条上的读数会照旧显示旧库名，直到读者点断开）。
-- [src/client/editor/EditorTabBody.tsx](../src/client/editor/EditorTabBody.tsx) 第 466 行：`<SqlConnectionStatus ... hideReadout={sqlNotebookMode === 'notebook'} />`。
+- [src/client/editor/views/sql-notebook-view.tsx](../src/client/editor/views/sql-notebook-view.tsx)：`<SqlConnectionStatus ... hideReadout={mode === 'notebook'} />`（原先在 [`EditorTabBody.tsx`](../src/client/editor/EditorTabBody.tsx) 第 466 行，视图注册表落地后随该视图搬到了这里）。
 
 **理由**：单元格视图下工具条的读数胶囊与状态条说的是同一件事，两处各说一遍；源码视图下工具条不在场，读数整句接管。这正是 `NotebookKernelStatus` 的 `hideChip` 已经写下的规矩（「状态条只说别的界面没说的事」），照抄而不是新发明。
 
