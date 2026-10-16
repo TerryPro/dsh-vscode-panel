@@ -594,99 +594,87 @@
  *
  * Inside the list rather than in the panel header above, because that header is shared with the
  * schema tree — a control there reads as scoping the whole panel, and this one only narrows the
- * list. Sticky so it stays reachable while a long list scrolls under it.
+ * list.
  *
- * Geometry is the notebook card's, on purpose: 8px radius, and a 4px inline inset so the selected
- * path starts on the same column as the entries' status dots and the panel title above. The two
- * read as one list rather than as a form bolted onto a list.
- *
- * The fill is what separates them. Cards paint `interactive-bg-*` on hover/active over the pane's
- * own background; this row paints a standing, slightly recessed layer, so it is legible as a
- * control at rest — while staying a step quieter than any card, because it is chrome around the
- * list rather than a member of it. `inset 0 0 0 1px` rather than `border` keeps the 4px inset
- * honest: a border would grow the box and push the path off the entries' column.
+ * It paints no box. The first version framed it like a form field and it read as a second header
+ * competing with the panel's own; a list's header should be quieter than the list. So the trigger
+ * is a bare button that tints on hover — the same treatment `DisclosureRow`'s title gets — and the
+ * only chrome on the row is the create action, which appears on hover of the row.
  */
-.listFilter {
+.databaseFilter {
   display: flex;
   align-items: center;
-  flex: 0 0 auto;
   gap: 2px;
+  /* Sticky so the filter stays reachable while a long list scrolls under it. Opaque background is
+     not decoration: entries pass beneath this row, and a transparent one would let them show
+     through. `bg-base` is the pane's own colour, so the row looks like the list rather than a
+     floating bar. */
   position: sticky;
   top: 0;
   z-index: 1;
-  /* A card's own geometry, not a form control's: 8px radius, and the exact inset
-     `.notebookSelect` / `.notebookStatusLine` use (4px), so the selected path starts on the same
-     column as the entries' status dots and their paths below. `min-height` is the card's first
-     row, so the row sits in the list's rhythm rather than reading as a form dropped on top. */
-  min-height: 30px;
-  padding: 0 2px 0 4px;
-  border-radius: 8px;
-  /* The fill is what separates it from the cards, which are transparent at rest. A standing,
-     slightly recessed layer reads as chrome around the list while staying quieter than any
-     card's hover/active fill. Opaque on purpose: the row is sticky, so entries scroll *under* it
-     and a translucent fill would let them show through. */
-  background: var(--dsw-alias-bg-layer-1);
-  /* `inset` rather than `border`: a border would grow the box and push the path off the column
-     the entries' text shares. */
-  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  /* Matches the notebook rows' inset, so the trigger's text starts on the same column as the
+     entries' status dots and their paths below. */
+  padding: 0 0 0 4px;
+  min-height: 24px;
 }
 
-.filterField {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-/*
- * The select paints nothing of its own; the row above is the box.
+/* The trigger: full width, no border, no fill until hovered.
  *
- * Two nested rounded fills at the same inset is what makes a control look like a form field
- * dropped into a list. Handing the box to `.listFilter` leaves one rounded shape per row, the same
- * way `.notebookEntry` owns the only fill in an entry.
- */
-.filterSelect {
-  width: 100%;
+ * It is the row the reader aims at, so the whole width is clickable rather than just the text —
+ * a small target on a quiet row is a control that looks nicer than it is usable. */
+.filterTrigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 0 18px 0 0;
+  height: 22px;
+  padding: 0 4px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
-  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  text-align: left;
   cursor: pointer;
-  appearance: none;
-  /* A path is the label and a path is long; the row must not push the button off its edge. */
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-/* The chevron, drawn rather than left to the platform: a native arrow keeps its own colours and
-   ignores `color`, so it cannot be made to match the tier pills' secondary tone. */
-.filterField::after {
-  content: '';
-  position: absolute;
-  inset-inline-end: 4px;
-  top: 50%;
-  width: 7px;
-  height: 7px;
-  margin-block-start: -4px;
-  border-inline-end: 1.4px solid var(--dsw-alias-label-tertiary);
-  border-block-end: 1.4px solid var(--dsw-alias-label-tertiary);
-  transform: rotate(45deg);
-  pointer-events: none;
+.filterTrigger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
-.filterSelect:disabled {
+.filterTrigger:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-/* The notebook-add glyph, sized and toned like the panel header's refresh button so the two
-   read as the same class of control. */
-.filterAction {
+/* A database path: the official `PathLabel` dims the directories and keeps the filename primary,
+   and fades the left edge instead of clipping the tail — so a deep path still ends in the name of
+   the file the reader is filtering by. `min-width: 0` is what lets it shrink inside the flex row. */
+.filterTriggerPath {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The two non-file values ("all", "no database recorded") are plain words, not paths. */
+.filterTriggerText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filterChevron {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The create action. Quiet until the row is hovered or it is focused, so a control the reader
+   cannot use yet does not read as the row's primary action. */
+.filterCreate {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -699,15 +687,23 @@
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
+  opacity: 0;
 }
 
-.filterAction:hover:not(:disabled) {
+/* Revealed on hover of the row, on its own hover, and on keyboard focus — the last one because a
+   control that only appears for pointers is unreachable for anyone tabbing through the panel. */
+.databaseFilter:hover .filterCreate,
+.filterCreate:hover:not(:disabled),
+.filterCreate:focus-visible {
+  opacity: 1;
+}
+
+.filterCreate:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 
-.filterAction:disabled {
-  opacity: 0.4;
+.filterCreate:disabled {
   cursor: default;
 }
 

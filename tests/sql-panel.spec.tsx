@@ -40,15 +40,32 @@ vi.mock('../src/client/model/use-workbench.ts', () => ({ useWorkbench: () => wor
  * The official Menu, stubbed the way the file tree's and the CSV grid's specs stub it.
  */
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  Menu: ({ open, items, onSelect }: {
+  Menu: ({ open, items, onSelect, anchor }: {
     open: boolean
     items: Array<{ id: string; label?: React.ReactNode; type?: string; disabled?: boolean }>
     onSelect: (id: string) => void
-  }) => (open ? (
-    <div role="menu">{items.filter(item => item.type === undefined).map(item => (
-      <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => { onSelect(item.id) }}>{item.label}</button>
-    ))}</div>
-  ) : null),
+    anchor: React.ReactNode
+  }) => (
+    <>
+      {/* The real `Menu` renders its anchor in place and only mounts the list when open, which is
+          what lets a caller style a closed trigger — so the stub does the same rather than hiding
+          the trigger until it opens. */}
+      {anchor}
+      {open ? (
+        <div role="menu">{items.filter(item => item.type === undefined).map(item => (
+          <button key={item.id} role="menuitem" disabled={item.disabled} onClick={() => { onSelect(item.id) }}>{item.label}</button>
+        ))}</div>
+      ) : null}
+    </>
+  ),
+  /**
+   * The official path renderer, reduced to its text.
+   *
+   * Its real value is presentational (dimmed directories, a fade at the left edge), which jsdom
+   * cannot show — but it is the *label* of every row and of the closed trigger, so a stub that
+   * dropped the path would leave those assertions testing nothing.
+   */
+  PathLabel: ({ path }: { path: string }) => <span>{path}</span>,
   IconChevronDownOutlineRegular: () => <span data-icon="chevron-down" />,
   IconChevronRightOutlineRegular: () => <span data-icon="chevron-right" />,
   // The "new notebook on this database" button reuses the file tree's own glyph
@@ -1147,8 +1164,20 @@ describe('SqlPanel — 按库筛选', () => {
     })
   }
 
-  const filterOf = (view: { getByRole: ReturnType<typeof render>['getByRole'] }): HTMLSelectElement =>
-    view.getByRole('combobox', { name: zh['sqlnotebook.filterByDatabase'] }) as HTMLSelectElement
+  /**
+   * The filter as the reader drives it: open the trigger, pick a row.
+   *
+   * Two steps rather than one `fireEvent.change`, because the control is a `Menu` — the same
+   * primitive every other dropdown in this repository uses — and not a native `<select>`. What the
+   * assertions below care about is unchanged (which notebooks the list keeps); only the gesture is.
+   */
+  const filterTrigger = (view: { getByRole: ReturnType<typeof render>['getByRole'] }): HTMLElement =>
+    view.getByRole('button', { name: zh['sqlnotebook.filterByDatabase'] })
+
+  function choose(view: ReturnType<typeof render>, row: string): void {
+    fireEvent.click(filterTrigger(view))
+    fireEvent.click(view.getByRole('menuitem', { name: row }))
+  }
 
   it('shows every notebook until a database is chosen', async () => {
     const harness = workspace()
@@ -1157,27 +1186,31 @@ describe('SqlPanel — 按库筛选', () => {
     for (const name of ['a.sqlnb', 'b.sqlnb', 'c.sqlnb', 'd.sqlnb']) {
       expect(harness.view.queryByText(name)).not.toBeNull()
     }
-    expect(filterOf(harness.view).value).toBe('')
+    // Unfiltered says so on the trigger itself, so a reader can tell a narrowed list from a small
+    // workspace without opening the menu.
+    expect(filterTrigger(harness.view).textContent).toContain(zh['sqlnotebook.filterAllDatabases'])
   })
 
   it('lists only the notebooks recording the chosen database', async () => {
     const harness = workspace()
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
 
-    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    choose(harness.view, 'demo.db')
 
     await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).toBeNull() })
     expect(harness.view.queryByText('a.sqlnb')).not.toBeNull()
     expect(harness.view.queryByText('b.sqlnb')).not.toBeNull()
     // A notebook that records no database is not on `demo.db`, so it is not in this list.
     expect(harness.view.queryByText('d.sqlnb')).toBeNull()
+    // And the trigger now names the database, which is the closed control's whole job.
+    expect(filterTrigger(harness.view).textContent).toContain('demo.db')
   })
 
   it('has its own option for the notebooks that record no database', async () => {
     const harness = workspace()
     await waitFor(() => { expect(harness.view.queryByText('d.sqlnb')).not.toBeNull() })
 
-    fireEvent.change(filterOf(harness.view), { target: { value: '\u0000unassociated' } })
+    choose(harness.view, zh['sqlnotebook.filterUnassociated'])
 
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).toBeNull() })
     expect(harness.view.queryByText('d.sqlnb')).not.toBeNull()
@@ -1194,9 +1227,9 @@ describe('SqlPanel — 按库筛选', () => {
     const harness = workspace()
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
 
-    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    choose(harness.view, 'demo.db')
     await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).toBeNull() })
-    fireEvent.change(filterOf(harness.view), { target: { value: '' } })
+    choose(harness.view, zh['sqlnotebook.filterAllDatabases'])
     await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).not.toBeNull() })
 
     expect(harness.api['sqlOpen']).not.toHaveBeenCalled()
@@ -1221,7 +1254,7 @@ describe('SqlPanel — 按库筛选', () => {
     })
     await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).not.toBeNull() })
 
-    fireEvent.change(filterOf(harness.view), { target: { value: 'empty.db' } })
+    choose(harness.view, 'empty.db')
 
     await waitFor(() => {
       expect(harness.view.queryByText(zh['sqlnotebook.databaseNotebooksEmpty'])).not.toBeNull()
@@ -1236,7 +1269,7 @@ describe('SqlPanel — 按库筛选', () => {
     // real cache, because that shared instance is what carries the choice between the two mounts.
     const harness = workspace()
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
-    fireEvent.change(filterOf(harness.view), { target: { value: 'orders.db' } })
+    choose(harness.view, 'orders.db')
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).toBeNull() })
 
     harness.view.unmount()
@@ -1245,14 +1278,14 @@ describe('SqlPanel — 按库筛选', () => {
     )
 
     await waitFor(() => { expect(remounted.queryByText('c.sqlnb')).not.toBeNull() })
-    expect(filterOf(remounted).value).toBe('orders.db')
+    expect(filterTrigger(remounted).textContent).toContain('orders.db')
     expect(remounted.queryByText('a.sqlnb')).toBeNull()
   })
 
   it('creates the notebook in the database’s own folder and opens it', async () => {
     const harness = workspace()
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
-    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    choose(harness.view, 'demo.db')
     fireEvent.click(harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }))
 
     await waitFor(() => { expect(harness.api['createFile']).toHaveBeenCalled() })
@@ -1276,7 +1309,7 @@ describe('SqlPanel — 按库筛选', () => {
     fireEvent.click(button)
     expect(harness.api['createFile']).not.toHaveBeenCalled()
 
-    fireEvent.change(filterOf(harness.view), { target: { value: '\u0000unassociated' } })
+    choose(harness.view, zh['sqlnotebook.filterUnassociated'])
     await waitFor(() => {
       expect((harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }) as HTMLButtonElement).disabled).toBe(true)
     })
@@ -1295,7 +1328,7 @@ describe('SqlPanel — 按库筛选', () => {
     await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
     const walksBefore = harness.listDirectory.mock.calls.length
 
-    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    choose(harness.view, 'demo.db')
     fireEvent.click(harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }))
 
     await waitFor(() => { expect(harness.openFile).toHaveBeenCalled() })

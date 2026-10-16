@@ -475,6 +475,7 @@ export const zh = {
   'sqlnotebook.filterByDatabase': '按库筛选',
   'sqlnotebook.filterAllDatabases': '全部数据库',
   'sqlnotebook.filterUnassociated': '未关联任何库',
+  'sqlnotebook.filterDatabases': '工作区里的库',
   'sqlnotebook.databaseNotebooksEmpty': '该库还没有笔记。',
   'sqlnotebook.newNotebookOnDatabase': '在此库上新建笔记',
   // 上半段列表自己的「没列全」声明。扫描一直带着 truncated，但此前没有消费方：
@@ -1138,6 +1139,7 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.filterByDatabase': 'Filter by database',
   'sqlnotebook.filterAllDatabases': 'All databases',
   'sqlnotebook.filterUnassociated': 'No database recorded',
+  'sqlnotebook.filterDatabases': 'Databases in this workspace',
   'sqlnotebook.databaseNotebooksEmpty': 'This database has no notebooks yet.',
   'sqlnotebook.newNotebookOnDatabase': 'New notebook on this database',
   'sqlnotebook.scanNotebooksTruncated': 'The workspace is large; only the first part of its notebooks is listed. Rescan, or open one from the file tree.',
