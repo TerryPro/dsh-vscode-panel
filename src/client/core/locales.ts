@@ -472,6 +472,9 @@ export const zh = {
   'sqlnotebook.workspaceNotebookOpenAria': '打开 SQL 笔记 {name}',
   'sqlnotebook.workspaceNotebooksScanning': '正在扫描工作区…',
   'sqlnotebook.workspaceNotebooksEmpty': '工作区里还没有 SQL 笔记。',
+  // 上半段列表自己的「没列全」声明。扫描一直带着 truncated，但此前没有消费方：
+  // 被上限截断的工作区和扫完的工作区画出同一份列表，找不到笔记的读者没有任何线索。
+  'sqlnotebook.scanNotebooksTruncated': '工作区较大，只列出了前面一部分笔记；用刷新重扫，或从文件树直接打开。',
   // 左侧面板顶部的笔记本列表：列出所有打开的 .sqlnb，激活的那条下面挂四层结构。
   'sqlnotebook.notebookListActiveBadge': '当前',
   'sqlnotebook.notebookListInactiveBadge': '点击切换',
@@ -486,6 +489,9 @@ export const zh = {
   'sqlnotebook.disconnectHint': '断开并释放连接；切换只读↔可写必须断开后重连，临时表与未提交事务会丢。',
   'sqlnotebook.schema': '结构',
   'sqlnotebook.refreshSchema': '刷新结构',
+  // 面板头部 ⟳ 按钮的标题：用户期待的"刷新"既要把当前连接的 schema 重拉，
+  // 也把工作区里的 .sqlnb / 库文件清单重扫——这两条都是用户在同一屏看到的真相。
+  'sqlnotebook.refreshWorkspace': '刷新',
   'sqlnotebook.searchPlaceholder': '搜索表或视图',
   'sqlnotebook.searchNoResults': '无匹配项',
   'sqlnotebook.connRowCount': '{tables} 张表，{views} 个视图',
@@ -1124,6 +1130,7 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.workspaceNotebookOpenAria': 'Open SQL notebook {name}',
   'sqlnotebook.workspaceNotebooksScanning': 'Scanning the workspace…',
   'sqlnotebook.workspaceNotebooksEmpty': 'The workspace has no SQL notebooks yet.',
+  'sqlnotebook.scanNotebooksTruncated': 'The workspace is large; only the first part of its notebooks is listed. Rescan, or open one from the file tree.',
   // The notebook list at the top of the panel: every open `.sqlnb`, with the active one
   // expanded into the four-level tree underneath.
   'sqlnotebook.notebookListActiveBadge': 'Active',
@@ -1140,6 +1147,11 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.disconnectHint': 'Disconnect and release the handle. Switching read-only ↔ writable means disconnecting first, which loses temporary tables and any uncommitted transaction.',
   'sqlnotebook.schema': 'Schema',
   'sqlnotebook.refreshSchema': 'Refresh the schema',
+  // The panel header's ⟳ button: the user expects "Refresh" to do both jobs
+  // visible on the same screen — reload the connected schema and rescan the
+  // workspace's `.sqlnb` / database file list. Either alone leaves the panel
+  // lying about a fact the reader can see.
+  'sqlnotebook.refreshWorkspace': 'Refresh',
   'sqlnotebook.searchPlaceholder': 'Search tables and views',
   'sqlnotebook.searchNoResults': 'No matches',
   'sqlnotebook.connRowCount': '{tables} tables, {views} views',

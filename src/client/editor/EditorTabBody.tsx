@@ -473,7 +473,14 @@ export function EditorTabBody({
       />
     )
     : isSqlNotebookTab
-      ? <SqlConnectionStatus runtime={controller.sqlRuntime} tabId={tab.id} t={t} />
+      ? (
+        <SqlConnectionStatus
+          runtime={controller.sqlRuntime}
+          tabId={tab.id}
+          t={t}
+          hideReadout={sqlNotebookMode === 'notebook'}
+        />
+      )
       : null
   return (
     <div className={css.editorFileArea}>

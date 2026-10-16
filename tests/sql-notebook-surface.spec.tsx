@@ -185,6 +185,8 @@ interface Harness {
   }
   /** Pick the first database the scan offered and press connect. */
   connect: () => Promise<void>
+  /** The workspace walk the picker drives, so a case can assert it was not needed. */
+  listDirectory: ReturnType<typeof vi.fn>
   /** The draft the tab holds — what a save would write, and what a reopen would read. */
   box: { current: string }
 }
@@ -207,6 +209,8 @@ function open(draft: string, options: {
   scanTruncated?: boolean
   /** Overrides the walked entries *and* marks the listing itself truncated. */
   scanEntries?: WorkspaceEntry[]
+  /** Never answers the walk, so a case can assert what the toolbar shows before it returns. */
+  holdScan?: boolean
 } = {}): Harness {
   const onEdit = vi.fn()
   const onSave = vi.fn()
@@ -257,7 +261,12 @@ function open(draft: string, options: {
     // Host already truncated. Either has to reach the picker's title, so the fixture can set it.
     truncated: options.scanTruncated ?? false,
   }
-  const listDirectory = vi.fn((path: string) => Promise.resolve(path === '' ? root : { path, entries: [], truncated: false }))
+  const listDirectory = vi.fn((path: string) => options.holdScan === true
+    // Never settles: the reader's first paint is then strictly before any walk result, which is
+    // the only way to assert that the toolbar does not need the walk to name the notebook's own
+    // database.
+    ? new Promise<never>(() => undefined)
+    : Promise.resolve(path === '' ? root : { path, entries: [], truncated: false }))
   /**
    * The draft held in state, the way the file tab holds it.
    *
@@ -299,7 +308,7 @@ function open(draft: string, options: {
     fireEvent.click(view.getByRole('button', { name: labels.connect }))
     await waitFor(() => { expect(api.sqlOpen).toHaveBeenCalled() })
   }
-  return { view, onEdit, onSave, api, connect, box }
+  return { view, onEdit, onSave, api, connect, listDirectory, box }
 }
 
 describe('SqlNotebookSurface 文档层', () => {
@@ -475,7 +484,11 @@ describe('SqlNotebookSurface 文档层', () => {
     // already say so — no "connecting…" placeholder, no "not connected" line.
     expect(harness.view.queryByText(labels.connecting)).toBeNull()
     expect(harness.view.queryByText(labels.notConnected)).toBeNull()
-    expect(harness.view.getByText(/demo\.db/)).toBeTruthy()
+    // Asserted as the bar's whole sentence rather than a `/demo\.db/` search: the path also
+    // appears as the picker's selected option, and a loose match would pass on either one while
+    // the bar itself said nothing. This is the line that must carry the path *and* the tier, and
+    // must not yet carry a cap — `connectionReadout` drops that until the Host answers with one.
+    expect(harness.view.getByText(`demo.db · ${labels.readOnlyTier}`)).toBeTruthy()
   })
 
   it('opens a file that records no database without connecting anything', async () => {
@@ -549,6 +562,62 @@ describe('SqlNotebookSurface 连接与执行', () => {
   it('offers an in-memory database beside the files', () => {
     const { view } = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
     expect(view.getByRole('combobox', { name: labels.database }).textContent).toContain(':memory:')
+  })
+
+  /**
+   * The reported bug: the toolbar's database picker took "ages" to name the notebook's database.
+   *
+   * Nothing was slow. A `<select>` whose `value` matches no `<option>` renders **blank** — the
+   * browser falls back to the first option — so the recorded path sat in `pickPath` from the first
+   * render while the box kept showing the placeholder, and it only appeared once a full workspace
+   * walk happened to return an option for it. The value was always right; the control had nothing
+   * to draw it with.
+   *
+   * The walk is held open here so the assertion lands strictly before it returns: if the picker
+   * needs the walk to display its own record, this fails.
+   */
+  it('names the recorded database before the workspace walk returns', () => {
+    const draft = JSON.stringify({
+      version: 2,
+      connection: { path: 'examples/demo.db', access: 'read-only' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    })
+    const harness = open(draft, { holdScan: true })
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+
+    // The walk has been *asked* — that is correct and happens on mount — but it has not answered.
+    expect(harness.listDirectory).toHaveBeenCalled()
+    // Nothing the walk could have contributed is on screen yet: only the placeholder, `:memory:`,
+    // and the record the file itself carries.
+    expect([...picker.options].map(option => option.value))
+      .toEqual(['', ':memory:', 'examples/demo.db'])
+    // And the record is already the selected, visible answer.
+    expect(picker.value).toBe('examples/demo.db')
+    expect(picker.selectedOptions[0]?.textContent).toBe('examples/demo.db')
+  })
+
+  it('does not list the recorded database twice once the walk names it too', async () => {
+    const draft = JSON.stringify({
+      version: 2,
+      connection: { path: 'examples/demo.db', access: 'read-only' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    })
+    const harness = open(draft, { scanEntries: [{ name: 'demo.db', path: 'examples/demo.db', kind: 'file' }] })
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+
+    await waitFor(() => { expect(picker.options.length).toBeGreaterThan(2) })
+    expect([...picker.options].filter(option => option.value === 'examples/demo.db')).toHaveLength(1)
+    expect(picker.value).toBe('examples/demo.db')
+  })
+
+  it('still lists the walk’s databases for a notebook that records none', async () => {
+    // The negative control: the recorded path is prepended only when there is one, so a notebook
+    // with no record keeps showing exactly what the walk found.
+    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
+    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
+
+    await waitFor(() => { expect([...picker.options].some(option => option.value === 'demo.db')).toBe(true) })
+    expect(picker.value).toBe('')
   })
 
   it('opens an in-memory database without a tier, because it has none', async () => {

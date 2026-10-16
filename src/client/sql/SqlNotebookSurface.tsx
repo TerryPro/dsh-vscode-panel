@@ -243,6 +243,34 @@ export function SqlNotebookSurface({
   const connection = runState?.connection ?? null
   const busy = runState !== null && (runState.connection !== null) && runtime.busy(tabId)
   /**
+   * What the status row says about the handle.
+   *
+   * The runtime's store is the authority, but it is only populated once `bind` has run in the
+   * mount effect — so on the first synchronous render there is nothing to read. The file's own
+   * record is the fallback: it is parsed from the draft the tab already holds, and it is the same
+   * fact `bind` will seed the store with a moment later. Without it a notebook reopened onto a
+   * database it had already named would flash "not connected" under tables it had just loaded.
+   *
+   * `rowLimit: 0` is the marker `connectionReadout` reads as "the Host has not answered yet"; it
+   * drops the cap segment, so the first paint names the database and the tier truthfully and adds
+   * the cap when the Host's answer refines it.
+   */
+  const readoutConnection = connection ?? (document.connection === null ? null : {
+    path: document.connection.path,
+    access: document.connection.access,
+    sqliteVersion: '',
+    rowLimit: 0,
+    walSidecarExpected: false,
+  })
+  const statusText = readoutConnection !== null
+    ? connectionReadout(readoutConnection, {
+      readOnly: labels.readOnlyTier,
+      writable: labels.writableTier,
+    })
+    : runState?.connecting === true
+      ? labels.connecting
+      : labels.notConnected
+  /**
    * An in-memory database has no tier: there is no file to protect, so the Host always opens
    * it writable and refuses a request that names a tier for it. The toggle is therefore
    * hidden rather than defaulted, and the connect sends `writable`.
@@ -254,6 +282,31 @@ export function SqlNotebookSurface({
   // (ADR 0008 moved the sidebar's copy away), so the state around it still lives in `useDatabaseScan`
   // rather than being re-derived here.
   const { scan, scanning, rescan } = useDatabaseScan(listDirectory)
+
+  /**
+   * The options the picker offers: the walk's list, plus the recorded path if the walk has not
+   * named it yet.
+   *
+   * A `<select>` whose `value` matches no `<option>` renders **blank**, not as the value it was
+   * given — the browser falls back to the first option and the reader sees the placeholder. That
+   * is what made the recorded database appear to take "ages" to show up: the file's path was in
+   * `pickPath` from the very first render, but it only became *visible* once a full workspace walk
+   * happened to return an option for it. Nothing was slow about the value; the box simply had
+   * nothing to draw it with.
+   *
+   * Adding the recorded path as its own option makes the toolbar name the notebook's database on
+   * the first paint, which is the same promise the status strip already keeps. The walk's own list
+   * then merges in behind it — and because the entry is keyed by path, a walk that does name it
+   * produces no duplicate row.
+   */
+  const pickerOptions = useMemo(() => {
+    const walked = scan?.databases ?? []
+    if (pickPath === '' || pickPath === SQL_MEMORY_TARGET) return walked
+    if (walked.some(choice => choice.path === pickPath)) return walked
+    // The name is what the row shows; the path is the value. Same derivation the walk uses.
+    const name = pickPath.split('/').at(-1) ?? pickPath
+    return [{ path: pickPath, name }, ...walked]
+  }, [scan, pickPath])
 
   /**
    * Apply one edit to the file text, or refuse it out loud.
@@ -539,7 +592,7 @@ export function SqlNotebookSurface({
           >
             <option value="">{labels.database}</option>
             <option value={SQL_MEMORY_TARGET}>{labels.memoryDatabase}</option>
-            {(scan?.databases ?? []).map(choice => (
+            {pickerOptions.map(choice => (
               <option key={choice.path} value={choice.path}>{choice.path}</option>
             ))}
           </select>
@@ -686,12 +739,29 @@ export function SqlNotebookSurface({
         )}
       </div>
       {/*
-        The connection readout now lives in the workbench's `editorStatusBar` below this surface.
-        `EditorTabBody` wires `SqlConnectionStatus` into the strip for every sqlnb tab, so the
-        same line says the database in both the source view and the cell view — one strip rather
-        than two stacked ones. The runtime's store is seeded with the file's recorded connection
-        in `bind`, so the first paint after mount already reports the right database rather than
-        flashing "未连接" under the tables the file just loaded.
+        The connection readout, in the row that owns the connection.
+
+        ADR 0008 gave the toolbar the whole connection face, and this line is the part of it that
+        has no control to sit on: which database the handle is on, at which tier, under which row
+        cap. The workbench's status strip below carries the same sentence in the source view, where
+        there is no toolbar to say it, and `SqlConnectionStatus` hides its copy here — the strip's
+        rule, already written down for the kernel chip as `hideChip`, is to say only what nothing
+        else on screen says.
+
+        It reads the runtime's seed as well as the Host's answer. `bind` puts the file's recorded
+        path and tier into the store before any request is on the wire, so a notebook reopened onto
+        a database it already named says so on the first paint instead of flashing "not connected"
+        under tables the file had just loaded; `connectionReadout` drops the cap segment until the
+        Host answers with a real one.
+      */}
+      <div className={css.notebookStatusBar} role="status">
+        {statusText}
+      </div>
+      {/*
+        The two standing facts about the live handle — an in-memory database evaporates with the
+        handle, and a read-only handle on a WAL database leaves -wal/-shm beside the file — stay in
+        the workbench's `editorStatusBar`. They are true for the whole session rather than for the
+        cell view, and the strip outlives this surface.
       */}
     </div>
   )

@@ -48,6 +48,7 @@ import { WorkbenchTerminals } from './workbench-terminals.ts'
 import { NotebookRuntime } from '../notebook/notebook-runtime.ts'
 import { KernelRegistry } from '../notebook/kernel-registry.ts'
 import { SqlRuntime } from '../sql/sql-runtime.ts'
+import { SqlWorkspaceCache } from '../sql/sql-workspace-cache.ts'
 import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import { SQL_MEMORY_TARGET } from '../../shared/sql-protocol.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
@@ -111,6 +112,19 @@ export class WorkbenchController {
    * rows must not make every tab in the workbench clone.
    */
   readonly sqlRuntime: SqlRuntime
+
+  /**
+   * Single-source cache for the SQL panel's workspace scan.
+   *
+   * The panel used to do a full `scanSqlNotebooks` walk on every mount, and the
+   * Host reported that as its worst hot path. Holding the cache on the
+   * controller (rather than inside the panel) means the result survives every
+   * React remount and every "切换到 SQL 面板", and the controller is already the
+   * one place that knows when the workspace changed — `setWorkspace` calls
+   * `invalidate()` so the next panel mount scans the new workspace instead of
+   * showing the old one's notebooks.
+   */
+  readonly sqlWorkspaceCache: SqlWorkspaceCache = new SqlWorkspaceCache()
 
   constructor(
     api: WorkbenchApi = new WorkbenchApi(),
@@ -242,6 +256,22 @@ export class WorkbenchController {
     // Requirement: leaving a workspace releases every connection it held, rather than letting
     // handles keep files open until the Host's grace timers happen to fire.
     if (previous !== undefined && previous !== workspaceId) void this.sqlRuntime.releaseWorkspace(previous)
+    /**
+     * Drop the panel's workspace scan only when the workspace actually changed.
+     *
+     * This method is not a rare event. `WorkbenchEditor`'s workspace-sync effect calls it on every
+     * mount of the right column (which the seat releases and reclaims as the editor column is
+     * collapsed and expanded), `WorkbenchSidebar` calls it whenever the resolved workspace is
+     * recomputed, and `WorkbenchData.openFile` reaches its own `setWorkspace` on every file open.
+     * Clearing unconditionally meant each of those threw away a perfectly good scan, and the
+     * panel's next mount paid for a full directory walk — measured: four mounts with no
+     * intervening `setWorkspace` cost one walk, and four mounts each preceded by one cost five.
+     *
+     * A re-set to the *same* workspace is not a change of subject: the files on disk are the ones
+     * the cached snapshot already describes. Re-scanning is the reader's own gesture (the panel's
+     * refresh button), not something a column remount should trigger on their behalf.
+     */
+    if (previous !== workspaceId) this.sqlWorkspaceCache.invalidate()
     this.data.setWorkspace(workspaceId)
   }
 

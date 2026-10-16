@@ -464,6 +464,48 @@ describe('WorkbenchController', () => {
     expect(activeTab(controller)).toMatchObject({ path: 'shared.txt', draft: 'shared draft', dirty: true })
   })
 
+  /**
+   * The SQL panel's workspace scan is expensive — a recursive directory walk — and the cache that
+   * spares it lives on the controller, cleared by `setWorkspace`. That method is not a rare event:
+   * the editor's workspace-sync effect fires it on every remount of the right column (which the
+   * seat releases and reclaims as the column is collapsed and expanded), and the sidebar fires it
+   * whenever the resolved workspace is recomputed. Clearing unconditionally meant each of those
+   * discarded a good scan and made the panel's next mount walk the workspace again — measured at
+   * five walks for four remounts, against one walk for four remounts without it.
+   */
+  it('does not drop the SQL panel scan when the same Workspace is set again', async () => {
+    const controller = createController({})
+    controller.setWorkspace('workspace-1')
+    // Filled through the cache's own public entry point, so this asserts the real thing: a second
+    // `ensure()` must be served from the snapshot rather than paying for another walk.
+    const list = vi.fn((path: string) => Promise.resolve({ path, entries: [], truncated: false }))
+    const scanner = { list, readNotebook: vi.fn(() => Promise.resolve('{}')) }
+    await controller.sqlWorkspaceCache.ensure('workspace-1', scanner)
+    expect(list).toHaveBeenCalledTimes(1)
+
+    controller.setWorkspace('workspace-1')
+    controller.setWorkspace('workspace-1')
+    await controller.sqlWorkspaceCache.ensure('workspace-1', scanner)
+
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
+  it('still drops the scan when the Workspace really changes', async () => {
+    const controller = createController({})
+    controller.setWorkspace('workspace-1')
+    const list = vi.fn((path: string) => Promise.resolve({ path, entries: [], truncated: false }))
+    const scanner = { list, readNotebook: vi.fn(() => Promise.resolve('{}')) }
+    await controller.sqlWorkspaceCache.ensure('workspace-1', scanner)
+    expect(list).toHaveBeenCalledTimes(1)
+
+    controller.setWorkspace('workspace-2')
+    await controller.sqlWorkspaceCache.ensure('workspace-2', scanner)
+
+    // The cached list describes workspace-1's files; serving it for workspace-2 would show the
+    // wrong workspace's notebooks, so this walk is the half that must survive.
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
   it('applies a late save to its file and Workspace without mutating the active Workspace', async () => {
     let finishSave: ((value: { path: string; version: string; size: number }) => void) | undefined
     const api = {

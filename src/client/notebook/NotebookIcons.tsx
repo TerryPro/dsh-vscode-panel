@@ -160,42 +160,51 @@ export function IconRestartKernel16({ size = 14 }: IconProps) {
 }
 
 /**
- * Connect: a plug being inserted into a socket. Two flat prongs on the left, a rounded
- * barrel on the right, so a reader recognises it as "this opens a handle" the same way
- * they would on a power strip. Deliberately not a link / chain (the same trap SSH clients
- * fall into, where a "connect" icon reads as "navigate to" instead).
+ * Connect: a two-pin plug, the shape a reader already knows from every power lead.
+ *
+ * Redrawn because the previous artwork was unreadable at the size it is actually used. It
+ * carried five separate strokes — two prongs, a cable barrel, a lead-in arc and a head — and at
+ * the toolbar's 14px they merged into a single grey smudge, with the arc reading as a stray dot.
+ * What replaces it is the plug's *silhouette* instead of its parts: two prongs and one body.
+ * Fewer strokes is not a simplification for its own sake here; a 14px glyph has roughly 14 device
+ * pixels of height to say one thing, and a shape that needs five strokes to be recognised spends
+ * all of them on detail nobody can resolve.
+ *
+ * The body is deliberately wide (9.2 of the 16 viewBox units) so the glyph's visual weight matches
+ * the floppy, plus, play and broom icons it sits between; a narrower plug read as a size smaller
+ * than its neighbours even though every button is the same 24x22 box.
+ *
+ * Deliberately not a link / chain, the trap SSH clients fall into, where "connect" reads as
+ * "navigate to" rather than "open a handle".
  */
 export function IconConnect16({ size = 14 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
-      {/* Prongs on the left, two short verticals. */}
-      <path d="M2.5 5.5v2" />
-      <path d="M5 5.5v2" />
-      {/* Cable / barrel between the prongs and the plug head. */}
-      <path d="M2.5 6.5h2.5v2.5a2 2 0 0 0 2 2h0" />
-      {/* Plug head: a rounded body with the lead-in arc showing it about to seat. */}
-      <path d="M7 7.5h4.2" />
-      <path d="M11.2 6 13.5 8l-2.3 2" />
+      {/* Two prongs. */}
+      <path d="M5.6 2.6v3.6" />
+      <path d="M10.4 2.6v3.6" />
+      {/* One body: a straight top edge with a rounded underside. */}
+      <path d="M3.4 6.2h9.2v3.2a4.6 4.6 0 0 1-9.2 0z" />
     </svg>
   )
 }
 
 /**
- * Disconnect: the connect plug, with a diagonal stroke through it. The stroke sits on
- * top, not under, so the slashed state reads as the live one when the handle is open
- * and the reader is about to close it. The slash starts on the upper-left and ends on
- * the lower-right — the same convention the workbench's other "off" states use.
+ * Disconnect: the same plug, struck through.
+ *
+ * Sharing the connect artwork is the point — the two states are one control, and a reader who has
+ * learned the plug must recognise its slashed form instantly rather than re-reading a different
+ * picture. The slash runs corner to corner on the diagonal the workbench's other "off" marks use,
+ * and it is drawn last so it sits on top: the struck-through state is the one shown while a handle
+ * is open and the reader is about to close it.
  */
 export function IconDisconnect16({ size = 14 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
-      <path d="M2.5 5.5v2" />
-      <path d="M5 5.5v2" />
-      <path d="M2.5 6.5h2.5v2.5a2 2 0 0 0 2 2h0" />
-      <path d="M7 7.5h4.2" />
-      <path d="M11.2 6 13.5 8l-2.3 2" />
-      {/* The slash: clearly on top, from upper-left to lower-right corner. */}
-      <path d="M2.5 2.5 13.5 13.5" />
+      <path d="M5.6 2.6v3.6" />
+      <path d="M10.4 2.6v3.6" />
+      <path d="M3.4 6.2h9.2v3.2a4.6 4.6 0 0 1-9.2 0z" />
+      <path d="M2.4 2.4 13.6 13.6" />
     </svg>
   )
 }

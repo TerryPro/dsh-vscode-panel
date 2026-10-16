@@ -14,7 +14,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchFileTab, WorkbenchState } from '../model/controller.ts'
-import type { DirectoryListing } from '../../shared/contracts.ts'
 import { copyTextToClipboard } from '../core/clipboard.ts'
 import type { WorkbenchController } from '../model/controller.ts'
 import { messageOf } from '../model/tab-model.ts'
@@ -24,7 +23,7 @@ import { appendSqlCell } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
 import { quotedSqlIdentifier, selectAllFrom } from './sql-schema-tree.ts'
 import { SqlRuntime, type SqlNotebookState } from './sql-runtime.ts'
-import { scanSqlNotebooks, type SqlNotebookScan } from './sql-notebook-scan.ts'
+import { SqlWorkspaceCache, type SqlWorkspaceScanner, type SqlWorkspaceSnapshot } from './sql-workspace-cache.ts'
 import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
 import {
   SqlTreeNode,
@@ -184,57 +183,45 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const [schemaProblem, setSchemaProblem] = useState<string | null>(null)
   const [columns, setColumns] = useState<Record<string, import('../../shared/sql-protocol.ts').SqlColumnEntry[]>>({})
   const [menuTarget, setMenuTarget] = useState<SqlTableMenuTarget | null>(null)
-  const [workspaceScan, setWorkspaceScan] = useState<SqlNotebookScan | null>(null)
+  // `null` means "never scanned for this workspace" — `null` is the trigger
+  // for the panel to ask the cache to scan. The cache decides whether the
+  // request actually walks the directory.
+  const [workspaceScan, setWorkspaceScan] = useState<SqlWorkspaceSnapshot>(null)
   const [scanning, setScanning] = useState(false)
   const lastExecution = useRef('')
 
-  /**
-   * Scan the workspace for every `.sqlnb`.
-   */
-  const listDirectory = useCallback(
-    (directory: string): Promise<DirectoryListing> => {
-      if (workspaceId === undefined) return Promise.reject(new Error('No workspace'))
-      return controller.api.listDirectory(workspaceId, directory)
-    },
-    [controller, workspaceId],
-  )
-
-  const readNotebook = useCallback(
-    async (path: string): Promise<string> => {
-      if (workspaceId === undefined) throw new Error('No workspace')
-      const file = await controller.api.readFile(workspaceId, path)
-      return file.content.slice(0, 512)
-    },
-    [controller, workspaceId],
-  )
-
-  const wantedScan = useRef(false)
-  const rescanWorkspace = useCallback((): void => {
-    if (workspaceId === undefined) return
-    wantedScan.current = true
-    setScanning(true)
-    void scanSqlNotebooks({ list: listDirectory, readNotebook }).then(
-      (result) => {
-        if (!wantedScan.current) return
-        setWorkspaceScan(result)
-        setScanning(false)
-      },
-      (error: unknown) => {
-        if (!wantedScan.current) return
-        setScanning(false)
-        setSchemaProblem(messageOf(error))
-      },
-    )
-  }, [listDirectory, readNotebook, workspaceId])
-  useEffect(() => {
-    wantedScan.current = true
-    rescanWorkspace()
-    return () => { wantedScan.current = false }
-  }, [rescanWorkspace])
-
+  // `connectedPath` is read by both the schema effect below and the panel's
+  // "Refresh" button (which reloads the schema in addition to rescanning the
+  // workspace). Hoisting it above the scan callbacks keeps both call sites
+  // pointing at the same source of truth and avoids a TDZ reference.
   const activeState = activeTabId === null ? null : notebookStates.get(activeTabId) ?? null
   const connection = activeState?.connection ?? null
   const connectedPath = connection?.path ?? null
+
+  /**
+   * Wrap the controller's `listDirectory`/`readFile` so the cache only ever
+   * sees the contract it cares about. Wrapping here (rather than at the
+   * controller) keeps the cache free of any WorkbenchController-shaped input.
+   */
+  const scanner = useMemo<SqlWorkspaceScanner | null>(() => {
+    if (workspaceId === undefined) return null
+    return {
+      list: (path: string) => controller.api.listDirectory(workspaceId, path),
+      /**
+       * The whole file, not its head.
+       *
+       * The scan parses this to read `connection`, which `writeSqlNotebookConnection` appends
+       * after `cells` — so in every notebook that has ever recorded a result, the field sits past
+       * the first kilobyte. Slicing the text here does not shorten a parse, it corrupts one: the
+       * prefix is not valid JSON, `JSON.parse` throws, and the row silently reports "no database"
+       * for a notebook that names one. Measured on `examples/`: 21 of 24 notebooks read that way.
+       */
+      readNotebook: async (path: string) => {
+        const file = await controller.api.readFile(workspaceId, path)
+        return file.content
+      },
+    }
+  }, [controller, workspaceId])
 
   const loadSchema = useCallback((): void => {
     if (workspaceId === undefined || activePath === null) return
@@ -244,6 +231,77 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       (error: unknown) => { setSchemaProblem(messageOf(error)) },
     )
   }, [controller, activePath, workspaceId])
+
+  /**
+   * Which scan request the panel is currently willing to render.
+   *
+   * The cache already refuses to *publish* a superseded walk, but it still answers whoever
+   * awaited it — so a slow walk started before the reader pressed refresh would resolve after
+   * the fresh one and paint its stale list over it. Gating on the request id here is what makes
+   * "the newest walk is the one on screen" true of the panel and not only of the cache.
+   */
+  const scanRequest = useRef(0)
+
+  /** Take one walk's result, unless a newer walk has been asked for since. */
+  const acceptScan = useCallback((request: number, result: SqlWorkspaceSnapshot): void => {
+    if (request !== scanRequest.current) return
+    setWorkspaceScan(result)
+    setScanning(false)
+  }, [])
+
+  /**
+   * Run (or skip) a workspace scan through the controller-owned cache.
+   *
+   * The cache is what makes "切换到 SQL 面板要再扫一次" go away: it remembers
+   * the most recent scan per workspace, and `setWorkspace()` invalidates it
+   * when the user moves to a different one. The panel only ever asks the
+   * cache; the cache is the one that decides whether a walk is needed.
+   */
+  const ensureWorkspaceScan = useCallback((): void => {
+    if (workspaceId === undefined || scanner === null) return
+    scanRequest.current += 1
+    const request = scanRequest.current
+    setScanning(true)
+    const cache: SqlWorkspaceCache = controller.sqlWorkspaceCache
+    void cache.ensure(workspaceId, scanner).then(
+      (result) => { acceptScan(request, result) },
+      (error: unknown) => {
+        if (request !== scanRequest.current) return
+        setScanning(false)
+        setSchemaProblem(messageOf(error))
+      },
+    )
+  }, [acceptScan, controller, scanner, workspaceId])
+
+  /**
+   * Force a fresh scan and reload the active schema, bound to the panel
+   * header's refresh button. The button is the only gesture that overwrites
+   * the cache: every other mount uses the cached snapshot.
+   */
+  const refreshAll = useCallback((): void => {
+    if (workspaceId === undefined || scanner === null) return
+    scanRequest.current += 1
+    const request = scanRequest.current
+    setScanning(true)
+    const cache: SqlWorkspaceCache = controller.sqlWorkspaceCache
+    void cache.refresh(workspaceId, scanner).then(
+      (result) => {
+        acceptScan(request, result)
+        if (connectedPath !== null) loadSchema()
+      },
+      (error: unknown) => {
+        if (request !== scanRequest.current) return
+        setScanning(false)
+        setSchemaProblem(messageOf(error))
+      },
+    )
+  }, [acceptScan, controller, scanner, workspaceId, connectedPath, loadSchema])
+
+  // Trigger the first scan on mount and whenever the cache for this workspace
+  // becomes invalid (e.g. the controller cleared it after a workspace switch).
+  useEffect(() => {
+    ensureWorkspaceScan()
+  }, [ensureWorkspaceScan])
 
   // Schema is per-active-tab
   useEffect(() => {
@@ -388,6 +446,17 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
               />
             )
           })}
+      {/*
+        The walk's own admission, said where its result is.
+
+        `SqlNotebookScan.truncated` has existed since the scan was written and had no consumer:
+        a workspace the caps cut short drew exactly the same list as a complete one, so a reader
+        who could not find their notebook had nothing telling them it might be off the end. The
+        empty case above does not cover this — a partial list is not an empty one.
+      */}
+      {workspaceScan?.truncated === true && (
+        <div className={css.muted}>{t('sqlnotebook.scanNotebooksTruncated')}</div>
+      )}
     </div>
   )
 
@@ -433,10 +502,10 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
         <button
           type="button"
           className={css.headerAction}
-          aria-label={t('sqlnotebook.refreshSchema')}
-          title={t('sqlnotebook.refreshSchema')}
-          disabled={connectedPath === null}
-          onClick={loadSchema}
+          aria-label={t('sqlnotebook.refreshWorkspace')}
+          title={t('sqlnotebook.refreshWorkspace')}
+          disabled={workspaceId === undefined}
+          onClick={refreshAll}
         >
           ⟳
         </button>

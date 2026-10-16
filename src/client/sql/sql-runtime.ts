@@ -124,6 +124,17 @@ interface TabRuntime {
    * reader deleted — would be hammered instead of reported.
    */
   autoConnectTried: boolean
+  /**
+   * Whether `hydrate` has run against a document that was actually there.
+   *
+   * `bind` can land before the tab's file content does: `WorkbenchData` pushes a tab with
+   * `draft: ''` and `loading: true`, and the panel's effect binds every SQL notebook it can see.
+   * Hydrating against that empty string restores nothing, and because a later bind with the same
+   * identity returns early, nothing ever re-read the file — so the recorded results stayed off the
+   * table for the whole session while the file held them all along. This flag is what tells that
+   * case apart from a notebook whose file is genuinely blank and has nothing to wait for.
+   */
+  hydrated: boolean
   /** Cell ids waiting their turn, in the order they were asked for. */
   queue: string[]
   /** The cell whose request is outstanding, or null when the connection is free. */
@@ -230,9 +241,29 @@ export class SqlRuntime {
    */
   bind(tabId: string, workspaceId: string, notebook: string): void {
     const existing = this.tabs.get(tabId)
-    if (existing !== undefined && existing.workspaceId === workspaceId && existing.notebook === notebook) return
+    if (existing !== undefined && existing.workspaceId === workspaceId && existing.notebook === notebook) {
+      /**
+       * Same notebook, so this is a re-bind rather than a new session — but the first bind may have
+       * landed before the file's content did, and this is the moment that changes.
+       *
+       * The panel binds every SQL tab it can see on each snapshot, and a tab is pushed with an
+       * empty draft before its read returns. Hydration against that draft restores nothing, and
+       * the early return above is what used to make that permanent: the reader opened a notebook
+       * full of recorded tables and saw an empty column, for the whole session.
+       *
+       * Re-reading the file is therefore attempted until a document is actually there. `hydrated`
+       * is what keeps this from becoming "hydrate on every render" — which the class must not do,
+       * because it would resurrect a block the reader just cleared.
+       */
+      if (!existing.hydrated && this.bridge.getDraft(tabId) !== '') {
+        existing.hydrated = true
+        this.hydrate(tabId)
+      }
+      return
+    }
     if (existing !== undefined) this.releaseToGrace(existing)
-    const recorded = recordedConnectionOf(this.bridge.getDraft(tabId))
+    const draft = this.bridge.getDraft(tabId)
+    const recorded = recordedConnectionOf(draft)
     this.tabs.set(tabId, {
       tabId,
       store: createSnapshotStore(initialSqlState(recorded)),
@@ -241,6 +272,9 @@ export class SqlRuntime {
       // A rebind to the same notebook is a page reload or a reopened tab, so the record is read
       // again: the file may have been edited (or produced results) in between.
       autoConnectTried: false,
+      // A blank draft is the one case where there is nothing to hydrate from *yet*; every other
+      // document is read now and never re-read, so a cleared block stays cleared.
+      hydrated: draft !== '',
       queue: [],
       inflight: null,
       stretch: [],
@@ -408,8 +442,23 @@ export class SqlRuntime {
   async autoConnect(tabId: string): Promise<boolean> {
     const tab = this.tabs.get(tabId)
     if (tab === undefined || tab.autoConnectTried) return false
+    const draft = this.bridge.getDraft(tabId)
+    /**
+     * Content has not arrived yet, so there is nothing to act on and the one attempt must not be
+     * spent on it.
+     *
+     * A tab is pushed with an empty draft while its read is in flight, and the panel binds every
+     * SQL notebook it can see — so without this guard the attempt was consumed by a file that had
+     * not been read, `connection` looked absent, and the notebook never auto-connected even after
+     * its content arrived. This is the same hazard the flag above exists for, one step earlier.
+     *
+     * A genuinely blank file lands here too and is simply re-checked on each bind: it is an
+     * in-memory string test with no I/O, and the alternative — treating "empty" as "no database" —
+     * is exactly the mistake being fixed.
+     */
+    if (draft === '') return false
     tab.autoConnectTried = true
-    const document = parseSqlNotebook(this.bridge.getDraft(tabId))
+    const document = parseSqlNotebook(draft)
     // A document this build does not understand is not acted on at all: its `connection` field may
     // mean something else in that version, and opening a database on a guess is the one mistake
     // here that touches something outside the notebook.

@@ -49,6 +49,8 @@
     "tests/sql-notebook-surface.spec.tsx",
     "tests/sql-notebook-create.spec.ts",
     "tests/sql-database-scan.spec.ts",
+    "tests/sql-notebook-scan.spec.ts",
+    "tests/sql-workspace-cache.spec.ts",
     "tests/sql-panel.spec.tsx",
     "tests/sql-schema-tree.spec.ts",
     "tests/sql-connection-status.spec.tsx",

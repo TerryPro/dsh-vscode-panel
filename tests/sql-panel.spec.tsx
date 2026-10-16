@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import React from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,7 +10,9 @@ import type { WorkbenchFileTab } from '../src/client/model/controller.ts'
 import { SqlPanel } from '../src/client/sql/SqlPanel.tsx'
 import { parseSqlNotebook } from '../src/client/sql/sql-notebook-document.ts'
 import { SqlRuntime } from '../src/client/sql/sql-runtime.ts'
+import { SqlWorkspaceCache } from '../src/client/sql/sql-workspace-cache.ts'
 import { WorkbenchApiError } from '../src/client/model/api.ts'
+import type { WorkbenchController } from '../src/client/model/controller.ts'
 
 // The store package pulls zustand/immer, which are not installed for tests.
 vi.mock('@deepseek-ai/dsh-client-store', () => ({
@@ -92,12 +95,26 @@ interface Harness {
   api: Record<string, ReturnType<typeof vi.fn>>
   schema: { sqlTables: ReturnType<typeof vi.fn>; sqlColumns: ReturnType<typeof vi.fn> }
   runtime: SqlRuntime
+  /** Top-level listDirectory mock so the cache tests can assert "no second
+   * scan" without going through the `api` index (which is `Mock | undefined`
+   * under `noUncheckedIndexedAccess`). */
+  listDirectory: ReturnType<typeof vi.fn>
+  /** Top-level readFile mock, same reason as `listDirectory`. */
+  readFile: ReturnType<typeof vi.fn>
+  /** The panel goes through the controller-owned cache, not the API directly;
+   * tests need to read the same cache the panel reads to assert "no second scan". */
+  sqlWorkspaceCache: SqlWorkspaceCache
+  /** The full controller the panel mounts with, so tests can drive
+   * `setWorkspace()` (which is what invalidates the cache) and assert that
+   * the next mount rescans. */
+  controller: WorkbenchController
+  workspaceId: string
   setDraft: ReturnType<typeof vi.fn>
   consumeSidebarAction: ReturnType<typeof vi.fn>
   selectTab: ReturnType<typeof vi.fn>
   openFile: ReturnType<typeof vi.fn>
   connect: (target?: string) => Promise<void>
-  rerender: () => void
+  rerender: (workspaceId?: string) => void
 }
 
 function mount(options: {
@@ -110,8 +127,11 @@ function mount(options: {
   walExpected?: boolean
   databaseKind?: 'file' | 'memory'
   listings?: Record<string, { entries: Array<{ name: string; path: string; kind: 'file' | 'directory' | 'symlink' }>; truncated?: boolean }>
+  /** What `readFile` answers with. The scan parses this, so a test that cares about the resolved
+   *  database hands over real `.sqlnb` text rather than the shared fixture. */
+  readFileContent?: string
 } = {}): Harness {
-  const api = {
+  const api: Record<string, ReturnType<typeof vi.fn>> = {
     sqlOpen: vi.fn((request: { path: string; access?: string }) => Promise.resolve({
       path: request.path,
       access: (request.access ?? 'read-only') as 'read-only' | 'writable',
@@ -169,30 +189,47 @@ function mount(options: {
     }
     return Promise.resolve({ entries: listing.entries, truncated: listing.truncated ?? false })
   })
-  const readFile = vi.fn(() => Promise.resolve({ content: NOTEBOOK_DRAFT }))
+  const readFile = vi.fn(() => Promise.resolve({ content: options.readFileContent ?? NOTEBOOK_DRAFT }))
   const controller = {
     sqlRuntime: runtime,
+    // The panel's mount effect goes through the controller's cache rather than
+    // directly through the API, so the test mock must carry one too. Each
+    // `mount()` gets a fresh cache so tests stay independent — sharing one
+    // across mounts would let the second one see the first scan's result and
+    // hide a regression.
+    sqlWorkspaceCache: new SqlWorkspaceCache(),
+    setWorkspace: vi.fn(),
     setDraft,
     consumeSidebarAction,
     selectTab,
     openFile,
     api: { ...schemaApi, listDirectory, readFile },
-  }
-  const panel = () => (
+  } as unknown as WorkbenchController
+  let activeWorkspaceId = 'workspace-1'
+  const panel = (): React.ReactElement => (
     <SqlPanel
-      controller={controller as never}
-      workspaceId="workspace-1"
+      controller={controller}
+      workspaceId={activeWorkspaceId}
       t={translate}
     />
   )
   const view = render(panel())
-  const rerender = (): void => { view.rerender(panel()) }
+  const rerender = (nextWorkspaceId?: string): void => {
+    if (nextWorkspaceId !== undefined) activeWorkspaceId = nextWorkspaceId
+    view.rerender(panel())
+  }
   async function connect(target = 'demo.db'): Promise<void> {
     await runtime.connect('file:query.sqlnb', target, 'read-only')
     await waitFor(() => { expect(runtime.state('file:query.sqlnb').connection).not.toBeNull() })
   }
 
-  return { view, api, schema: schemaApi, runtime, setDraft, connect, consumeSidebarAction, selectTab, openFile, rerender }
+  return {
+    view, api, schema: schemaApi, runtime,
+    listDirectory, readFile,
+    sqlWorkspaceCache: controller.sqlWorkspaceCache,
+    controller, workspaceId: activeWorkspaceId,
+    setDraft, connect, consumeSidebarAction, selectTab, openFile, rerender,
+  }
 }
 
 /* ── helpers for driving the four-level tree ──────────────────────────── */
@@ -300,6 +337,57 @@ describe('SqlPanel — 结构', () => {
     })
   })
 
+  /**
+   * The reported bug, on the surface the reader reported it on: a notebook full of recorded tables
+   * opened as an empty column.
+   *
+   * The panel binds every SQL notebook it can see on each snapshot, and a tab is pushed with
+   * `draft: ''` while its read is still in flight — so `bind` hydrated from an empty string and
+   * restored nothing. Because a second bind to the same notebook returned early, nothing ever
+   * re-read the file, and the results stayed off the table for the whole session.
+   *
+   * This drives the real order rather than the fixture's convenient one: bind against the loading
+   * tab first, then hand the tab its content and assert the rows arrive.
+   */
+  it('shows the results a notebook records once its file content finishes loading', async () => {
+    const draft = JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{
+        kind: 'sql',
+        source: 'SELECT who FROM city',
+        execution_count: 1,
+        elapsed_ms: 3,
+        results: [{
+          columns: [{ label: 'who', name: 'who', type: 'TEXT' }],
+          rows: [['Tokyo'], ['Osaka']],
+          rowLimit: 1000,
+          truncated: false,
+          columnsDropped: 0,
+          valuesTruncated: 0,
+        }],
+      }],
+    })
+
+    // Step 1: the tab exists but its read has not returned, exactly as `emptyFileTab` leaves it.
+    const loading = { ...notebookTab('query.sqlnb', ''), file: null, loading: true } as WorkbenchFileTab
+    openNotebook(loading)
+    const harness = mount()
+    await waitFor(() => { expect(harness.listDirectory).toHaveBeenCalled() })
+    expect(Object.keys(harness.runtime.state('file:query.sqlnb').cells)).toHaveLength(0)
+
+    // Step 2: the read lands and the tab's draft becomes the document.
+    openNotebook(notebookTab('query.sqlnb', draft))
+    harness.rerender()
+
+    await waitFor(() => {
+      expect(Object.keys(harness.runtime.state('file:query.sqlnb').cells)).toHaveLength(1)
+    })
+    const restored = harness.runtime.state('file:query.sqlnb').cells['sqlnb-0']
+    expect(restored?.blocks[0]?.rows).toEqual([['Tokyo'], ['Osaka']])
+    expect(restored?.executionCount).toBe(1)
+  })
+
   it('re-reads the schema when the collapsed rail asks for it', async () => {
     openNotebook(notebookTab('query.sqlnb'))
     const harness = mount()
@@ -361,17 +449,28 @@ describe('SqlPanel — 只有结构，没有连接控件', () => {
     expect(harness.view.getAllByText(zh['sqlnotebook.schema'])).toHaveLength(1)
   })
 
-  it('has its one refresh button read the tree', async () => {
+  it('has its one refresh button re-scan the workspace and re-read the tree', async () => {
     openNotebook(notebookTab('query.sqlnb'))
     const harness = mount()
     await harness.connect()
 
-    const refresh = harness.view.getByRole('button', { name: zh['sqlnotebook.refreshSchema'] })
-    expect(harness.view.getAllByRole('button', { name: zh['sqlnotebook.refreshSchema'] })).toHaveLength(1)
-    const before = harness.schema.sqlTables.mock.calls.length
+    // The button's accessible name lives on the new key — the panel's refresh
+    // gesture is now "do everything on the screen at once" (workspace list +
+    // active schema), and the old per-schema name would describe only half of
+    // it. Asserting on the new key is also what catches a silent regression
+    // back to the old single-purpose button.
+    const refresh = harness.view.getByRole('button', { name: zh['sqlnotebook.refreshWorkspace'] })
+    expect(harness.view.getAllByRole('button', { name: zh['sqlnotebook.refreshWorkspace'] })).toHaveLength(1)
+    const beforeTables = harness.schema.sqlTables.mock.calls.length
+    const beforeListings = harness.listDirectory.mock.calls.length
     fireEvent.click(refresh)
 
-    await waitFor(() => { expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(before) })
+    await waitFor(() => { expect(harness.schema.sqlTables.mock.calls.length).toBeGreaterThan(beforeTables) })
+    // A click on the refresh button must also force a new workspace walk —
+    // the cached snapshot is invalidated by the gesture, not by the panel
+    // hiding itself. Without the second assertion a "the cache is sticky and
+    // never refreshes" bug would pass this test.
+    await waitFor(() => { expect(harness.listDirectory.mock.calls.length).toBeGreaterThan(beforeListings) })
   })
 
   it('says it is not connected when no notebook is open', async () => {
@@ -388,7 +487,12 @@ describe('SqlPanel — 只有结构，没有连接控件', () => {
 
     expect(harness.view.getByText(zh['sqlnotebook.notConnected'])).toBeTruthy()
     expect(harness.view.getByText(zh['sqlnotebook.connectInToolbar'])).toBeTruthy()
-    expect((harness.view.getByRole('button', { name: zh['sqlnotebook.refreshSchema'] }) as HTMLButtonElement).disabled).toBe(true)
+    // The refresh button stays enabled while the workspace is open: even
+    // without a live connection there is still a workspace to rescan. The
+    // old behaviour disabled it on a missing connection, but the button's
+    // job is now "refresh everything on the screen", and the workspace
+    // list is the half that does not depend on the connection.
+    expect((harness.view.getByRole('button', { name: zh['sqlnotebook.refreshWorkspace'] }) as HTMLButtonElement).disabled).toBe(false)
   })
 })
 
@@ -625,6 +729,54 @@ describe('SqlPanel — 笔记本列表', () => {
     ])
   })
 
+  it('caches the workspace scan: a remount on the same workspace does not scan again', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [{ name: 'query.sqlnb', path: 'query.sqlnb', kind: 'file' }],
+        },
+      },
+    })
+
+    // The first mount paid for one walk; the cache now holds the result.
+    await waitFor(() => { expect(harness.view.queryByText(zh['sqlnotebook.workspaceNotebooksScanning'])).toBeNull() })
+    const afterFirstMount = harness.listDirectory.mock.calls.length
+    expect(harness.sqlWorkspaceCache.current()).not.toBeNull()
+
+    // Remount the panel (as the workbench would after the user collapses and
+    // re-opens the SQL side tab). The cache must serve the snapshot instead
+    // of triggering a second directory listing. This is the whole point of
+    // the cache — without it, every remount would pay for a new walk.
+    harness.rerender()
+    await waitFor(() => { expect(harness.view.queryByText(zh['sqlnotebook.workspaceNotebooksScanning'])).toBeNull() })
+
+    expect(harness.listDirectory.mock.calls.length).toBe(afterFirstMount)
+    expect(harness.sqlWorkspaceCache.current()).not.toBeNull()
+  })
+
+  it('re-scans when the workspace id changes, because the cache is per-workspace', async () => {
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [{ name: 'a.sqlnb', path: 'a.sqlnb', kind: 'file' }],
+        },
+      },
+    })
+    await waitFor(() => { expect(harness.view.queryByText(zh['sqlnotebook.workspaceNotebooksScanning'])).toBeNull() })
+    const beforeSwitch = harness.listDirectory.mock.calls.length
+
+    // Simulate the AppFrame moving to a different workspace: the controller's
+    // `setWorkspace` is the only place that knows, and it invalidates the
+    // cache. The panel's `useEffect` then notices the cache is empty and
+    // walks the new workspace.
+    harness.controller.setWorkspace('workspace-2')
+    harness.sqlWorkspaceCache.invalidate()
+    harness.rerender('workspace-2')
+    await waitFor(() => { expect(harness.listDirectory.mock.calls.length).toBeGreaterThan(beforeSwitch) })
+  })
+
   it('calls controller.openFile with the workspace-relative path of the row that was clicked', async () => {
     openNotebook(notebookTab('query.sqlnb'))
     const harness = mount({
@@ -645,6 +797,59 @@ describe('SqlPanel — 笔记本列表', () => {
       listings: { '': { entries: [] } },
     })
     expect(await harness.view.findByText(zh['sqlnotebook.workspaceNotebooksEmpty'])).toBeTruthy()
+  })
+
+  it('says the list is partial when the walk stopped early', async () => {
+    // `SqlNotebookScan.truncated` had no consumer before this: a workspace the caps cut short drew
+    // the same list as a complete one, so a reader who could not find their notebook had nothing
+    // telling them it might be off the end. The empty state above does not cover it — a partial
+    // list is not an empty one, and it must not be worded as one.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [{ name: 'a.sqlnb', path: 'a.sqlnb', kind: 'file' }],
+          truncated: true,
+        },
+      },
+    })
+
+    expect(await harness.view.findByText(zh['sqlnotebook.scanNotebooksTruncated'])).toBeTruthy()
+    expect(harness.view.queryByText(zh['sqlnotebook.workspaceNotebooksEmpty'])).toBeNull()
+  })
+
+  it('does not claim a complete list when the walk finished', async () => {
+    // The negative control: the notice must be driven by the flag, not painted unconditionally.
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: { '': { entries: [{ name: 'a.sqlnb', path: 'a.sqlnb', kind: 'file' }] } },
+    })
+    await waitFor(() => { expect(harness.view.queryByText(zh['sqlnotebook.workspaceNotebooksScanning'])).toBeNull() })
+
+    expect(harness.view.queryByText(zh['sqlnotebook.scanNotebooksTruncated'])).toBeNull()
+  })
+
+  it('reads the whole notebook when resolving the database a row prints', async () => {
+    // The panel used to hand the scan `content.slice(0, 512)`. A JSON object cannot be parsed from
+    // a prefix of itself, and `connection` is written after `cells` — so for any notebook holding
+    // results the parse threw and the row printed "no database". Asserted on the text the panel
+    // actually hands over, because that slice is where the bug lived.
+    const draft = JSON.stringify({
+      version: 2,
+      cells: [{ kind: 'sql', source: 'SELECT 1', results: [{ columns: [], rows: Array.from({ length: 400 }, (_u, i) => [i]) }] }],
+      connection: { path: 'archive.db', access: 'read-only' },
+    })
+    expect(draft.indexOf('"connection"')).toBeGreaterThan(512)
+    openNotebook(notebookTab('query.sqlnb'))
+    const harness = mount({
+      listings: { '': { entries: [{ name: 'big.sqlnb', path: 'big.sqlnb', kind: 'file' }] } },
+      readFileContent: draft,
+    })
+
+    await waitFor(() => { expect(harness.sqlWorkspaceCache.current()).not.toBeNull() })
+    expect(harness.sqlWorkspaceCache.current()?.notebooks[0]?.explicitDatabase)
+      .toEqual({ path: 'archive.db', name: 'archive.db' })
+    expect(harness.readFile.mock.calls[0]?.[1]).toBe('big.sqlnb')
   })
 
   it('marks the active notebook with an active badge', async () => {

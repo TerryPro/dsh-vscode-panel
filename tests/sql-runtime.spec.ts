@@ -278,6 +278,109 @@ describe('SqlRuntime', () => {
     expect(restored?.elapsedMs).toBe(12)
   })
 
+  /**
+   * The reported bug, second form: the tables were missing when the notebook was *loading*.
+   *
+   * `bind` used to hydrate once and never look again, which is correct only if the tab already
+   * holds its file text. It does not always: `WorkbenchData` pushes a tab with `draft: ''` and
+   * `loading: true`, and the panel binds every SQL notebook it can see on each snapshot — so the
+   * hydration ran against an empty string, restored nothing, and the early return on the next
+   * (identical) bind made that permanent. The reader opened a notebook full of recorded tables and
+   * watched an empty column, while the file held every row the whole time.
+   *
+   * The fixture drives the real order rather than the convenient one: bind first, content second.
+   */
+  it('restores the file’s results when the tab’s content arrives after the bind', () => {
+    const fixture = createRuntime([], '')
+    // Step 1: the panel binds while the read is still in flight.
+    fixture.runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
+    expect(Object.keys(fixture.runtime.state('tab-1').cells)).toHaveLength(0)
+
+    // Step 2: the file's text lands in the tab, exactly as `WorkbenchData` sets it.
+    fixture.addNotebook('query-1.sqlnb', JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{
+        kind: 'sql',
+        source: 'SELECT who FROM city',
+        execution_count: 1,
+        elapsed_ms: 3,
+        results: [{
+          columns: [{ label: 'who', name: 'who' }],
+          rows: [['Tokyo'], ['Osaka']],
+          rowLimit: 1000,
+          truncated: false,
+          columnsDropped: 0,
+          valuesTruncated: 0,
+        }],
+      }],
+    }))
+    // Step 3: the panel binds again — same notebook, so this is the re-bind that used to return
+    // early and leave the screen empty.
+    fixture.runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
+
+    const restored = fixture.runtime.state('tab-1').cells['sqlnb-0']
+    expect(restored?.blocks).toHaveLength(1)
+    expect(restored?.blocks[0]?.rows).toEqual([['Tokyo'], ['Osaka']])
+    expect(restored?.executionCount).toBe(1)
+  })
+
+  it('auto-connects a notebook whose content arrives after the first attempt', async () => {
+    // The same race, one step earlier: the attempt must not be spent on a draft that is not there
+    // yet, or `connection` looks absent and the notebook never connects at all.
+    const fixture = createRuntime([], '')
+    fixture.runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
+    expect(await fixture.runtime.autoConnect('tab-1')).toBe(false)
+    expect(fixture.api.sqlOpen).not.toHaveBeenCalled()
+
+    fixture.addNotebook('query-1.sqlnb', JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'writable' },
+      cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    }))
+    fixture.runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
+    expect(await fixture.runtime.autoConnect('tab-1')).toBe(true)
+
+    expect(fixture.api.sqlOpen).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1', notebook: 'query-1.sqlnb', path: 'demo.db', access: 'writable',
+    })
+  })
+
+  /**
+   * The other half of that fix, and the reason it is a flag rather than "hydrate on every bind":
+   * hydration assigns `state.cells` wholesale from the file, so re-running it unconditionally would
+   * bring back a block the reader had just cleared — a viewer undoing a gesture, which is worse
+   * than the bug being fixed.
+   */
+  it('does not resurrect a cleared block when the notebook is bound again', () => {
+    const fixture = createRuntime([], JSON.stringify({
+      version: 2,
+      connection: { path: 'demo.db', access: 'read-only' },
+      cells: [{
+        kind: 'sql',
+        source: 'SELECT who FROM city',
+        execution_count: 1,
+        elapsed_ms: 3,
+        results: [{
+          columns: [{ label: 'who', name: 'who' }],
+          rows: [['Tokyo']],
+          rowLimit: 1000,
+          truncated: false,
+          columnsDropped: 0,
+          valuesTruncated: 0,
+        }],
+      }],
+    }))
+    expect(Object.keys(fixture.runtime.state('tab-1').cells)).toHaveLength(1)
+
+    fixture.runtime.clearOutputs('tab-1')
+    expect(Object.keys(fixture.runtime.state('tab-1').cells)).toHaveLength(0)
+
+    fixture.runtime.bind('tab-1', 'workspace-1', 'query-1.sqlnb')
+
+    expect(Object.keys(fixture.runtime.state('tab-1').cells)).toHaveLength(0)
+  })
+
   it('leaves a notebook with no recorded database unconnected rather than guessing one', async () => {
     // `:memory:` would be a plausible default and the wrong one: a notebook that never named a
     // database must not have one chosen for it, or its first query would run against an empty

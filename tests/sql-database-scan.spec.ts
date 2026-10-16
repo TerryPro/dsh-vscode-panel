@@ -74,6 +74,39 @@ describe('scanDatabases', () => {
     expect(result.databases).toEqual([])
   })
 
+  /**
+   * The measured reason this rule exists: in a repository with 1466 directories under
+   * `node_modules`, the walk spent 181 of its 200 listings there and found only the databases in
+   * `examples/`. This walk runs on the notebook toolbar, so that cost lands on the critical path
+   * of opening a notebook — and `truncated` cannot explain that the missing entries were all
+   * third-party.
+   */
+  it('never descends into node_modules', async () => {
+    const result = await scan({
+      '': listing('', [directory('node_modules'), directory('app'), file('root.db')]),
+      app: listing('app', [file('app/orders.db')]),
+    })
+
+    expect(result.requested).toEqual(['', 'app'])
+    expect(result.databases.map(entry => entry.path)).toEqual(['app/orders.db', 'root.db'])
+    expect(result.truncated).toBe(false)
+  })
+
+  it('leaves budget for the workspace when a dependency tree is huge', async () => {
+    // The real shape: one root entry named `node_modules`, and the hundreds of packages only
+    // appear once that folder is listed. Skipping it means they are never queued at all.
+    const packages = Array.from({ length: 300 }, (_u, i) => directory(`node_modules/p${i}`))
+    const result = await scan({
+      '': listing('', [directory('node_modules'), directory('app')]),
+      node_modules: listing('node_modules', packages),
+      app: listing('app', [file('app/q.db')]),
+    }, { maxDirectories: 5 })
+
+    expect(result.databases.map(entry => entry.path)).toEqual(['app/q.db'])
+    expect(result.requested).toEqual(['', 'app'])
+    expect(result.truncated).toBe(false)
+  })
+
   it('matches the extension whatever case the file uses', async () => {
     const result = await scan({
       '': listing('', [file('Reports/SALES.DB')]),
