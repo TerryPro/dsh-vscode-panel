@@ -9,3 +9,5 @@ coverage/
 .qoder/
 # examples/ 只作本地调试素材，不再随仓库提交。
 examples/
+.archify/
+.trae-html-share-packages/
