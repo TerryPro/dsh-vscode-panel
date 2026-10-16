@@ -23,7 +23,16 @@ import { appendSqlCell } from './sql-notebook-document.ts'
 import { activeSqlNotebook } from './sql-notebook-tab.ts'
 import { quotedSqlIdentifier, selectAllFrom } from './sql-schema-tree.ts'
 import { SqlRuntime, type SqlNotebookState } from './sql-runtime.ts'
-import { SqlWorkspaceCache, type SqlWorkspaceScanner, type SqlWorkspaceSnapshot } from './sql-workspace-cache.ts'
+import {
+  sqlWorkspaceScanner,
+  SQL_FILTER_ALL,
+  SQL_FILTER_UNASSOCIATED,
+  SqlWorkspaceCache,
+  type SqlWorkspaceScanner,
+  type SqlWorkspaceSnapshot,
+} from './sql-workspace-cache.ts'
+import { createSqlNotebook, SQL_NOTEBOOK_NAME_ATTEMPTS } from './sql-notebook-create.ts'
+import { parentPath } from '../../shared/path-name.ts'
 import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
 import {
   SqlTreeNode,
@@ -199,29 +208,18 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   const connectedPath = connection?.path ?? null
 
   /**
-   * Wrap the controller's `listDirectory`/`readFile` so the cache only ever
-   * sees the contract it cares about. Wrapping here (rather than at the
-   * controller) keeps the cache free of any WorkbenchController-shaped input.
+   * The scanner both SQL surfaces walk the workspace with.
+   *
+   * Built by the shared factory rather than hand-written here, because the `readNotebook` half
+   * carries the rule that must not drift: it returns the **whole** file, since `connection` is
+   * appended after `cells` and a sliced read silently answers "no database" for every notebook
+   * holding results (measured on `examples/`: 21 of 24). One definition, used by the panel and by
+   * the notebook toolbar, so the two cannot disagree about what a notebook records.
    */
-  const scanner = useMemo<SqlWorkspaceScanner | null>(() => {
-    if (workspaceId === undefined) return null
-    return {
-      list: (path: string) => controller.api.listDirectory(workspaceId, path),
-      /**
-       * The whole file, not its head.
-       *
-       * The scan parses this to read `connection`, which `writeSqlNotebookConnection` appends
-       * after `cells` — so in every notebook that has ever recorded a result, the field sits past
-       * the first kilobyte. Slicing the text here does not shorten a parse, it corrupts one: the
-       * prefix is not valid JSON, `JSON.parse` throws, and the row silently reports "no database"
-       * for a notebook that names one. Measured on `examples/`: 21 of 24 notebooks read that way.
-       */
-      readNotebook: async (path: string) => {
-        const file = await controller.api.readFile(workspaceId, path)
-        return file.content
-      },
-    }
-  }, [controller, workspaceId])
+  const scanner = useMemo<SqlWorkspaceScanner | null>(
+    () => (workspaceId === undefined ? null : sqlWorkspaceScanner(controller.api, workspaceId)),
+    [controller, workspaceId],
+  )
 
   const loadSchema = useCallback((): void => {
     if (workspaceId === undefined || activePath === null) return
@@ -422,14 +420,153 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
     void controller.openFile(workspaceId, path)
   }, [controller, workspaceId])
 
+  /**
+   * Which database the list is filtered to.
+   *
+   * The value itself lives on the cache, because the choice has to outlive this panel unmounting —
+   * the sidebar swaps panels on every mode change, and coming back to a list that had silently
+   * widened to "everything" would read as the panel forgetting an instruction it was given. The
+   * cache also answers per workspace, so a value naming a database in another workspace cannot
+   * filter this one. `filterVersion` is only what makes React paint the change.
+   */
+  const [filterVersion, setFilterVersion] = useState(0)
+  const databaseFilter = useMemo(() => {
+    void filterVersion
+    if (workspaceId === undefined) return SQL_FILTER_ALL
+    return controller.sqlWorkspaceCache.databaseFilter(workspaceId)
+  }, [controller, workspaceId, filterVersion])
+
+  const chooseDatabaseFilter = useCallback((value: string): void => {
+    if (workspaceId === undefined) return
+    controller.sqlWorkspaceCache.setDatabaseFilter(workspaceId, value)
+    setFilterVersion(current => current + 1)
+  }, [controller, workspaceId])
+
+  /**
+   * The notebooks the filter keeps.
+   *
+   * Matched on `explicitDatabase` — the database the notebook's own file records — which is the
+   * same field the row's second line prints. That shared source is the point: a notebook can never
+   * be filed under one database while its row names another. The runtime's live connection is
+   * deliberately *not* consulted, because a notebook that was connected but never saved would then
+   * be listed under a database its row does not mention.
+   */
+  const visibleNotebooks = useMemo(() => {
+    const all = workspaceScan?.notebooks ?? []
+    if (databaseFilter === SQL_FILTER_ALL) return all
+    if (databaseFilter === SQL_FILTER_UNASSOCIATED) {
+      return all.filter(choice => choice.explicitDatabase === null)
+    }
+    return all.filter(choice => choice.explicitDatabase?.path === databaseFilter)
+  }, [workspaceScan, databaseFilter])
+
+  /**
+   * The filter's options: the walk's databases, plus the selected one when the walk no longer
+   * names it.
+   *
+   * A `<select>` whose `value` matches no `<option>` renders **blank** rather than as the value it
+   * was given — the browser falls back to the first option. The walk can stop listing a database
+   * the reader is filtered by (it was deleted, or a cap cut the list short), and without this the
+   * control would show "全部数据库" while the list underneath stayed filtered. Same fix, and the
+   * same reason, as the toolbar's database picker.
+   */
+  const filterOptions = useMemo(() => {
+    const walked = workspaceScan?.databases ?? []
+    if (databaseFilter === SQL_FILTER_ALL || databaseFilter === SQL_FILTER_UNASSOCIATED) return walked
+    if (walked.some(choice => choice.path === databaseFilter)) return walked
+    const name = databaseFilter.split('/').at(-1) ?? databaseFilter
+    return [{ path: databaseFilter, name }, ...walked]
+  }, [workspaceScan, databaseFilter])
+
+  const canCreateOnDatabase = databaseFilter !== SQL_FILTER_ALL
+    && databaseFilter !== SQL_FILTER_UNASSOCIATED
+    && workspaceId !== undefined
+
+  /**
+   * Create a notebook on the database the list is filtered to.
+   *
+   * The same call the file tree makes when a database is double-clicked — same seed, same
+   * directory rule (the database's own folder), same generated `库名-N.sqlnb` name — because two
+   * entries that create "a notebook for this database" must not disagree about where it goes.
+   *
+   * The explicit `invalidate()` is the part this feature cannot work without: nothing watches the
+   * filesystem, so the only party that knows a file appeared is the one that wrote it. Without it
+   * the walk keeps answering from a snapshot taken before the write, and the notebook the reader
+   * just asked for is missing from the list they asked for it from.
+   */
+  const createNotebookOnDatabase = useCallback((): void => {
+    if (workspaceId === undefined) return
+    if (databaseFilter === SQL_FILTER_ALL || databaseFilter === SQL_FILTER_UNASSOCIATED) return
+    const target = workspaceId
+    const database = databaseFilter
+    void createSqlNotebook({
+      api: controller.api,
+      workspaceId: target,
+      directory: parentPath(database),
+      seed: 'database',
+      database,
+    }).then(
+      (path) => {
+        if (path === null) {
+          setSchemaProblem(t('files.sqlNotebookNoName', { attempts: String(SQL_NOTEBOOK_NAME_ATTEMPTS) }))
+          return
+        }
+        controller.sqlWorkspaceCache.invalidate()
+        ensureWorkspaceScan()
+        void controller.openFile(target, path)
+      },
+      (error: unknown) => { setSchemaProblem(messageOf(error)) },
+    )
+  }, [controller, databaseFilter, ensureWorkspaceScan, t, workspaceId])
+
   // Top half: notebook list (workspace scan)
   const notebookListContent = (
     <div className={css.notebookList}>
+      {/*
+        The filter sits inside the list rather than in the panel header: the header is shared with
+        the schema tree below, so a control there reads as scoping the whole panel, and this one
+        only narrows the list. The repo's own rule for where a note belongs applies to controls too
+        — the thing that explains the list belongs beside it.
+      */}
+      <div className={css.listFilter}>
+        <label className={css.filterField}>
+          <select
+            className={css.filterSelect}
+            aria-label={t('sqlnotebook.filterByDatabase')}
+            value={databaseFilter}
+            disabled={workspaceId === undefined}
+            onChange={(event) => { chooseDatabaseFilter(event.target.value) }}
+          >
+            <option value={SQL_FILTER_ALL}>{t('sqlnotebook.filterAllDatabases')}</option>
+            <option value={SQL_FILTER_UNASSOCIATED}>{t('sqlnotebook.filterUnassociated')}</option>
+            {filterOptions.map(choice => (
+              <option key={choice.path} value={choice.path}>{choice.path}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className={css.filterAction}
+          // Disabled rather than hidden when no database is picked: a control that appears and
+          // disappears as the reader moves the dropdown beside it is harder to aim at than one
+          // that is always there and says when it does not apply.
+          disabled={!canCreateOnDatabase}
+          aria-label={t('sqlnotebook.newNotebookOnDatabase')}
+          title={t('sqlnotebook.newNotebookOnDatabase')}
+          onClick={createNotebookOnDatabase}
+        >
+          ＋
+        </button>
+      </div>
       {workspaceScan === null || scanning && workspaceScan.notebooks.length === 0
         ? <div className={css.muted}>{t('sqlnotebook.workspaceNotebooksScanning')}</div>
         : workspaceScan.notebooks.length === 0
           ? <div className={css.notebookListEmpty}>{t('sqlnotebook.workspaceNotebooksEmpty')}</div>
-          : workspaceScan.notebooks.map((choice) => {
+          : visibleNotebooks.length === 0
+            // A filtered-out list is not an empty workspace, and saying so would be a plain
+            // falsehood: the notebooks exist, the reader asked not to see them.
+            ? <div className={css.notebookListEmpty}>{t('sqlnotebook.databaseNotebooksEmpty')}</div>
+            : visibleNotebooks.map((choice) => {
             const openTab = openPathsMap.get(choice.path)
             const isOpen = openTab !== undefined
             const isActive = isOpen && openTab.id === activeTabId
@@ -449,12 +586,14 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       {/*
         The walk's own admission, said where its result is.
 
-        `SqlNotebookScan.truncated` has existed since the scan was written and had no consumer:
-        a workspace the caps cut short drew exactly the same list as a complete one, so a reader
+        A workspace the caps cut short drew exactly the same list as a complete one, so a reader
         who could not find their notebook had nothing telling them it might be off the end. The
         empty case above does not cover this — a partial list is not an empty one.
+
+        The notebooks' flag specifically: the walk keeps one per kind, and the database list being
+        cut short says nothing about whether this list is complete.
       */}
-      {workspaceScan?.truncated === true && (
+      {workspaceScan?.notebooksTruncated === true && (
         <div className={css.muted}>{t('sqlnotebook.scanNotebooksTruncated')}</div>
       )}
     </div>

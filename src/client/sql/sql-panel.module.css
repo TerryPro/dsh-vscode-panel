@@ -590,6 +590,76 @@
 }
 
 /*
+ * The list's own header: which database to show, and the one thing to do with it.
+ *
+ * Inside the list rather than in the panel header above, because that header is shared with the
+ * schema tree — a control there reads as scoping the whole panel, and this one only narrows the
+ * list. Sticky so it stays reachable while a long list scrolls under it.
+ */
+.listFilter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-block-end: 4px;
+  background: var(--dsw-alias-bg-base);
+}
+
+.filterField {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.filterSelect {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  /* The path is the label and a path is long; the control must not push the button off the row. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filterSelect:disabled {
+  opacity: 0.5;
+}
+
+.filterAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.filterAction:hover:not(:disabled) {
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.filterAction:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/*
  * The toolbar of the "Open" pane. It is the pane's header, not a container for the
  * content, so it is fixed-height and never scrolls. The title is uppercase so the
  * two panes read as parallel siblings rather than as two items in one list.

@@ -17,7 +17,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useSyncExternalStore } from 'react'
 import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { DirectoryListing } from '../../shared/contracts.ts'
 import { SQL_MEMORY_TARGET, type SqlAccess, type SqlCellKind } from '../../shared/sql-protocol.ts'
 import { CodeEditor } from '../editor/CodeEditor.tsx'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
@@ -43,6 +42,7 @@ import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.t
 import { buildSqlNotebookOutline } from './sql-notebook-outline.ts'
 import { connectionReadout } from './sql-connection-readout.ts'
 import { useDatabaseScan } from './use-database-scan.ts'
+import type { SqlWorkspaceCache, SqlWorkspaceScanner } from './sql-workspace-cache.ts'
 import {
   applySqlNotebookEdit,
   cellIndexFromId,
@@ -165,7 +165,15 @@ interface SqlNotebookSurfaceProps {
   dirty: boolean
   saving: boolean
   runtime: SqlRuntime
-  listDirectory: (path: string) => Promise<DirectoryListing>
+  /**
+   * The workspace walk's cache, and the scanner that fills it.
+   *
+   * Passed in rather than walked here because the panel runs the *same* traversal for its notebook
+   * list: one walk collects both kinds, and a second one per surface is the serial round-trip cost
+   * this shape exists to avoid. See `use-database-scan.ts`.
+   */
+  workspaceCache: SqlWorkspaceCache
+  scanner: SqlWorkspaceScanner
   onEdit: (text: string) => void
   onSave: () => void
   labels: SqlNotebookLabels
@@ -183,7 +191,8 @@ export function SqlNotebookSurface({
   dirty,
   saving,
   runtime,
-  listDirectory,
+  workspaceCache,
+  scanner,
   onEdit,
   onSave,
   labels,
@@ -278,10 +287,13 @@ export function SqlNotebookSurface({
   const memoryPicked = pickPath === SQL_MEMORY_TARGET
   const connectAccess: SqlAccess = memoryPicked ? 'writable' : pickAccess
 
-  // The workspace walk is what the picker lists. The toolbar is the only surface that lists it now
-  // (ADR 0008 moved the sidebar's copy away), so the state around it still lives in `useDatabaseScan`
-  // rather than being re-derived here.
-  const { scan, scanning, rescan } = useDatabaseScan(listDirectory)
+  // The workspace walk is what the picker lists, read through the shared cache so opening a
+  // notebook does not start a second traversal of the tree the panel already walked.
+  const { databases, scanning, truncated: walkTruncated, rescan } = useDatabaseScan(
+    workspaceCache,
+    workspaceId,
+    scanner,
+  )
 
   /**
    * The options the picker offers: the walk's list, plus the recorded path if the walk has not
@@ -300,13 +312,12 @@ export function SqlNotebookSurface({
    * produces no duplicate row.
    */
   const pickerOptions = useMemo(() => {
-    const walked = scan?.databases ?? []
-    if (pickPath === '' || pickPath === SQL_MEMORY_TARGET) return walked
-    if (walked.some(choice => choice.path === pickPath)) return walked
+    if (pickPath === '' || pickPath === SQL_MEMORY_TARGET) return databases
+    if (databases.some(choice => choice.path === pickPath)) return databases
     // The name is what the row shows; the path is the value. Same derivation the walk uses.
     const name = pickPath.split('/').at(-1) ?? pickPath
-    return [{ path: pickPath, name }, ...walked]
-  }, [scan, pickPath])
+    return [{ path: pickPath, name }, ...databases]
+  }, [databases, pickPath])
 
   /**
    * Apply one edit to the file text, or refuse it out loud.
@@ -585,7 +596,7 @@ export function SqlNotebookSurface({
             // The list's own caveat, said on the list: a short list that claims to be everything the
             // workspace holds is the failure `scanDatabases` carries `truncated` to prevent, and the
             // reader is only wondering that while their pointer is here.
-            title={scan?.truncated === true ? labels.scanTruncated : undefined}
+            title={walkTruncated ? labels.scanTruncated : undefined}
             value={pickPath}
             disabled={!canConnect}
             onChange={event => { setPickPath(event.target.value) }}

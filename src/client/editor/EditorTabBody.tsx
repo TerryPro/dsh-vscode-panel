@@ -30,7 +30,7 @@ import { isSqlNotebookPath } from '../sql/sql-notebook-document.ts'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../sql/SqlNotebookSurface.tsx'
 import { SqlConnectionStatus } from '../sql/SqlConnectionStatus.tsx'
 import type { SqlResultLabels } from '../sql/SqlResultBlockView.tsx'
-import type { DirectoryListing } from '../../shared/contracts.ts'
+import { sqlWorkspaceScanner, type SqlWorkspaceScanner } from '../sql/sql-workspace-cache.ts'
 import { MarkdownOutline } from '../markdown/MarkdownOutline.tsx'
 import { extractMarkdownOutline } from '../markdown/markdown-outline.ts'
 import { attachSplitScrollSync } from '../markdown/markdown-split-scroll.ts'
@@ -343,10 +343,13 @@ export function EditorTabBody({
       page: String(page), pageCount: String(pageCount), from: String(from), to: String(to),
     }),
   }), [t])
-  // Stable across renders so the surface can keep it in an effect dependency: a fresh closure
-  // every render would restart the workspace scan on each keystroke in a cell.
-  const sqlListDirectory = useMemo<(directory: string) => Promise<DirectoryListing>>(
-    () => (directory: string) => controller.api.listDirectory(workspaceId, directory),
+  /**
+   * Stable across renders so the surface can keep it in an effect dependency: a fresh closure
+   * every render would restart the workspace scan on each keystroke in a cell. One scanner for
+   * both SQL surfaces, so the walk they share is one walk.
+   */
+  const sqlScanner = useMemo<SqlWorkspaceScanner>(
+    () => sqlWorkspaceScanner(controller.api, workspaceId),
     [controller, workspaceId],
   )
   // Outline only makes sense where a rendered preview is shown (preview or split).
@@ -445,7 +448,8 @@ export function EditorTabBody({
         dirty={tab.dirty}
         saving={tab.saving}
         runtime={controller.sqlRuntime}
-        listDirectory={sqlListDirectory}
+        workspaceCache={controller.sqlWorkspaceCache}
+        scanner={sqlScanner}
         onEdit={text => { controller.setDraft(text, 'input', tab.id) }}
         onSave={() => { void controller.save(tab.id) }}
         labels={sqlNotebookLabels}

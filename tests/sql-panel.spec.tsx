@@ -130,7 +130,20 @@ function mount(options: {
   /** What `readFile` answers with. The scan parses this, so a test that cares about the resolved
    *  database hands over real `.sqlnb` text rather than the shared fixture. */
   readFileContent?: string
+  /**
+   * Per-path notebook text, for the filter tests.
+   *
+   * They need notebooks that record *different* databases, which one shared answer cannot express —
+   * and the filter's whole contract is that it files a notebook by what its own file records.
+   */
+  readFileByPath?: Record<string, string>
+  /** Make every generated notebook name collide, the way a full folder does. */
+  createFileRefuses?: boolean
 } = {}): Harness {
+  // The filter cases are about the *list*, which reads the workspace walk rather than the open
+  // tabs, so they mount over a workbench with no notebook open. `afterEach` empties this between
+  // cases; without a shape here those mounts reach `activeSqlNotebook` with `tabs` undefined.
+  workbench.current = { activeTabId: undefined, tabs: [], ...workbench.current }
   const api: Record<string, ReturnType<typeof vi.fn>> = {
     sqlOpen: vi.fn((request: { path: string; access?: string }) => Promise.resolve({
       path: request.path,
@@ -189,7 +202,25 @@ function mount(options: {
     }
     return Promise.resolve({ entries: listing.entries, truncated: listing.truncated ?? false })
   })
-  const readFile = vi.fn(() => Promise.resolve({ content: options.readFileContent ?? NOTEBOOK_DRAFT }))
+  const readFile = vi.fn((_ws: string, path: string) => Promise.resolve({
+    content: options.readFileByPath?.[path] ?? options.readFileContent ?? NOTEBOOK_DRAFT,
+  }))
+  /**
+   * The two calls `createSqlNotebook` makes, mocked at the API boundary rather than inside it.
+   *
+   * The panel's "create on this database" reuses the file tree's own creation path, so these are
+   * the only two verbs it needs; stubbing `createSqlNotebook` itself would let the test assert a
+   * call shape while the real naming, seeding and `connection` record went unexercised.
+   */
+  const createFile = vi.fn((_ws: string, path: string) => {
+    if (options.createFileRefuses === true) return Promise.reject(new WorkbenchApiError('FS_ALREADY_EXISTS', '已存在'))
+    return Promise.resolve({ path })
+  })
+  const saveFile = vi.fn((_ws: string, path: string) => Promise.resolve({ path, version: '1' }))
+  // Hung on the outer `api` as well as the controller's, so the filter cases can assert the two
+  // verbs the creation path uses without reaching through `controller.api`.
+  api['createFile'] = createFile
+  api['saveFile'] = saveFile
   const controller = {
     sqlRuntime: runtime,
     // The panel's mount effect goes through the controller's cache rather than
@@ -203,7 +234,7 @@ function mount(options: {
     consumeSidebarAction,
     selectTab,
     openFile,
-    api: { ...schemaApi, listDirectory, readFile },
+    api: { ...schemaApi, listDirectory, readFile, createFile, saveFile },
   } as unknown as WorkbenchController
   let activeWorkspaceId = 'workspace-1'
   const panel = (): React.ReactElement => (
@@ -1066,6 +1097,205 @@ describe('SqlPanel — 上下两部分', () => {
     const bottomPane = panes[panes.length - 1]
     expect(bottomPane).toBeDefined()
     expect(bottomPane!.contains(tree)).toBe(true)
+  })
+})
+
+/* ── 按数据库筛选 ─────────────────────────────────────────────────── */
+
+/**
+ * The filter narrows the notebook list by the database each notebook's own file records.
+ *
+ * The cases below are the ones that distinguish a *filter* from a second connection surface:
+ * it must not open anything, it must file a notebook by its record rather than by its live
+ * connection, and its empty state must not claim the workspace is empty.
+ */
+describe('SqlPanel — 按库筛选', () => {
+  const noteOn = (database: string | null): string => JSON.stringify({
+    version: 2,
+    cells: [{ kind: 'sql', source: 'SELECT 1' }],
+    ...(database === null ? {} : { connection: { path: database, access: 'read-only' } }),
+  })
+
+  /** Three notebooks: two on `demo.db`, one on `orders.db`, one recording nothing. */
+  function workspace(): ReturnType<typeof mount> {
+    workbench.current = { activeTabId: undefined, tabs: [] }
+    return mount({
+      listings: {
+        '': {
+          entries: [
+            { name: 'a.sqlnb', path: 'a.sqlnb', kind: 'file' },
+            { name: 'b.sqlnb', path: 'b.sqlnb', kind: 'file' },
+            { name: 'c.sqlnb', path: 'c.sqlnb', kind: 'file' },
+            { name: 'd.sqlnb', path: 'd.sqlnb', kind: 'file' },
+            { name: 'demo.db', path: 'demo.db', kind: 'file' },
+            { name: 'orders.db', path: 'orders.db', kind: 'file' },
+          ],
+        },
+      },
+      readFileByPath: {
+        'a.sqlnb': noteOn('demo.db'),
+        'b.sqlnb': noteOn('demo.db'),
+        'c.sqlnb': noteOn('orders.db'),
+        'd.sqlnb': noteOn(null),
+      },
+    })
+  }
+
+  const filterOf = (view: { getByRole: ReturnType<typeof render>['getByRole'] }): HTMLSelectElement =>
+    view.getByRole('combobox', { name: zh['sqlnotebook.filterByDatabase'] }) as HTMLSelectElement
+
+  it('shows every notebook until a database is chosen', async () => {
+    const harness = workspace()
+
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+    for (const name of ['a.sqlnb', 'b.sqlnb', 'c.sqlnb', 'd.sqlnb']) {
+      expect(harness.view.queryByText(name)).not.toBeNull()
+    }
+    expect(filterOf(harness.view).value).toBe('')
+  })
+
+  it('lists only the notebooks recording the chosen database', async () => {
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+
+    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+
+    await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).toBeNull() })
+    expect(harness.view.queryByText('a.sqlnb')).not.toBeNull()
+    expect(harness.view.queryByText('b.sqlnb')).not.toBeNull()
+    // A notebook that records no database is not on `demo.db`, so it is not in this list.
+    expect(harness.view.queryByText('d.sqlnb')).toBeNull()
+  })
+
+  it('has its own option for the notebooks that record no database', async () => {
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('d.sqlnb')).not.toBeNull() })
+
+    fireEvent.change(filterOf(harness.view), { target: { value: '\u0000unassociated' } })
+
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).toBeNull() })
+    expect(harness.view.queryByText('d.sqlnb')).not.toBeNull()
+  })
+
+  /**
+   * The assertion that makes this a filter and not a second connection surface (ADR 0008).
+   *
+   * Nothing about choosing a database may reach the Host's connection layer: no handle is opened,
+   * none is closed, and no notebook's target changes. If a later change ever "helpfully" connects
+   * on the reader's behalf, this is the case that fails.
+   */
+  it('opens no connection and touches no handle when a database is chosen', async () => {
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+
+    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).toBeNull() })
+    fireEvent.change(filterOf(harness.view), { target: { value: '' } })
+    await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).not.toBeNull() })
+
+    expect(harness.api['sqlOpen']).not.toHaveBeenCalled()
+    expect(harness.api['sqlClose']).not.toHaveBeenCalled()
+  })
+
+  it('says the database has no notebooks rather than that the workspace has none', async () => {
+    // `orders.db` holds one notebook; `empty.db` holds none. The difference matters because the
+    // workspace-wide sentence is false here — the reader's notebooks are on screen, just not
+    // under the database they picked, and telling them "no notebooks yet" sends them looking for
+    // files that already exist.
+    const harness = mount({
+      listings: {
+        '': {
+          entries: [
+            { name: 'c.sqlnb', path: 'c.sqlnb', kind: 'file' },
+            { name: 'empty.db', path: 'empty.db', kind: 'file' },
+          ],
+        },
+      },
+      readFileByPath: { 'c.sqlnb': noteOn('orders.db') },
+    })
+    await waitFor(() => { expect(harness.view.queryByText('c.sqlnb')).not.toBeNull() })
+
+    fireEvent.change(filterOf(harness.view), { target: { value: 'empty.db' } })
+
+    await waitFor(() => {
+      expect(harness.view.queryByText(zh['sqlnotebook.databaseNotebooksEmpty'])).not.toBeNull()
+    })
+    expect(harness.view.queryByText(zh['sqlnotebook.workspaceNotebooksEmpty'])).toBeNull()
+  })
+
+  it('keeps the filter when the panel unmounts and comes back', async () => {
+    // The sidebar swaps panels on every mode change, so a filter held in component state would be
+    // silently dropped the moment the reader looked at another view — and the list would come back
+    // showing notebooks they had just narrowed away. Asserted through the real controller and its
+    // real cache, because that shared instance is what carries the choice between the two mounts.
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+    fireEvent.change(filterOf(harness.view), { target: { value: 'orders.db' } })
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).toBeNull() })
+
+    harness.view.unmount()
+    const remounted = render(
+      <SqlPanel controller={harness.controller} workspaceId="workspace-1" t={translate} />,
+    )
+
+    await waitFor(() => { expect(remounted.queryByText('c.sqlnb')).not.toBeNull() })
+    expect(filterOf(remounted).value).toBe('orders.db')
+    expect(remounted.queryByText('a.sqlnb')).toBeNull()
+  })
+
+  it('creates the notebook in the database’s own folder and opens it', async () => {
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    fireEvent.click(harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }))
+
+    await waitFor(() => { expect(harness.api['createFile']).toHaveBeenCalled() })
+    const created = harness.api['createFile']?.mock.calls[0]
+    // A root database -> a root notebook, named after the database the way `createSqlNotebook`
+    // does. The sibling `FileTree` double-click lands in the same place by the same call.
+    expect(created?.[1]).toBe('demo-1.sqlnb')
+    expect(harness.api['saveFile']).toHaveBeenCalled()
+    await waitFor(() => { expect(harness.openFile).toHaveBeenCalled() })
+  })
+
+  it('refuses to create a notebook while no database is chosen', async () => {
+    // "All databases" and "no database recorded" are not databases, so there is no folder to put a
+    // notebook in and no target to record. Disabled rather than hidden, so the button does not
+    // appear and disappear as the reader moves the control beside it.
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+
+    const button = harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(harness.api['createFile']).not.toHaveBeenCalled()
+
+    fireEvent.change(filterOf(harness.view), { target: { value: '\u0000unassociated' } })
+    await waitFor(() => {
+      expect((harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }) as HTMLButtonElement).disabled).toBe(true)
+    })
+  })
+
+  /**
+   * Creating a notebook is the one thing that makes the cache wrong without the workspace changing.
+   *
+   * The walk has no watcher, so the only party that knows a file appeared is the one that wrote it.
+   * Asserted as a *second walk* rather than as "invalidate was called": the point is that the new
+   * notebook can appear in the filtered list it was created from, and a spy on the cache would pass
+   * even if the panel never re-read it.
+   */
+  it('rescans after creating, so the new notebook can appear in the list', async () => {
+    const harness = workspace()
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+    const walksBefore = harness.listDirectory.mock.calls.length
+
+    fireEvent.change(filterOf(harness.view), { target: { value: 'demo.db' } })
+    fireEvent.click(harness.view.getByRole('button', { name: zh['sqlnotebook.newNotebookOnDatabase'] }))
+
+    await waitFor(() => { expect(harness.openFile).toHaveBeenCalled() })
+    await waitFor(() => {
+      expect(harness.listDirectory.mock.calls.length).toBeGreaterThan(walksBefore)
+    })
   })
 })
 

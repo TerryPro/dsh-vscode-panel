@@ -11,6 +11,7 @@ import type { SqlResultBlock } from '../src/shared/sql-protocol.ts'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../src/client/sql/SqlNotebookSurface.tsx'
 import type { SqlResultLabels } from '../src/client/sql/SqlResultBlockView.tsx'
 import { SqlRuntime } from '../src/client/sql/sql-runtime.ts'
+import { SqlWorkspaceCache } from '../src/client/sql/sql-workspace-cache.ts'
 import { WorkbenchApiError } from '../src/client/model/api.ts'
 import { sqlBlock } from './sql-block-fixture.ts'
 import { parseSqlNotebook, SQLNB_VERSION } from '../src/client/sql/sql-notebook-document.ts'
@@ -268,6 +269,16 @@ function open(draft: string, options: {
     ? new Promise<never>(() => undefined)
     : Promise.resolve(path === '' ? root : { path, entries: [], truncated: false }))
   /**
+   * A real cache over the fake directory, not a stub of one.
+   *
+   * The surface reads its picker through the shared workspace cache now — that sharing is what
+   * keeps the toolbar from walking the tree a second time — so a fixture that handed it a canned
+   * list would stop covering the path the app actually takes. `listDirectory` stays the one seam,
+   * which is also what lets `holdScan` mean what it says.
+   */
+  const workspaceCache = new SqlWorkspaceCache()
+  const scanner = { list: listDirectory, readNotebook: () => Promise.resolve(draft) }
+  /**
    * The draft held in state, the way the file tab holds it.
    *
    * A fixed prop would let a reorder test assert on the text the surface wrote while the screen
@@ -290,7 +301,8 @@ function open(draft: string, options: {
         dirty={false}
         saving={false}
         runtime={runtime}
-        listDirectory={listDirectory as never}
+        workspaceCache={workspaceCache}
+        scanner={scanner}
         onEdit={next => { box.current = next; onEdit(next); setText(next) }}
         onSave={onSave}
         labels={labels}
@@ -533,7 +545,11 @@ describe('SqlNotebookSurface 文档层', () => {
         dirty={false}
         saving={false}
         runtime={runtime}
-        listDirectory={vi.fn(() => Promise.resolve({ path: '', entries: [], truncated: false })) as never}
+        workspaceCache={new SqlWorkspaceCache()}
+        scanner={{
+          list: () => Promise.resolve({ path: '', entries: [], truncated: false }),
+          readNotebook: () => Promise.resolve(draft),
+        }}
         onEdit={onEdit}
         onSave={vi.fn()}
         labels={labels}

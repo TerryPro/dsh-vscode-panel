@@ -1,10 +1,10 @@
 // Unit tests for the workspace cache. The cache is the seam between the
 // directory walk and the panel; what matters here is *when* it walks and
 // *when* it reuses the result, not the walk itself (the walk is covered by
-// `tests/sql-database-scan.spec.ts`).
+// `tests/sql-workspace-scan.spec.ts`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { SqlWorkspaceCache } from '../src/client/sql/sql-workspace-cache.ts'
+import { SqlWorkspaceCache, SQL_FILTER_ALL } from '../src/client/sql/sql-workspace-cache.ts'
 
 interface FakeListing {
   entries: Array<{ name: string; path: string; kind: 'file' | 'directory' | 'symlink' }>
@@ -293,5 +293,58 @@ describe('SqlWorkspaceCache — 缓存命中与失效', () => {
 
     // The cleared cache must stay cleared: the walk it dropped is not allowed to refill it.
     expect(cache.current()).toBeNull()
+  })
+})
+
+/**
+ * The panel's database filter lives on the cache because its lifetime is the cache's.
+ *
+ * The panel unmounts on every sidebar mode change, so a filter kept in component state would be
+ * dropped the moment the reader looked elsewhere. These cases pin the three edges of that choice:
+ * it survives a remount, it survives a rescan (which is what runs right after the reader creates a
+ * notebook, and forgetting the filter there would hide the notebook they just asked for), and it
+ * does *not* follow them into another workspace, where the path it names does not exist.
+ */
+describe('SqlWorkspaceCache — 筛选值', () => {
+  let cache: SqlWorkspaceCache
+  beforeEach(() => { cache = new SqlWorkspaceCache() })
+
+  it('starts unfiltered', () => {
+    expect(cache.databaseFilter('ws-1')).toBe(SQL_FILTER_ALL)
+  })
+
+  it('remembers a choice for the workspace it was made in', () => {
+    cache.setDatabaseFilter('ws-1', 'examples/demo.db')
+
+    expect(cache.databaseFilter('ws-1')).toBe('examples/demo.db')
+  })
+
+  it('does not carry a choice into another workspace', () => {
+    // The value names a database inside one workspace, so applying it to another would filter the
+    // list by a file that is not there. Answered per workspace rather than cleared on a switch:
+    // the panel can change workspace without unmounting, so a reset would race the first render.
+    cache.setDatabaseFilter('ws-1', 'examples/demo.db')
+
+    expect(cache.databaseFilter('ws-2')).toBe(SQL_FILTER_ALL)
+    // And the original workspace still has it, so switching back is not a loss.
+    expect(cache.databaseFilter('ws-1')).toBe('examples/demo.db')
+  })
+
+  it('keeps the choice across a rescan', async () => {
+    // `refresh()` and `invalidate()` are what run after the reader creates a notebook. Clearing the
+    // filter there would drop the new notebook out of the very list it was created from.
+    cache.setDatabaseFilter('ws-1', 'examples/demo.db')
+    const scanner = makeScanner({ '': { entries: [] } })
+
+    await cache.refresh('ws-1', scanner)
+    cache.invalidate()
+
+    expect(cache.databaseFilter('ws-1')).toBe('examples/demo.db')
+  })
+
+  it('is not carried by the snapshot, so a new cache starts clean', () => {
+    cache.setDatabaseFilter('ws-1', 'examples/demo.db')
+
+    expect(new SqlWorkspaceCache().databaseFilter('ws-1')).toBe(SQL_FILTER_ALL)
   })
 })

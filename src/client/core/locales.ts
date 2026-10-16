@@ -472,6 +472,11 @@ export const zh = {
   'sqlnotebook.workspaceNotebookOpenAria': '打开 SQL 笔记 {name}',
   'sqlnotebook.workspaceNotebooksScanning': '正在扫描工作区…',
   'sqlnotebook.workspaceNotebooksEmpty': '工作区里还没有 SQL 笔记。',
+  'sqlnotebook.filterByDatabase': '按库筛选',
+  'sqlnotebook.filterAllDatabases': '全部数据库',
+  'sqlnotebook.filterUnassociated': '未关联任何库',
+  'sqlnotebook.databaseNotebooksEmpty': '该库还没有笔记。',
+  'sqlnotebook.newNotebookOnDatabase': '在此库上新建笔记',
   // 上半段列表自己的「没列全」声明。扫描一直带着 truncated，但此前没有消费方：
   // 被上限截断的工作区和扫完的工作区画出同一份列表，找不到笔记的读者没有任何线索。
   'sqlnotebook.scanNotebooksTruncated': '工作区较大，只列出了前面一部分笔记；用刷新重扫，或从文件树直接打开。',
@@ -1130,6 +1135,11 @@ export const en: Record<keyof typeof zh, string> = {
   'sqlnotebook.workspaceNotebookOpenAria': 'Open SQL notebook {name}',
   'sqlnotebook.workspaceNotebooksScanning': 'Scanning the workspace…',
   'sqlnotebook.workspaceNotebooksEmpty': 'The workspace has no SQL notebooks yet.',
+  'sqlnotebook.filterByDatabase': 'Filter by database',
+  'sqlnotebook.filterAllDatabases': 'All databases',
+  'sqlnotebook.filterUnassociated': 'No database recorded',
+  'sqlnotebook.databaseNotebooksEmpty': 'This database has no notebooks yet.',
+  'sqlnotebook.newNotebookOnDatabase': 'New notebook on this database',
   'sqlnotebook.scanNotebooksTruncated': 'The workspace is large; only the first part of its notebooks is listed. Rescan, or open one from the file tree.',
   // The notebook list at the top of the panel: every open `.sqlnb`, with the active one
   // expanded into the four-level tree underneath.
