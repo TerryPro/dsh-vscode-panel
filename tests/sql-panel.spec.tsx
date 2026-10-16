@@ -51,6 +51,12 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   ) : null),
   IconChevronDownOutlineRegular: () => <span data-icon="chevron-down" />,
   IconChevronRightOutlineRegular: () => <span data-icon="chevron-right" />,
+  // The "new notebook on this database" button reuses the file tree's own glyph
+  // (`CreateEntryIcons.tsx`), which composes these two official icons. They are stubbed rather
+  // than the button's icon being swapped for something self-contained: the point of using it is
+  // that the panel and the file tree offer the same action under the same mark.
+  IconPlusOutlineMedium: () => <span data-icon="plus" />,
+  IconFolderCloseMedium: () => <span data-icon="folder" />,
 }))
 
 afterEach(() => {

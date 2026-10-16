@@ -595,43 +595,97 @@
  * Inside the list rather than in the panel header above, because that header is shared with the
  * schema tree — a control there reads as scoping the whole panel, and this one only narrows the
  * list. Sticky so it stays reachable while a long list scrolls under it.
+ *
+ * Geometry is the notebook card's, on purpose: 8px radius, and a 4px inline inset so the selected
+ * path starts on the same column as the entries' status dots and the panel title above. The two
+ * read as one list rather than as a form bolted onto a list.
+ *
+ * The fill is what separates them. Cards paint `interactive-bg-*` on hover/active over the pane's
+ * own background; this row paints a standing, slightly recessed layer, so it is legible as a
+ * control at rest — while staying a step quieter than any card, because it is chrome around the
+ * list rather than a member of it. `inset 0 0 0 1px` rather than `border` keeps the 4px inset
+ * honest: a border would grow the box and push the path off the entries' column.
  */
 .listFilter {
   display: flex;
   align-items: center;
-  gap: 4px;
+  flex: 0 0 auto;
+  gap: 2px;
   position: sticky;
   top: 0;
   z-index: 1;
-  padding-block-end: 4px;
-  background: var(--dsw-alias-bg-base);
+  /* A card's own geometry, not a form control's: 8px radius, and the exact inset
+     `.notebookSelect` / `.notebookStatusLine` use (4px), so the selected path starts on the same
+     column as the entries' status dots and their paths below. `min-height` is the card's first
+     row, so the row sits in the list's rhythm rather than reading as a form dropped on top. */
+  min-height: 30px;
+  padding: 0 2px 0 4px;
+  border-radius: 8px;
+  /* The fill is what separates it from the cards, which are transparent at rest. A standing,
+     slightly recessed layer reads as chrome around the list while staying quieter than any
+     card's hover/active fill. Opaque on purpose: the row is sticky, so entries scroll *under* it
+     and a translucent fill would let them show through. */
+  background: var(--dsw-alias-bg-layer-1);
+  /* `inset` rather than `border`: a border would grow the box and push the path off the column
+     the entries' text shares. */
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l1);
 }
 
 .filterField {
+  position: relative;
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
 }
 
+/*
+ * The select paints nothing of its own; the row above is the box.
+ *
+ * Two nested rounded fills at the same inset is what makes a control look like a form field
+ * dropped into a list. Handing the box to `.listFilter` leaves one rounded shape per row, the same
+ * way `.notebookEntry` owns the only fill in an entry.
+ */
 .filterSelect {
   width: 100%;
   min-width: 0;
-  box-sizing: border-box;
-  padding: 2px 4px;
-  border: 1px solid var(--dsw-alias-border-l1);
+  padding: 0 18px 0 0;
+  border: none;
   border-radius: 4px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  /* The path is the label and a path is long; the control must not push the button off the row. */
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  appearance: none;
+  /* A path is the label and a path is long; the row must not push the button off its edge. */
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.filterSelect:disabled {
-  opacity: 0.5;
+/* The chevron, drawn rather than left to the platform: a native arrow keeps its own colours and
+   ignores `color`, so it cannot be made to match the tier pills' secondary tone. */
+.filterField::after {
+  content: '';
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-block-start: -4px;
+  border-inline-end: 1.4px solid var(--dsw-alias-label-tertiary);
+  border-block-end: 1.4px solid var(--dsw-alias-label-tertiary);
+  transform: rotate(45deg);
+  pointer-events: none;
 }
 
+.filterSelect:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The notebook-add glyph, sized and toned like the panel header's refresh button so the two
+   read as the same class of control. */
 .filterAction {
   display: inline-flex;
   align-items: center;
@@ -640,17 +694,15 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 5px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
-  line-height: 1;
   cursor: pointer;
 }
 
 .filterAction:hover:not(:disabled) {
-  background: var(--dsw-alias-bg-layer-2);
+  background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 

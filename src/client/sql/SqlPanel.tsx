@@ -32,6 +32,7 @@ import {
   type SqlWorkspaceSnapshot,
 } from './sql-workspace-cache.ts'
 import { createSqlNotebook, SQL_NOTEBOOK_NAME_ATTEMPTS } from './sql-notebook-create.ts'
+import { IconSqlNotebookAddOutline16 } from '../files/CreateEntryIcons.tsx'
 import { parentPath } from '../../shared/path-name.ts'
 import { SqlTableContextMenu, type SqlTableMenuAction, type SqlTableMenuTarget } from './SqlTableContextMenu.tsx'
 import {
@@ -527,6 +528,11 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
         the schema tree below, so a control there reads as scoping the whole panel, and this one
         only narrows the list. The repo's own rule for where a note belongs applies to controls too
         — the thing that explains the list belongs beside it.
+
+        The row is built to read as the list's own header, not as a form: it takes the notebook
+        card's 8px radius and 4px inset (so the path starts on the same column as the entries'
+        status dots and the panel title), and its fill is one step *below* the cards' so the
+        control is distinguishable from the entries it filters without competing with them.
       */}
       <div className={css.listFilter}>
         <label className={css.filterField}>
@@ -555,7 +561,12 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
           title={t('sqlnotebook.newNotebookOnDatabase')}
           onClick={createNotebookOnDatabase}
         >
-          ＋
+          {/*
+            The same glyph the file tree's context menu uses for "new SQL notebook" — a database
+            cylinder with a plus — rather than a bare "＋", which says "add something" without
+            saying what, next to a control that is specifically about notebooks.
+          */}
+          <IconSqlNotebookAddOutline16 size={14} />
         </button>
       </div>
       {workspaceScan === null || scanning && workspaceScan.notebooks.length === 0
