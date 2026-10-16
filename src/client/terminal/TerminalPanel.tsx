@@ -22,6 +22,7 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchController, WorkbenchShellChoice, WorkbenchTerminalTab } from '../model/controller.ts'
 import type { TerminalBinding } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
+import { CancellingRequestFence } from '../core/request-fence.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
 import css from './terminal.module.css'
 
@@ -243,26 +244,19 @@ function ShellPickerButton({ controller, workspaceId, t }: {
   const [open, setOpen] = useState(false)
   const [shells, setShells] = useState<readonly WorkbenchShellChoice[]>([])
   const [selectedShell, setSelectedShell] = useState<string | undefined>(undefined)
-  const lifetime = useRef<AbortController | undefined>(undefined)
-  const generation = useRef(0)
+  const requests = useRef(new CancellingRequestFence())
 
   const load = (): void => {
-    lifetime.current?.abort()
-    const probe = new AbortController()
-    lifetime.current = probe
-    const token = ++generation.current
-    void controller.listShells(probe.signal).then((result) => {
+    const request = requests.current.begin({ kind: 'terminal.shells' })
+    void controller.listShells(request.signal).then((result) => {
       // A menu reopened before the previous probe settled owns the list state.
-      if (generation.current !== token) return
+      if (!requests.current.isLatest(request)) return
       setShells(result.shells)
       setSelectedShell(result.selectedShell)
     })
   }
 
-  useEffect(() => () => {
-    generation.current += 1
-    lifetime.current?.abort()
-  }, [])
+  useEffect(() => () => { requests.current.cancelAll() }, [])
 
   const items: MenuEntry[] = shells.length === 0
     ? [{ id: DEFAULT_SHELL, label: t('terminal.defaultShell'), icon: <IconTerminalOutline16 size={14} /> }]

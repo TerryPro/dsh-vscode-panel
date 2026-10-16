@@ -24,6 +24,7 @@ import {
 import { GitRepositoryToolbar } from './GitRepositoryToolbar.tsx'
 import { GitRemoteDialog, type GitRemoteDialogMode, type GitRemoteDraft } from './GitRemoteDialog.tsx'
 import { copyTextToClipboard } from '../core/clipboard.ts'
+import { RequestFence, type RequestToken } from '../core/request-fence.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
 import css from './git.module.css'
 
@@ -40,8 +41,9 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
   const workbench = useWorkbench(controller)
   const activeTab = workbench.tabs.find(tab => tab.id === workbench.activeTabId)
   const activeDiff = activeTab?.kind === 'diff' ? activeTab.diff : null
-  const refreshId = useRef(0)
-  const graphPageRequestId = useRef(0)
+  const fence = useRef(new RequestFence())
+  /** 当前这一轮刷新的凭证：分页请求靠它判断图谱是否已经被整轮刷新换掉。 */
+  const refreshRequest = useRef<RequestToken | undefined>(undefined)
   const graphPagePending = useRef(false)
   const activeWorkspace = useRef(workspaceId)
   activeWorkspace.current = workspaceId
@@ -76,8 +78,8 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
 
   const refresh = useCallback(async (): Promise<void> => {
     if (workspaceId === undefined) return
-    const request = ++refreshId.current
-    graphPageRequestId.current += 1
+    const request = fence.current.begin({ kind: 'gitPanel.refresh', workspaceId }, workspaceId)
+    refreshRequest.current = request
     graphPagePending.current = false
     setGraphLoadingMore(false)
     setGraphLoadError(null)
@@ -88,7 +90,7 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
       const [nextGraph, nextBranches] = nextStatus.available
         ? await Promise.all([controller.api.gitGraph(workspaceId), controller.api.gitBranches(workspaceId)])
         : [null, null]
-      if (request !== refreshId.current) return
+      if (!isCurrent(request)) return
       setStatus(nextStatus)
       controller.acceptGitStatus?.(workspaceId, nextStatus)
       setGraph(nextGraph)
@@ -97,14 +99,17 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
       setExpandedCommit(null)
       setExpandedKind('commit')
     } catch (reason: unknown) {
-      if (request === refreshId.current) setError(messageOf(reason))
+      if (isCurrent(request)) setError(messageOf(reason))
     } finally {
-      if (request === refreshId.current) setLoading(false)
+      if (isCurrent(request)) setLoading(false)
     }
   }, [controller, workspaceId])
 
+  /** 这次异步结果此刻还属于这个面板吗：既要是本工作区最新的一轮，面板也得还停在这个工作区。 */
+  const isCurrent = (request: RequestToken): boolean =>
+    fence.current.isLatest(request) && fence.current.matches(request, activeWorkspace.current)
+
   useEffect(() => {
-    refreshId.current += 1
     setStatus(null)
     setBranches(null)
     setGraph(null)
@@ -150,23 +155,24 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
 
   const loadMoreGraph = useCallback(async (): Promise<void> => {
     if (workspaceId === undefined || graph === null || loading || !graph.truncated || graphPagePending.current) return
-    const targetWorkspace = workspaceId
-    const refreshRequest = refreshId.current
-    const pageRequest = ++graphPageRequestId.current
+    const refreshAtStart = refreshRequest.current
+    if (refreshAtStart === undefined) return
+    const request = fence.current.begin({ kind: 'gitPanel.graphPage', workspaceId }, workspaceId)
     const offset = graph.nextOffset
     graphPagePending.current = true
     setGraphLoadingMore(true)
     setGraphLoadError(null)
     try {
-      const page = await controller.api.gitGraph(targetWorkspace, offset)
-      if (activeWorkspace.current !== targetWorkspace || refreshId.current !== refreshRequest || graphPageRequestId.current !== pageRequest) return
+      const page = await controller.api.gitGraph(workspaceId, offset)
+      // 整轮刷新已经换掉了图谱的话，这一页接上去就是旧图里的旧页。
+      if (!isCurrent(request) || !fence.current.isLatest(refreshAtStart)) return
       setGraph(current => current === null ? current : appendGraphPage(current, page))
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace && refreshId.current === refreshRequest && graphPageRequestId.current === pageRequest) {
+      if (isCurrent(request) && fence.current.isLatest(refreshAtStart)) {
         setGraphLoadError(messageOf(reason))
       }
     } finally {
-      if (graphPageRequestId.current === pageRequest) {
+      if (fence.current.isLatest(request)) {
         graphPagePending.current = false
         setGraphLoadingMore(false)
       }
@@ -186,31 +192,33 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
   }): Promise<void> => {
     if (workspaceId === undefined) return
     const targetWorkspace = workspaceId
+    const request = fence.current.begin({ kind: 'gitPanel.operation' }, targetWorkspace)
     setBusy(config.busy)
     if (config.clearError !== false) setError(null)
     if (config.clearResult !== false) setResult(null)
     config.onStart?.()
     try {
       const value = await config.perform(targetWorkspace)
-      if (activeWorkspace.current !== targetWorkspace) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       await config.onSuccess?.(value, targetWorkspace)
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) (config.error ?? setError)(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) (config.error ?? setError)(messageOf(reason))
     } finally {
-      if (activeWorkspace.current === targetWorkspace) setBusy(null)
+      if (fence.current.matches(request, activeWorkspace.current)) setBusy(null)
     }
   }
 
   const update = async (targetWorkspace: string, operation: () => Promise<GitStatus>): Promise<boolean> => {
+    const request = fence.current.begin({ kind: 'gitPanel.operation' }, targetWorkspace)
     setError(null)
     try {
       const next = await operation()
-      if (activeWorkspace.current !== targetWorkspace) return false
+      if (!fence.current.matches(request, activeWorkspace.current)) return false
       setStatus(next)
       controller.acceptGitStatus?.(targetWorkspace, next)
       return true
     } catch (reason: unknown) {
-      if (activeWorkspace.current !== targetWorkspace) return false
+      if (!fence.current.matches(request, activeWorkspace.current)) return false
       setError(messageOf(reason))
       return false
     }
@@ -298,15 +306,16 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
     setExpandedKind(kind)
     const key = `${kind}:${commitValue.hash}`
     if (commitFiles[key] !== undefined) return
+    const request = fence.current.begin({ kind: 'gitPanel.commitFiles' }, targetWorkspace)
     setCommitFiles(current => ({ ...current, [key]: { state: 'loading' } }))
     try {
       const value = kind === 'commit'
         ? await controller.api.gitCommitFiles(targetWorkspace, commitValue.hash)
         : await controller.api.gitComparisonFiles(targetWorkspace, commitValue.hash)
-      if (activeWorkspace.current !== targetWorkspace) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       setCommitFiles(current => ({ ...current, [key]: { state: 'ready', value } }))
     } catch (reason: unknown) {
-      if (activeWorkspace.current !== targetWorkspace) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       setCommitFiles(current => ({
         ...current,
         [key]: { state: 'error', message: messageOf(reason) },
@@ -438,14 +447,15 @@ export function GitPanel({ controller, workspaceId, t }: GitPanelProps) {
   const openRemoteDialog = async (mode: GitRemoteDialogMode): Promise<void> => {
     if (workspaceId === undefined) return
     const targetWorkspace = workspaceId
+    const request = fence.current.begin({ kind: 'gitPanel.remotes' }, targetWorkspace)
     setRemoteDialog(mode)
     setRemotes(null)
     setRemoteDialogError(null)
     try {
       const value = await controller.api.gitRemotes(targetWorkspace)
-      if (activeWorkspace.current === targetWorkspace) setRemotes(value)
+      if (fence.current.matches(request, activeWorkspace.current)) setRemotes(value)
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setRemoteDialogError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setRemoteDialogError(messageOf(reason))
     }
   }
 

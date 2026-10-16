@@ -10,13 +10,14 @@ import { isStructuredPath } from '../json/json-path.ts'
 import { isMermaidPath } from '../mermaid/mermaid-path.ts'
 import { isNotebookPath } from '../notebook/notebook-path.ts'
 import { buildGitDecorations } from '../git/git-decorations.ts'
+import { RequestFence } from '../core/request-fence.ts'
+import { cloneState, INITIAL_STATE, stripWorkspaceEphemera } from './workbench-snapshot.ts'
 import {
   buildGitLineVersions,
   gitBaselineKey,
   sameDecorations,
   sameStringMap,
 } from './git-decoration-state.ts'
-import { cloneState, INITIAL_STATE, stripWorkspaceEphemera } from './workbench-snapshot.ts'
 import { focusedPaneId, placeTabInPane, reconcilePanes, selectInPanes } from './editor-pane-model.ts'
 import {
   diffTabId,
@@ -25,7 +26,6 @@ import {
   fileTabId,
   isSameOrDescendantPath,
   messageOf,
-  tabRequestKey,
 } from './tab-model.ts'
 import type {
   DiffViewMode,
@@ -45,16 +45,16 @@ export interface DataHost {
 
 /** Owns async tab IO, the per-Workspace snapshot cache, and the request-race fencing. */
 export class WorkbenchData {
-  private requestId = 0
-  private readonly fileRequests = new Map<string, number>()
-  private readonly gitBaselineRequests = new Map<string, number>()
-  private readonly diffRequests = new Map<string, number>()
+  /**
+   * 标签请求的 key 把标签 id 放进 `path` 槽，所以同一文件的工作区/暂存/提交三种 Diff
+   * 各自有独立的在飞请求；`gitStatus` 的 key 只按工作区。
+   */
+  private readonly fence = new RequestFence()
   private readonly workspaceStates = new Map<string, WorkbenchState>()
   private refreshPromise: Promise<void> | undefined
   private refreshFailureActive = false
   private readonly gitRefreshes = new Map<string, Promise<void>>()
   private readonly gitRefreshFailures = new Set<string>()
-  private readonly gitStatusGenerations = new Map<string, number>()
 
   constructor(
     private readonly store: SnapshotStore<WorkbenchState>,
@@ -86,7 +86,9 @@ export class WorkbenchData {
 
   /** Store Git file decorations in the Workspace snapshot shared by the tree and editor tabs. */
   acceptGitStatus(workspaceId: string, status: GitStatus): void {
-    this.gitStatusGenerations.set(workspaceId, (this.gitStatusGenerations.get(workspaceId) ?? 0) + 1)
+    // 落盘一次更新更晚的状态，就是对这个工作区的 Git 状态作出更晚的声明：
+    // 仍在飞的读取拿到的是更早的一份，因此过期。
+    this.fence.begin({ kind: 'gitStatus', workspaceId })
     const decorations = status.available ? buildGitDecorations(status.files) : {}
     const lineVersions = status.available ? buildGitLineVersions(status.files) : {}
     const current = this.store.getSnapshot().workspaceId === workspaceId
@@ -117,26 +119,24 @@ export class WorkbenchData {
     if (workspaceId === undefined || tab?.kind !== 'file' || tab.file === null) return
     const key = gitBaselineKey(snapshot, tab)
     if (tab.gitBaselineKey === key) return
-    const requestKey = tabRequestKey(workspaceId, tabId)
-    const requestId = ++this.requestId
-    this.gitBaselineRequests.set(requestKey, requestId)
+    const request = this.fence.begin({ kind: 'gitBaseline', workspaceId, path: tabId }, key)
     this.updateFileTabState(workspaceId, tabId, (draft) => {
       draft.gitBaselineKey = key
       draft.gitBaselineLoading = true
     })
     try {
       const baseline = await this.api.gitEditorBaseline(workspaceId, tab.path)
-      if (this.gitBaselineRequests.get(requestKey) !== requestId) return
+      if (!this.fence.isLatest(request)) return
       this.updateFileTabState(workspaceId, tabId, (draft) => {
-        if (draft.gitBaselineKey !== key) return
+        if (!this.fence.matches(request, draft.gitBaselineKey)) return
         draft.gitBaseline = baseline
         draft.gitBaselineLoading = false
       })
       this.logger.info(`workbench-layout: prepared Git line decorations for ${JSON.stringify(tab.path)}`)
     } catch {
-      if (this.gitBaselineRequests.get(requestKey) !== requestId) return
+      if (!this.fence.isLatest(request)) return
       this.updateFileTabState(workspaceId, tabId, (draft) => {
-        if (draft.gitBaselineKey !== key) return
+        if (!this.fence.matches(request, draft.gitBaselineKey)) return
         draft.gitBaseline = null
         draft.gitBaselineLoading = false
       })
@@ -173,9 +173,7 @@ export class WorkbenchData {
     }
     if (existing?.kind === 'file' && existing.loading) return
 
-    const requestKey = tabRequestKey(workspaceId, tabId)
-    const requestId = ++this.requestId
-    this.fileRequests.set(requestKey, requestId)
+    const request = this.fence.begin({ kind: 'file', workspaceId, path: tabId })
     this.updateFileTabState(workspaceId, tabId, (tab) => {
       tab.loading = true
       tab.error = null
@@ -183,7 +181,7 @@ export class WorkbenchData {
     try {
       if (imageMimeTypeForPath(path) !== undefined) {
         const image = await this.api.readImage(workspaceId, path)
-        if (this.fileRequests.get(requestKey) !== requestId) return
+        if (!this.fence.isLatest(request)) return
         this.updateFileTabState(workspaceId, tabId, (tab) => {
           tab.image = image
           tab.loading = false
@@ -193,7 +191,7 @@ export class WorkbenchData {
         return
       }
       const file = await this.api.readFile(workspaceId, path)
-      if (this.fileRequests.get(requestKey) !== requestId) return
+      if (!this.fence.isLatest(request)) return
       this.updateFileTabState(workspaceId, tabId, (tab) => {
         const isMarkdown = file.markdown
         const nextMarkdownMode = tab.markdownMode === 'source' && isMarkdown
@@ -218,7 +216,7 @@ export class WorkbenchData {
       })
       this.logger.info(`workbench-layout: opened workspace file tab ${JSON.stringify(path)}`)
     } catch (error: unknown) {
-      if (this.fileRequests.get(requestKey) !== requestId) return
+      if (!this.fence.isLatest(request)) return
       this.updateFileTabState(workspaceId, tabId, (tab) => {
         tab.loading = false
         tab.error = messageOf(error)
@@ -352,9 +350,8 @@ export class WorkbenchData {
       reconcilePanes(state)
     })
     for (const id of removedIds) {
-      const key = tabRequestKey(workspaceId, id)
-      this.fileRequests.delete(key)
-      this.diffRequests.delete(key)
+      this.fence.forget({ kind: 'file', workspaceId, path: id })
+      this.fence.forget({ kind: 'diff', workspaceId, path: id })
     }
     this.releaseNotebooks(removedTabs)
     if (removedIds.length > 0) {
@@ -379,10 +376,10 @@ export class WorkbenchData {
 
   /** Drop in-flight request fences for a tab the shell is closing. */
   forgetRequests(workspaceId: string | undefined, tabId: string): void {
-    const requestKey = tabRequestKey(workspaceId, tabId)
-    this.fileRequests.delete(requestKey)
-    this.gitBaselineRequests.delete(requestKey)
-    this.diffRequests.delete(requestKey)
+    const scope = workspaceId === undefined ? { path: tabId } : { workspaceId, path: tabId }
+    this.fence.forget({ kind: 'file', ...scope })
+    this.fence.forget({ kind: 'gitBaseline', ...scope })
+    this.fence.forget({ kind: 'diff', ...scope })
   }
 
   /** Refresh all loaded file tabs in one request; concurrent visibility/focus triggers share the same run. */
@@ -416,16 +413,14 @@ export class WorkbenchData {
     }
     if (existing?.kind === 'diff' && existing.loading) return
 
-    const requestKey = tabRequestKey(workspaceId, descriptor.id)
-    const requestId = ++this.requestId
-    this.diffRequests.set(requestKey, requestId)
+    const request = this.fence.begin({ kind: 'diff', workspaceId, path: descriptor.id })
     this.updateDiffTabState(workspaceId, descriptor.id, (tab) => {
       tab.loading = true
       tab.error = null
     })
     try {
       const diff = await load()
-      if (this.diffRequests.get(requestKey) !== requestId) return
+      if (!this.fence.isLatest(request)) return
       this.updateDiffTabState(workspaceId, descriptor.id, (tab) => {
         tab.diff = diff
         tab.loading = false
@@ -433,7 +428,7 @@ export class WorkbenchData {
       })
       this.logger.info(`workbench-layout: opened ${logLabel} tab`)
     } catch (error: unknown) {
-      if (this.diffRequests.get(requestKey) !== requestId) return
+      if (!this.fence.isLatest(request)) return
       this.updateDiffTabState(workspaceId, descriptor.id, (tab) => {
         tab.loading = false
         tab.error = messageOf(error)
@@ -513,10 +508,10 @@ export class WorkbenchData {
   }
 
   private async refreshGitDecorationsOnce(workspaceId: string): Promise<void> {
-    const generation = this.gitStatusGenerations.get(workspaceId) ?? 0
+    const request = this.fence.begin({ kind: 'gitStatus', workspaceId })
     try {
       const status = await this.api.gitStatus(workspaceId)
-      if ((this.gitStatusGenerations.get(workspaceId) ?? 0) !== generation) return
+      if (!this.fence.isLatest(request)) return
       this.acceptGitStatus(workspaceId, status)
       if (this.gitRefreshFailures.delete(workspaceId)) {
         this.logger.info(`workbench-layout: Git file decoration refresh recovered in ${JSON.stringify(workspaceId)}`)

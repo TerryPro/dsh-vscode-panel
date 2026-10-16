@@ -3,6 +3,7 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceEntry } from '../../shared/contracts.ts'
 import type { WorkbenchController, WorkbenchTab } from '../model/controller.ts'
 import { isSameOrDescendantPath, messageOf } from '../model/tab-model.ts'
+import { RequestFence } from '../core/request-fence.ts'
 import { parentPath } from '../../shared/path-name.ts'
 
 interface FileTreeMutationOptions {
@@ -24,6 +25,7 @@ export function useFileTreeMutations(options: FileTreeMutationOptions) {
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const activeWorkspace = useRef(options.workspaceId)
+  const fence = useRef(new RequestFence())
 
   useEffect(() => {
     activeWorkspace.current = options.workspaceId
@@ -62,22 +64,23 @@ export function useFileTreeMutations(options: FileTreeMutationOptions) {
     const workspaceId = options.workspaceId
     if (workspaceId === undefined || renameTarget === null || busy) return
     const source = renameTarget
+    const request = fence.current.begin({ kind: 'files.rename', path: source.path }, workspaceId)
     setBusy(true)
     setDialogError(null)
     try {
       const renamed = await options.controller.api.renameEntry(workspaceId, source.path, name)
       options.controller.closeWorkspaceEntries(workspaceId, source.path)
       void options.controller.refreshGitDecorations?.(workspaceId)
-      if (activeWorkspace.current !== workspaceId) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       options.onInvalidate(source.path)
       options.onSelect({ path: renamed.path, kind: renamed.kind })
       setRenameTarget(null)
       options.onResult(options.t('files.renamed', { name: renamed.name }))
       await options.onReloadParent(workspaceId, parentPath(source.path))
     } catch (reason: unknown) {
-      if (activeWorkspace.current === workspaceId) setDialogError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setDialogError(messageOf(reason))
     } finally {
-      if (activeWorkspace.current === workspaceId) setBusy(false)
+      if (fence.current.matches(request, activeWorkspace.current)) setBusy(false)
     }
   }
 
@@ -85,22 +88,23 @@ export function useFileTreeMutations(options: FileTreeMutationOptions) {
     const workspaceId = options.workspaceId
     if (workspaceId === undefined || deleteTarget === null || busy) return
     const source = deleteTarget
+    const request = fence.current.begin({ kind: 'files.delete', path: source.path }, workspaceId)
     setBusy(true)
     setDialogError(null)
     try {
       await options.controller.api.deleteEntry(workspaceId, source.path)
       options.controller.closeWorkspaceEntries(workspaceId, source.path)
       void options.controller.refreshGitDecorations?.(workspaceId)
-      if (activeWorkspace.current !== workspaceId) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       options.onInvalidate(source.path)
       options.onSelect(null)
       setDeleteTarget(null)
       options.onResult(options.t('files.deleted', { path: source.path }))
       await options.onReloadParent(workspaceId, parentPath(source.path))
     } catch (reason: unknown) {
-      if (activeWorkspace.current === workspaceId) setDialogError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setDialogError(messageOf(reason))
     } finally {
-      if (activeWorkspace.current === workspaceId) setBusy(false)
+      if (fence.current.matches(request, activeWorkspace.current)) setBusy(false)
     }
   }
 

@@ -11,6 +11,7 @@ import { isDatabasePath } from '../../shared/sql-protocol.ts'
 import { parentPath } from '../../shared/path-name.ts'
 import { createSqlNotebook, SQL_NOTEBOOK_NAME_ATTEMPTS, type SqlNotebookSeed } from '../sql/sql-notebook-create.ts'
 import { isSameOrDescendantPath, messageOf } from '../model/tab-model.ts'
+import { RequestFence } from '../core/request-fence.ts'
 import { IconFileAddOutline16, IconFolderAddOutline16 } from './CreateEntryIcons.tsx'
 import type { FileTreeCreateKind } from './FileTreeCreateRow.tsx'
 import { FileTreeContextMenu, type FileTreeMenuAction, type FileTreeMenuTarget } from './FileTreeContextMenu.tsx'
@@ -41,6 +42,7 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
   const activeTab = workbench.tabs.find(tab => tab.id === workbench.activeTabId)
   const activeWorkspace = useRef(workspaceId)
   activeWorkspace.current = workspaceId
+  const fence = useRef(new RequestFence())
   const handledSidebarAction = useRef<number | undefined>(undefined)
   const [listings, setListings] = useState<Record<string, DirectoryListing | undefined>>({})
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']))
@@ -100,18 +102,18 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
 
   const loadDirectory = async (path: string): Promise<void> => {
     if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
     if (listings[path] !== undefined || loading.has(path)) return
+    const request = fence.current.begin({ kind: 'files.list', path }, workspaceId)
     setLoading(previous => new Set(previous).add(path))
     try {
-      const listing = await controller.api.listDirectory(targetWorkspace, path)
-      if (activeWorkspace.current !== targetWorkspace) return
+      const listing = await controller.api.listDirectory(workspaceId, path)
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       setListings(previous => ({ ...previous, [path]: listing }))
     } catch (reason: unknown) {
-      if (activeWorkspace.current !== targetWorkspace) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       setError(messageOf(reason))
     } finally {
-      if (activeWorkspace.current === targetWorkspace) {
+      if (fence.current.matches(request, activeWorkspace.current)) {
         setLoading(previous => {
           const next = new Set(previous)
           next.delete(path)
@@ -167,19 +169,19 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
    */
   const revealPath = async (path: string): Promise<void> => {
     if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
     const ancestors = ancestorDirectories(path)
+    const request = fence.current.begin({ kind: 'files.reveal', path }, workspaceId)
     setError(null)
     let loaded: DirectoryListing[]
     try {
       loaded = await Promise.all(
-        ancestors.map(ancestor => controller.api.listDirectory(targetWorkspace, ancestor)),
+        ancestors.map(ancestor => controller.api.listDirectory(workspaceId, ancestor)),
       )
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setError(messageOf(reason))
       return
     }
-    if (activeWorkspace.current !== targetWorkspace) return
+    if (!fence.current.matches(request, activeWorkspace.current)) return
     const merged: Record<string, DirectoryListing> = {}
     for (let index = 0; index < ancestors.length; index += 1) {
       const ancestor = ancestors[index]
@@ -199,23 +201,23 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
 
   const createEntry = async (draft: FileTreeCreateDraft, name: string): Promise<boolean> => {
     if (workspaceId === undefined) return false
-    const targetWorkspace = workspaceId
+    const request = fence.current.begin({ kind: 'files.create', path: draft.parent }, workspaceId)
     let path: string
     try {
       path = childWorkspacePath(draft.parent, name)
       setError(null)
-      if (draft.kind === 'file') await controller.api.createFile(targetWorkspace, path)
-      else await controller.api.createDirectory(targetWorkspace, path)
-      void controller.refreshGitDecorations?.(targetWorkspace)
+      if (draft.kind === 'file') await controller.api.createFile(workspaceId, path)
+      else await controller.api.createDirectory(workspaceId, path)
+      void controller.refreshGitDecorations?.(workspaceId)
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setError(messageOf(reason))
       return false
     }
-    if (activeWorkspace.current !== targetWorkspace) return true
+    if (!fence.current.matches(request, activeWorkspace.current)) return true
     setSelection({ path, kind: draft.kind })
-    await reloadDirectory(targetWorkspace, draft.parent)
-    if (draft.kind === 'file' && activeWorkspace.current === targetWorkspace) {
-      void controller.openFile(targetWorkspace, path)
+    await reloadDirectory(workspaceId, draft.parent)
+    if (draft.kind === 'file' && fence.current.matches(request, activeWorkspace.current)) {
+      void controller.openFile(workspaceId, path)
     }
     return true
   }
@@ -230,14 +232,14 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
    */
   const createNotebook = async (directory: string, seed: SqlNotebookSeed, connectTo?: string): Promise<void> => {
     if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
+    const request = fence.current.begin({ kind: 'files.notebook', path: directory }, workspaceId)
     setError(null)
     setResult(null)
     let path: string | null
     try {
       path = await createSqlNotebook({
         api: controller.api,
-        workspaceId: targetWorkspace,
+        workspaceId,
         directory,
         seed,
         // Recorded in the file so reopening this notebook connects again, rather than asking the
@@ -245,24 +247,24 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
         ...(connectTo === undefined ? {} : { database: connectTo }),
       })
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setError(messageOf(reason))
       return
     }
-    if (activeWorkspace.current !== targetWorkspace) return
+    if (!fence.current.matches(request, activeWorkspace.current)) return
     if (path === null) {
       setError(t('files.sqlNotebookNoName', { attempts: String(SQL_NOTEBOOK_NAME_ATTEMPTS) }))
       return
     }
-    void controller.refreshGitDecorations?.(targetWorkspace)
+    void controller.refreshGitDecorations?.(workspaceId)
     setSelection({ path, kind: 'file' })
-    await reloadDirectory(targetWorkspace, directory)
-    if (activeWorkspace.current === targetWorkspace) {
+    await reloadDirectory(workspaceId, directory)
+    if (fence.current.matches(request, activeWorkspace.current)) {
       // What the new notebook connects to is decided by which entry made it: a notebook written
       // beside a database is about *that* database, and its first cell queries it — landing it on
       // `:memory:` would hand the reader a notebook whose seeded query can only return nothing.
       // A notebook made from nothing has no database to point at, so it gets `:memory:`, which is
       // the one place a fresh notebook can write without asking for a file first.
-      void controller.openFile(targetWorkspace, path).then(() => controller.connectNewSqlNotebook(targetWorkspace, path, connectTo))
+      void controller.openFile(workspaceId, path).then(() => controller.connectNewSqlNotebook(workspaceId, path, connectTo))
     }
   }
 
@@ -298,25 +300,26 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
   }
 
   const reloadDirectory = async (targetWorkspace: string, path: string): Promise<void> => {
+    const request = fence.current.begin({ kind: 'files.list', path }, targetWorkspace)
     try {
       const listing = await controller.api.listDirectory(targetWorkspace, path)
-      if (activeWorkspace.current === targetWorkspace) {
+      if (fence.current.matches(request, activeWorkspace.current)) {
         setListings(previous => ({ ...previous, [path]: listing }))
       }
     } catch (reason: unknown) {
-      if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+      if (fence.current.matches(request, activeWorkspace.current)) setError(messageOf(reason))
     }
   }
 
   const refreshAllExpanded = async (): Promise<void> => {
     if (workspaceId === undefined) return
-    const targetWorkspace = workspaceId
     const paths = [...expanded].filter(path => listings[path] !== undefined)
     if (paths.length === 0) return
+    const request = fence.current.begin({ kind: 'files.list' }, workspaceId)
     const results = await Promise.allSettled(
-      paths.map(path => controller.api.listDirectory(targetWorkspace, path)),
+      paths.map(path => controller.api.listDirectory(workspaceId, path)),
     )
-    if (activeWorkspace.current !== targetWorkspace) return
+    if (!fence.current.matches(request, activeWorkspace.current)) return
     setListings(previous => {
       const next = { ...previous }
       for (let index = 0; index < paths.length; index += 1) {
@@ -378,12 +381,13 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     }
     if (action === 'expand-all') {
       if (entry === null || entry.kind !== 'directory') return
+      const request = fence.current.begin({ kind: 'files.expand', path: entry.path }, targetWorkspace)
       const collected = await collectDirectoryExpansion(
         path => controller.api.listDirectory(targetWorkspace, path),
         entry.path,
         expanded,
       )
-      if (activeWorkspace.current !== targetWorkspace) return
+      if (!fence.current.matches(request, activeWorkspace.current)) return
       setListings(previous => ({ ...previous, ...collected.listings }))
       setExpanded(collected.expanded)
       return
@@ -432,25 +436,27 @@ export function FileTree({ controller, workspaceId, workspacePath, t }: FileTree
     // reason (no file manager on this platform, the entry vanished) rather than a
     // browser-permission message that would describe a different failure.
     if (action === 'reveal-in-file-manager') {
+      const request = fence.current.begin({ kind: 'files.reveal', path: entry.path }, targetWorkspace)
       try {
         await controller.api.revealPath(targetWorkspace, entry.path)
       } catch (reason: unknown) {
-        if (activeWorkspace.current === targetWorkspace) setError(messageOf(reason))
+        if (fence.current.matches(request, activeWorkspace.current)) setError(messageOf(reason))
       }
       return
     }
+    const request = fence.current.begin({ kind: 'files.copy', path: entry.path }, targetWorkspace)
     try {
       if (action === 'copy-relative-path') {
         await copyTextToClipboard(entry.path)
         setResult(t('files.relativePathCopied'))
       } else if (action === 'copy-absolute-path') {
         const resolved = await controller.api.absolutePath(targetWorkspace, entry.path)
-        if (activeWorkspace.current !== targetWorkspace) return
+        if (!fence.current.matches(request, activeWorkspace.current)) return
         await copyTextToClipboard(resolved.absolutePath)
         setResult(t('files.absolutePathCopied'))
       }
     } catch {
-      if (activeWorkspace.current === targetWorkspace) setError(t('files.copyFailed'))
+      if (fence.current.matches(request, activeWorkspace.current)) setError(t('files.copyFailed'))
     }
   }
 
