@@ -1,6 +1,7 @@
 /** 侧栏面板分隔线：绘制在 AppFrame 上的覆盖层，几何全部实测。 */
 
 import {
+  EDITOR_COLLAPSED_ATTRIBUTE,
   PANEL_HEADER_ATTRIBUTE,
   PANEL_HEADER_HEIGHT_PROPERTY,
   PANEL_RULE_ANCHOR_ATTRIBUTE,
@@ -11,6 +12,25 @@ import {
 
 /** The rule continues a 1px border-bottom, so it is one CSS pixel thick. */
 const RULE_THICKNESS_PX = 1
+
+/**
+ * The header row's height when there is no tab bar to align with.
+ *
+ * The middle column renders `EditorPane` — and with it the tab bar the header closes against —
+ * only while a file is open; with no tabs it early-returns to the empty state, so there is no
+ * anchor to measure. The header must not change height when that happens: the reader watches the
+ * panel's whole body jump up the moment they close their last file, and the rule under the title
+ * disappear with it.
+ *
+ * So the height falls back to the height the anchor *would* have had, held as the same pair of
+ * declarations the tab bar uses (`editor.module.css`): `.editorHeader` is `height: 38px` plus a
+ * `1px` bottom border. `PENDING_HEADER_HEIGHT_PX` is that sum, i.e. the `bottom` edge the header
+ * aligns to when a tab bar is present, and `measuredHeaderHeight` subtracts the header's own top
+ * offset from it exactly as the measured path does.
+ */
+const TAB_BAR_HEIGHT_PX = 38
+const TAB_BAR_BORDER_PX = 1
+const FALLBACK_ANCHOR_BOTTOM_PX = TAB_BAR_HEIGHT_PX + TAB_BAR_BORDER_PX
 
 export interface PanelRuleLogger {
   info(message: string): void
@@ -134,16 +154,45 @@ export function createPanelRuleLayout(
 
   /**
    * The header's rule, aligned to the tab bar's bottom edge rather than its own,
-   * plus the header height that edge implies. Undefined when the tab bar is
-   * missing or collapsed, which is the middle column being folded away.
+   * plus the header height that edge implies.
+   *
+   * Undefined only when the geometry cannot be trusted at all — no header, no column, a column
+   * with no width. Two states that both lack a *tab bar* are handled differently, because they
+   * mean different things:
+   *
+   * - **No file is open.** `WorkbenchEditor` renders its empty state instead of `EditorPane`, so
+   *   the anchor is absent from the DOM. The header still falls back to the height the tab bar
+   *   would have had, so closing the last file does not resize the panel header or drop its rule
+   *   and make the whole body jump.
+   * - **The middle column is collapsed.** The anchor is still rendered but measures zero width, so
+   *   it offers an edge nothing can meet. The header keeps DSH's natural height here (the rule is
+   *   withdrawn): the column it was aligning to is gone, so there is nothing to align with.
    */
   const measureHeader = (
     header: HTMLElement | null,
     anchor: HTMLElement | null,
   ): { rule: MeasuredRule; headerHeight: number } | undefined => {
-    if (header === null || anchor === null) return undefined
+    if (header === null) return undefined
     const column = columnOf(header)
     if (column === undefined) return undefined
+
+    if (anchor === null) {
+      // No tab bar in the DOM at all: see the no-file case above. A collapsed middle column is
+      // *not* this case — it renders the editor and folds it away, so its anchor exists and is
+      // handled below by the zero-width check. That leaves the empty editor, where the edge the
+      // header closes against is derived from the column's own top plus the tab bar's declared
+      // height: `.editorHeader` is 38px with a 1px bottom border, both columns share the frame's
+      // content top, and a frame with a collapsed middle column must not take this path.
+      if (frame.hasAttribute(EDITOR_COLLAPSED_ATTRIBUTE)) return undefined
+      const columnBox = column.getBoundingClientRect()
+      if (columnBox.width <= 0) return undefined
+      const bottomEdge = columnBox.top + FALLBACK_ANCHOR_BOTTOM_PX
+      const rule = measure(header, column, bottomEdge)
+      const headerHeight = bottomEdge - header.getBoundingClientRect().top
+      if (rule === undefined || !(headerHeight > 0)) return undefined
+      return { rule, headerHeight }
+    }
+
     const anchorBox = anchor.getBoundingClientRect()
     // A collapsed middle column still reports the tab bar's height but no width,
     // so the edge it offers cannot be met by anything.

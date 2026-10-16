@@ -64,7 +64,20 @@ describe('侧栏面板分隔线实测', () => {
     expect(section.style.borderBottom).toBe('')
   })
 
-  it('keeps the section rule when the middle column has no tab bar', () => {
+  /**
+   * The reported bug: with no file open, the panel header lost its rule and the whole body jumped
+   * up the moment the last tab was closed.
+   *
+   * `WorkbenchEditor` renders its empty state instead of `EditorPane` when no file is open, so the
+   * tab bar the header closes against is absent from the DOM — not zero-width, simply not there.
+   * The header's height and its rule are one measurement, so withdrawing the rule also withdrew the
+   * height and the header fell back to its natural size, moving every row beneath it.
+   *
+   * The header therefore keeps the height the tab bar *would* have had: `.editorHeader` is 38px
+   * with a 1px bottom border, so it closes against the column's top plus 39px. Asserted as the same
+   * numbers a rendered tab bar produces, which is what makes the two states indistinguishable.
+   */
+  it('keeps the header rule and height when no file is open and there is no tab bar', () => {
     const { frame, anchor } = fixture({
       frame: rect(0, 0, 1440, 900),
       column: rect(48, 0, 300, 900),
@@ -75,7 +88,34 @@ describe('侧栏面板分隔线实测', () => {
 
     createPanelRuleLayout(frame, { info: vi.fn() })
 
-    // The header rule needs the tab bar; the commit box does not.
+    // Both rules: the commit box's, and the header's fallback edge.
+    expect(rules(frame)).toHaveLength(2)
+    expect(rules(frame)[0]).toEqual({ left: '48px', top: '38px', width: '300px' })
+    expect(rules(frame)[1]).toEqual({ left: '48px', top: '289px', width: '300px' })
+    expect(frame.hasAttribute(PANEL_RULE_ATTRIBUTE)).toBe(true)
+    // 39px from the column's top, less the header's own 6px top offset — the same '33px' the
+    // tab-bar case publishes, which is the point: closing the last file must not resize anything.
+    expect(style(frame, PANEL_HEADER_HEIGHT_PROPERTY)).toBe('33px')
+  })
+
+  /**
+   * A collapsed middle column is a different state from an empty one: it *renders* the editor and
+   * folds it away, so its anchor exists and measures zero width. Nothing on screen offers an edge
+   * to align with, so the header keeps DSH's natural height and the rule is withdrawn — the
+   * fallback above is for a missing tab bar, not for a folded column.
+   */
+  it('withdraws the header rule when the middle column is collapsed', () => {
+    const { frame, anchor } = fixture({
+      frame: rect(0, 0, 1440, 900),
+      column: rect(48, 0, 300, 900),
+      header: rect(60, 6, 276, 34),
+      anchor: rect(360, 0, 0, 39),
+      section: rect(60, 200, 276, 90),
+    })
+    expect(anchor.getBoundingClientRect().width).toBe(0)
+
+    createPanelRuleLayout(frame, { info: vi.fn() })
+
     expect(rules(frame)).toHaveLength(1)
     expect(rules(frame)[0]).toEqual({ left: '48px', top: '289px', width: '300px' })
     expect(frame.hasAttribute(PANEL_RULE_ATTRIBUTE)).toBe(false)
