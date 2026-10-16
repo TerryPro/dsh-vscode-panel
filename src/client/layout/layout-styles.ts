@@ -183,11 +183,20 @@ const CSS = `
    exact fractional width, so two visually identical CSS rules render two
    different lines: at the 125%/150% scales Windows defaults to, a 1px fill
    spreads over an extra device row and reads heavier than the border it
-   continues. Identical primitive, identical geometry, identical colour. */
+   continues. Identical primitive, identical geometry, identical colour.
+
+   Fixed positioning, not absolute: the frame is deliberately not a containing
+   block (see above), so an absolute overlay would resolve against whichever
+   ancestor happens to be positioned and the computed offsets would be measured
+   from an origin this layout cannot see. The frame cannot be made one either —
+   that is what would capture the commit-graph lanes. Fixing the containing block
+   to the viewport lets the numbers be used as written, on any platform, padding
+   or zoom. */
 [${FRAME_ATTRIBUTE}] > [${PANEL_RULE_OVERLAY_ATTRIBUTE}] {
-  position: absolute;
-  /* left, top, and width come from panel-rule-layout.ts, per rule, so no host
-     padding is assumed and the lines cannot drift on another platform or zoom. */
+  position: fixed;
+  /* left, top, and width come from panel-rule-layout.ts, per rule, in viewport
+     coordinates, so no host padding or frame origin is assumed and the lines
+     cannot drift on another platform or zoom. */
   height: 0;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   pointer-events: none;

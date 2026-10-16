@@ -35,6 +35,18 @@ export const PANEL_RULE_OVERLAY_ATTRIBUTE = 'data-dsh-workbench-panel-rule-overl
 export const PANEL_HEADER_HEIGHT_PROPERTY = '--dsh-workbench-panel-header-height'
 
 /**
+ * Marks the middle column's own root, in both of its states.
+ *
+ * `WorkbenchEditor` puts it on `.editorRoot` when a file is open and `EditorShared`'s empty state
+ * carries it otherwise, so it is the one handle that exists whether or not there are tabs. The
+ * panel-rule layout reads it as the base for the edge the tab bar *would* occupy: the tab bar lives
+ * in this column, and taking the sidebar column's top instead assumes the two columns share an
+ * origin — an assumption that only holds because every test fixture put the frame at the viewport
+ * origin.
+ */
+export const EDITOR_ROOT_ATTRIBUTE = 'data-dsh-workbench-editor'
+
+/**
  * Mount seat the workbench opens inside the official Plugins page header. The
  * page contributes no header slot, so its missing way back to the Conversation
  * is contributed through the DOM instead.

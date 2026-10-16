@@ -2,6 +2,7 @@
 
 import {
   EDITOR_COLLAPSED_ATTRIBUTE,
+  EDITOR_ROOT_ATTRIBUTE,
   PANEL_HEADER_ATTRIBUTE,
   PANEL_HEADER_HEIGHT_PROPERTY,
   PANEL_RULE_ANCHOR_ATTRIBUTE,
@@ -14,7 +15,7 @@ import {
 const RULE_THICKNESS_PX = 1
 
 /**
- * The header row's height when there is no tab bar to align with.
+ * The header row's height when there is no tab bar to measure.
  *
  * The middle column renders `EditorPane` — and with it the tab bar the header closes against —
  * only while a file is open; with no tabs it early-returns to the empty state, so there is no
@@ -22,15 +23,20 @@ const RULE_THICKNESS_PX = 1
  * panel's whole body jump up the moment they close their last file, and the rule under the title
  * disappear with it.
  *
- * So the height falls back to the height the anchor *would* have had, held as the same pair of
+ * So the edge falls back to the one the tab bar *would* have offered, built from the same pair of
  * declarations the tab bar uses (`editor.module.css`): `.editorHeader` is `height: 38px` plus a
- * `1px` bottom border. `PENDING_HEADER_HEIGHT_PX` is that sum, i.e. the `bottom` edge the header
- * aligns to when a tab bar is present, and `measuredHeaderHeight` subtracts the header's own top
- * offset from it exactly as the measured path does.
+ * `1px` bottom border.
+ *
+ * The base is the **middle column's** top, not the sidebar column's. The two do not share an
+ * origin — the shell insets the sidebar — so deriving the edge from the sidebar's own box drops
+ * the rule by that inset while the measured path, which reads the real tab bar inside the middle
+ * column, stays put. The height survives either way (the same offset cancels between the edge and
+ * the header's own top), which is exactly why the symptom was a line sitting low on an otherwise
+ * correct layout.
  */
 const TAB_BAR_HEIGHT_PX = 38
 const TAB_BAR_BORDER_PX = 1
-const FALLBACK_ANCHOR_BOTTOM_PX = TAB_BAR_HEIGHT_PX + TAB_BAR_BORDER_PX
+const TAB_BAR_OUTER_HEIGHT_PX = TAB_BAR_HEIGHT_PX + TAB_BAR_BORDER_PX
 
 export interface PanelRuleLogger {
   info(message: string): void
@@ -93,23 +99,32 @@ export function createPanelRuleLayout(
     ) as HTMLElement | undefined
 
   /**
-   * A rule spanning `column`'s full width on the row above `bottomEdge`, which
-   * is in viewport space. Undefined when the geometry cannot be trusted: a zero
-   * box means the panel or the column is hidden, a negative offset that the two
-   * no longer share an origin.
+   * A rule spanning `column`'s full width, positioned in **viewport coordinates**.
+   *
+   * Not offsets inside the frame, because the frame is deliberately not a containing block —
+   * making it one would capture the sidebar's absolutely-positioned commit-graph lanes (see the
+   * overlay rule in `layout-styles.ts`). Without that, an absolutely-positioned overlay resolves
+   * `top` against whichever ancestor *is* positioned, and arithmetic that assumed the frame's own
+   * padding box cannot know that ancestor's origin.
+   *
+   * Measured: with the frame sitting 2px below the viewport origin, the computed offset landed the
+   * rule 2px above the seam it continues — in *both* the open-file and the empty-editor states,
+   * because the mistake is in the origin both paths share rather than in either branch. That is
+   * also why no case here caught it: every fixture puts the frame at the viewport origin, where the
+   * two origins coincide and the wrong arithmetic gives the right answer.
+   *
+   * The overlays are `position: fixed` for the same reason: it makes the viewport the containing
+   * block, so these numbers are used as written, on any platform, padding or zoom.
    */
   const measure = (
     owner: HTMLElement,
     column: HTMLElement,
     bottomEdge: number,
   ): MeasuredRule | undefined => {
-    const frameBox = frame.getBoundingClientRect()
     const columnBox = column.getBoundingClientRect()
     if (columnBox.width <= 0 || owner.getBoundingClientRect().width <= 0) return undefined
-    // Offsets inside the frame are relative to its padding box, so the frame's
-    // own border comes off both axes.
-    const left = columnBox.left - frameBox.left - frame.clientLeft
-    const top = bottomEdge - frameBox.top - frame.clientTop - RULE_THICKNESS_PX
+    const left = columnBox.left
+    const top = bottomEdge - RULE_THICKNESS_PX
     if (!(left >= 0) || !(top >= 0)) return undefined
     return { left, top, width: columnBox.width }
   }
@@ -177,16 +192,22 @@ export function createPanelRuleLayout(
     if (column === undefined) return undefined
 
     if (anchor === null) {
-      // No tab bar in the DOM at all: see the no-file case above. A collapsed middle column is
-      // *not* this case — it renders the editor and folds it away, so its anchor exists and is
-      // handled below by the zero-width check. That leaves the empty editor, where the edge the
-      // header closes against is derived from the column's own top plus the tab bar's declared
-      // height: `.editorHeader` is 38px with a 1px bottom border, both columns share the frame's
-      // content top, and a frame with a collapsed middle column must not take this path.
+      // No tab bar in the DOM: the empty editor. A collapsed middle column is *not* this case —
+      // it renders the editor and folds it away, so its anchor exists and is handled below by the
+      // zero-width check.
       if (frame.hasAttribute(EDITOR_COLLAPSED_ATTRIBUTE)) return undefined
+      // The base is the middle column's own root, not the sidebar column's. Both are children of
+      // the frame, but nothing makes them share a top edge: the sidebar is inset by the shell, so
+      // a sidebar-derived edge sits that much lower than the tab bar the rule is meant to continue.
+      // The editor root is the right base because the tab bar lives inside it — and it is present
+      // in this state too (`EditorShared`'s empty state carries the same marker), so the fallback
+      // measures the same column the measured path does, just without the tab bar in it.
+      const editor = frame.querySelector<HTMLElement>(`[${EDITOR_ROOT_ATTRIBUTE}]`)
+      if (editor === null) return undefined
       const columnBox = column.getBoundingClientRect()
-      if (columnBox.width <= 0) return undefined
-      const bottomEdge = columnBox.top + FALLBACK_ANCHOR_BOTTOM_PX
+      const editorBox = editor.getBoundingClientRect()
+      if (columnBox.width <= 0 || editorBox.width <= 0) return undefined
+      const bottomEdge = editorBox.top + TAB_BAR_OUTER_HEIGHT_PX
       const rule = measure(header, column, bottomEdge)
       const headerHeight = bottomEdge - header.getBoundingClientRect().top
       if (rule === undefined || !(headerHeight > 0)) return undefined

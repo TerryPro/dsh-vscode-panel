@@ -5,6 +5,8 @@ import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPanelRuleLayout } from '../src/client/layout/panel-rule-layout.ts'
 import {
+  EDITOR_COLLAPSED_ATTRIBUTE,
+  EDITOR_ROOT_ATTRIBUTE,
   PANEL_HEADER_ATTRIBUTE,
   PANEL_HEADER_HEIGHT_PROPERTY,
   PANEL_RULE_ANCHOR_ATTRIBUTE,
@@ -73,15 +75,19 @@ describe('侧栏面板分隔线实测', () => {
    * The header's height and its rule are one measurement, so withdrawing the rule also withdrew the
    * height and the header fell back to its natural size, moving every row beneath it.
    *
-   * The header therefore keeps the height the tab bar *would* have had: `.editorHeader` is 38px
-   * with a 1px bottom border, so it closes against the column's top plus 39px. Asserted as the same
-   * numbers a rendered tab bar produces, which is what makes the two states indistinguishable.
+   * The header therefore keeps the height the tab bar *would* have had, measured from the middle
+   * column's own root: `.editorHeader` is 38px with a 1px bottom border, and that root is the node
+   * the tab bar lives in. Asserted as the same numbers a rendered tab bar produces, which is what
+   * makes the two states indistinguishable.
    */
   it('keeps the header rule and height when no file is open and there is no tab bar', () => {
     const { frame, anchor } = fixture({
       frame: rect(0, 0, 1440, 900),
       column: rect(48, 0, 300, 900),
       header: rect(60, 6, 276, 34),
+      // The middle column's root, and the tab bar's own box inside it (38px + 1px border).
+      editor: rect(360, 0, 640, 900),
+      anchor: rect(360, 0, 640, 39),
       section: rect(60, 200, 276, 90),
     })
     anchor.remove()
@@ -93,9 +99,39 @@ describe('侧栏面板分隔线实测', () => {
     expect(rules(frame)[0]).toEqual({ left: '48px', top: '38px', width: '300px' })
     expect(rules(frame)[1]).toEqual({ left: '48px', top: '289px', width: '300px' })
     expect(frame.hasAttribute(PANEL_RULE_ATTRIBUTE)).toBe(true)
-    // 39px from the column's top, less the header's own 6px top offset — the same '33px' the
-    // tab-bar case publishes, which is the point: closing the last file must not resize anything.
+    // 39px from the middle column's top, less the header's own 6px top offset — the same '33px'
+    // the tab-bar case publishes, which is the point: closing the last file must not resize
+    // anything.
     expect(style(frame, PANEL_HEADER_HEIGHT_PROPERTY)).toBe('33px')
+  })
+
+  /**
+   * The base for that fallback is the middle column's root, not the sidebar column's.
+   *
+   * Nothing makes the two columns share a top edge — the shell insets the sidebar — so deriving
+   * the edge from the sidebar's own box puts the rule that much lower than the tab bar it is meant
+   * to continue. This case is the one the original fixtures could not express: they hung the anchor
+   * off the frame directly and gave both columns the same origin, where the wrong arithmetic and
+   * the right one agree.
+   */
+  it('measures the fallback edge from the middle column, not the sidebar column', () => {
+    const { frame, anchor } = fixture({
+      frame: rect(0, 0, 1440, 900),
+      // The sidebar starts 2px lower than the editor column.
+      column: rect(48, 2, 300, 898),
+      header: rect(60, 8, 276, 34),
+      editor: rect(360, 0, 640, 900),
+      anchor: rect(360, 0, 640, 39),
+    })
+    anchor.remove()
+
+    createPanelRuleLayout(frame, { info: vi.fn() })
+
+    // 0 + 39 - 1, i.e. the tab bar's own edge — NOT the sidebar's 2px-lower top plus 39.
+    const [headerRule] = rules(frame)
+    expect(headerRule).toEqual({ left: '48px', top: '38px', width: '300px' })
+    // And the height the measured path would publish for the same header.
+    expect(style(frame, PANEL_HEADER_HEIGHT_PROPERTY)).toBe('31px')
   })
 
   /**
@@ -257,7 +293,7 @@ function rect(x: number, y: number, width: number, height: number): FixtureRect 
 }
 
 function fixture(
-  boxes: Partial<Record<'frame' | 'column' | 'header' | 'anchor' | 'section', FixtureRect>>,
+  boxes: Partial<Record<'frame' | 'column' | 'header' | 'anchor' | 'section' | 'editor', FixtureRect>>,
 ) {
   const frame = document.createElement('div')
   const column = document.createElement('div')
@@ -267,16 +303,24 @@ function fixture(
   const section = document.createElement('div')
   section.setAttribute(PANEL_RULE_SECTION_ATTRIBUTE, '')
   column.append(header, section)
+  // The middle column's root, with the tab bar inside it — the real nesting. The header closes
+  // against an edge *inside this column*, so the fallback path needs this node to stand in for it
+  // when there is no tab bar; a fixture that hung the anchor off the frame directly could not tell
+  // the two columns' origins apart, which is the mistake the fallback originally made.
+  const editor = document.createElement('div')
+  editor.setAttribute(EDITOR_ROOT_ATTRIBUTE, '')
   const anchor = document.createElement('header')
   anchor.setAttribute(PANEL_RULE_ANCHOR_ATTRIBUTE, '')
-  frame.append(column, anchor)
+  editor.appendChild(anchor)
+  frame.append(column, editor)
   document.body.appendChild(frame)
   measure(frame, boxes.frame)
   measure(column, boxes.column)
   measure(header, boxes.header)
+  measure(editor, boxes.editor ?? boxes.anchor)
   measure(anchor, boxes.anchor)
   measure(section, boxes.section)
-  return { frame, column, header, anchor, section }
+  return { frame, column, header, anchor, section, editor }
 }
 
 /** The overlays the layout published, in document order. */
