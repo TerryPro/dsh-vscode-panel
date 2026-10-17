@@ -60,13 +60,15 @@ export interface WorkbenchFileTab {
   draft: string
   dirty: boolean
   /**
-   * 这份文件此刻归哪个文件视图，以及它在用哪个模式。
+   * 这份文件此刻在用哪个模式。
    *
-   * 视图与模式的集合由 `editor/view-registry.ts` 声明，这里只记读者的选择：视图缺席就按路径
-   * 重新认领，模式缺席（或已不在该视图的集合里）就退回默认。模式不持久化——每次打开一份
-   * 文件都回到该视图的默认模式。
+   * 模式集合由 `editor/view-registry.ts` 为它认领的那个视图声明，这里只记读者的选择：模式
+   * 缺席、或已不在该视图的集合里，就退回该视图的默认模式。模式不持久化——每次打开一份文件
+   * 都回到默认模式。
+   *
+   * 这里没有「视图」字段：一份文件归哪个视图由文件自己决定（认领者是路径与宿主那个 markdown
+   * 标记的纯函数），存进 tab 的只会是一个过期值——文件改成别的类型时认领者必须跟着换。
    */
-  view?: string
   mode?: string
   /** Per-file editing view toggles so each split pane keeps its own wrapping and diff. */
   wrap: boolean

@@ -193,9 +193,8 @@ export class WorkbenchData {
         tab.draft = file.content
         tab.dirty = false
         tab.externalChange = null
-        // 视图与模式每次打开都重新定：视图按这份文件重新认领，模式回到该视图的默认模式。
-        // 每种格式开在哪个模式、一个笔记本为什么开成单元格，是各视图自己声明的事。
-        delete tab.view
+        // 模式每次打开都重新定：回到该视图声明的默认模式。每种格式开在哪个模式、一个笔记本
+        // 为什么开成单元格，是各视图自己声明的事。
         delete tab.mode
         tab.loading = false
         tab.error = null
