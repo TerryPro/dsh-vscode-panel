@@ -102,7 +102,7 @@ export function SqlDatabaseFilter({
       : <PathLabel path={value} className={css.filterTriggerPath} />
 
   return (
-    <div className={css.databaseFilter} data-disabled={disabled || undefined}>
+    <div className={css.databaseFilter} data-disabled={disabled || undefined} data-dsh-workbench-sql-database-filter="">
       <Menu
         open={open}
         onClose={() => { setOpen(false) }}

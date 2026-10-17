@@ -1179,6 +1179,32 @@ describe('SqlPanel — 按库筛选', () => {
     fireEvent.click(view.getByRole('menuitem', { name: row }))
   }
 
+  /**
+   * The database filter must not scroll with the notebook list.
+   *
+   * They used to share one scroll box, so a notebook scrolled up over the filter and read as part
+   * of the dropdown — the filter looked like it belonged to the row passing under it. The fix is
+   * structural, so it is asserted structurally: the filter is a sibling *outside* the scrolling
+   * list, not a child of it. A `position: sticky` inside the list would pass a "looks fixed"
+   * screenshot check while still sharing the scroll box, which is why the DOM shape is what is
+   * pinned here.
+   */
+  it('keeps the database filter outside the notebook list scroll box', async () => {
+    const harness = workspace()
+
+    await waitFor(() => { expect(harness.view.queryByText('a.sqlnb')).not.toBeNull() })
+    const scroller = harness.view.container.querySelector('[data-dsh-workbench-sql-notebook-scroll]')
+    expect(scroller, 'the notebook list must be its own scroll box').not.toBeNull()
+    // The filter is the dropdown trigger's whole card, identified by its disabled marker, and it
+    // must sit outside that scroller — that is the whole fix: a filter inside the list scrolls
+    // with it and lets entries ride up over the dropdown.
+    const filter = harness.view.container.querySelector('[data-dsh-workbench-sql-database-filter]')
+    expect(filter, 'the filter card must render').not.toBeNull()
+    expect(scroller?.contains(filter as Node)).toBe(false)
+    // And the list still holds the entries, so this is not "the scroller is empty".
+    expect(scroller?.textContent).toContain('a.sqlnb')
+  })
+
   it('shows every notebook until a database is chosen', async () => {
     const harness = workspace()
 

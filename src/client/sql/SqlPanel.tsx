@@ -521,68 +521,77 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
   }, [controller, databaseFilter, ensureWorkspaceScan, t, workspaceId])
 
   // Top half: notebook list (workspace scan)
+  //
+  // The filter and the list are two rows, not one scrolling column: the filter is the list's
+  // scope, so it stays put while the list scrolls under it. They used to share `paneContent`'s
+  // scroll box, which let a notebook scroll up over the filter and read as if it belonged to the
+  // dropdown.
   const notebookListContent = (
-    <div className={css.notebookList}>
+    <div className={css.notebookSection}>
       {/*
-        The filter sits inside the list rather than in the panel header: the header is shared with
+        The filter sits above the list rather than in the panel header: the header is shared with
         the schema tree below, so a control there reads as scoping the whole panel, and this one
         only narrows the list. The repo's own rule for where a note belongs applies to controls too
         — the thing that explains the list belongs beside it.
       */}
-      <SqlDatabaseFilter
-        value={databaseFilter}
-        databases={filterOptions}
-        disabled={workspaceId === undefined}
-        canCreate={canCreateOnDatabase}
-        onChange={chooseDatabaseFilter}
-        onCreate={createNotebookOnDatabase}
-        labels={{
-          filter: t('sqlnotebook.filterByDatabase'),
-          all: t('sqlnotebook.filterAllDatabases'),
-          unassociated: t('sqlnotebook.filterUnassociated'),
-          databases: t('sqlnotebook.filterDatabases'),
-          create: t('sqlnotebook.newNotebookShort'),
-          createTitle: t('sqlnotebook.newNotebookOnDatabase'),
-        }}
-      />
-      {workspaceScan === null || scanning && workspaceScan.notebooks.length === 0
-        ? <div className={css.muted}>{t('sqlnotebook.workspaceNotebooksScanning')}</div>
-        : workspaceScan.notebooks.length === 0
-          ? <div className={css.notebookListEmpty}>{t('sqlnotebook.workspaceNotebooksEmpty')}</div>
-          : visibleNotebooks.length === 0
-            // A filtered-out list is not an empty workspace, and saying so would be a plain
-            // falsehood: the notebooks exist, the reader asked not to see them.
-            ? <div className={css.notebookListEmpty}>{t('sqlnotebook.databaseNotebooksEmpty')}</div>
-            : visibleNotebooks.map((choice) => {
-            const openTab = openPathsMap.get(choice.path)
-            const isOpen = openTab !== undefined
-            const isActive = isOpen && openTab.id === activeTabId
-            const state = isOpen ? (notebookStates.get(openTab.id) ?? null) : null
-            return (
-              <NotebookEntry
-                key={choice.path}
-                choice={choice}
-                isOpen={isOpen}
-                isActive={isActive}
-                state={state}
-                onOpen={openNotebookFromDisk}
-                t={t}
-              />
-            )
-          })}
-      {/*
-        The walk's own admission, said where its result is.
+      <div className={css.notebookFilter}>
+        <SqlDatabaseFilter
+          value={databaseFilter}
+          databases={filterOptions}
+          disabled={workspaceId === undefined}
+          canCreate={canCreateOnDatabase}
+          onChange={chooseDatabaseFilter}
+          onCreate={createNotebookOnDatabase}
+          labels={{
+            filter: t('sqlnotebook.filterByDatabase'),
+            all: t('sqlnotebook.filterAllDatabases'),
+            unassociated: t('sqlnotebook.filterUnassociated'),
+            databases: t('sqlnotebook.filterDatabases'),
+            create: t('sqlnotebook.newNotebookShort'),
+            createTitle: t('sqlnotebook.newNotebookOnDatabase'),
+          }}
+        />
+      </div>
+      <div className={css.notebookList} data-dsh-workbench-sql-notebook-scroll="">
+        {workspaceScan === null || scanning && workspaceScan.notebooks.length === 0
+          ? <div className={css.muted}>{t('sqlnotebook.workspaceNotebooksScanning')}</div>
+          : workspaceScan.notebooks.length === 0
+            ? <div className={css.notebookListEmpty}>{t('sqlnotebook.workspaceNotebooksEmpty')}</div>
+            : visibleNotebooks.length === 0
+              // A filtered-out list is not an empty workspace, and saying so would be a plain
+              // falsehood: the notebooks exist, the reader asked not to see them.
+              ? <div className={css.notebookListEmpty}>{t('sqlnotebook.databaseNotebooksEmpty')}</div>
+              : visibleNotebooks.map((choice) => {
+              const openTab = openPathsMap.get(choice.path)
+              const isOpen = openTab !== undefined
+              const isActive = isOpen && openTab.id === activeTabId
+              const state = isOpen ? (notebookStates.get(openTab.id) ?? null) : null
+              return (
+                <NotebookEntry
+                  key={choice.path}
+                  choice={choice}
+                  isOpen={isOpen}
+                  isActive={isActive}
+                  state={state}
+                  onOpen={openNotebookFromDisk}
+                  t={t}
+                />
+              )
+            })}
+        {/*
+          The walk's own admission, said where its result is.
 
-        A workspace the caps cut short drew exactly the same list as a complete one, so a reader
-        who could not find their notebook had nothing telling them it might be off the end. The
-        empty case above does not cover this — a partial list is not an empty one.
+          A workspace the caps cut short drew exactly the same list as a complete one, so a reader
+          who could not find their notebook had nothing telling them it might be off the end. The
+          empty case above does not cover this — a partial list is not an empty one.
 
-        The notebooks' flag specifically: the walk keeps one per kind, and the database list being
-        cut short says nothing about whether this list is complete.
-      */}
-      {workspaceScan?.notebooksTruncated === true && (
-        <div className={css.muted}>{t('sqlnotebook.scanNotebooksTruncated')}</div>
-      )}
+          The notebooks' flag specifically: the walk keeps one per kind, and the database list being
+          cut short says nothing about whether this list is complete.
+        */}
+        {workspaceScan?.notebooksTruncated === true && (
+          <div className={css.muted}>{t('sqlnotebook.scanNotebooksTruncated')}</div>
+        )}
+      </div>
     </div>
   )
 
@@ -639,7 +648,8 @@ export function SqlPanel({ controller, workspaceId, t }: SqlPanelProps) {
       {/* Two-pane body: top = notebook list, bottom = schema tree */}
       <div className={css.body}>
         <div className={`${css.pane} ${css.paneTop}`} data-dsh-workbench-panel-rule-section="">
-          <div className={css.paneContent}>
+          {/* This pane scrolls in its own list, not here: the filter above it must stay put. */}
+          <div className={`${css.paneContent} ${css.paneContentFixed}`}>
             {notebookListContent}
           </div>
         </div>
