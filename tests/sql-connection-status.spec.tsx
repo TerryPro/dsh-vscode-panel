@@ -33,8 +33,19 @@ afterEach(() => { cleanup() })
 
 const t = (key: string): string => (zh as Record<string, string>)[key] ?? key
 
-/** One notebook and a runtime that answers open with whatever tier it was asked for. */
-function mount(props: { walExpected?: boolean; path?: string; hideReadout?: boolean } = {}): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: Record<string, ReturnType<typeof vi.fn>> } {
+/**
+ * The strip, with the tab bound by default.
+ *
+ * `bound: false` leaves the tab without a runtime, which is the state the strip is in on the paint
+ * before `bind` runs — and for the whole time in the source view, where nothing mounts a surface to
+ * bind. `recorded` is what the notebook's own file names in that state.
+ */
+function mount(props: {
+  walExpected?: boolean
+  path?: string
+  bound?: boolean
+  recorded?: { path: string; access: 'read-only' | 'writable' } | null
+} = {}): { runtime: SqlRuntime; view: ReturnType<typeof render>; api: Record<string, ReturnType<typeof vi.fn>> } {
   const api = {
     sqlOpen: vi.fn((request: { path: string; access?: string }) => Promise.resolve({
       path: request.path,
@@ -53,14 +64,13 @@ function mount(props: { walExpected?: boolean; path?: string; hideReadout?: bool
     setDraft: vi.fn(),
     save: vi.fn(),
   })
-  runtime.bind('tab-1', 'workspace-1', 'query.sqlnb')
-  // `SqlConnectionStatus` renders nothing until a tab is bound, which the call above does.
+  if (props.bound !== false) runtime.bind('tab-1', 'workspace-1', 'query.sqlnb')
   const view = render(
     <SqlConnectionStatus
       runtime={runtime}
       tabId="tab-1"
       t={t as never}
-      {...(props.hideReadout === undefined ? {} : { hideReadout: props.hideReadout })}
+      recorded={props.recorded ?? null}
     />,
   )
   return { runtime, view, api }
@@ -154,30 +164,51 @@ describe('SqlConnectionStatus', () => {
   })
 
   /**
-   * `hideReadout` is the cell view's contract (ADR 0008): the toolbar owns the connection face and
-   * paints `库名 · 档别 · 上限` one row above, so the strip saying it again is one sentence twice
-   * on one screen. These three cases are what keep the suppression narrow — the easy way to pass
-   * the first is to mute the whole component, which would also swallow the two things the toolbar
-   * cannot say.
+   * The strip is the *only* place the connection line is said, in the cell view as much as in the
+   * source view. The cell surface used to paint `库名 · 档别 · 上限` in a row of its own directly
+   * above the strip while the strip held its copy back (`hideReadout`, ADR 0008) — two rows for one
+   * sentence, and nothing told the reader which was the authority. That row is gone, so these cases
+   * are the inverse of the ones they replace: the line must now be present, not absent.
    */
-  it('holds the readout line back when the cell surface is on screen', async () => {
-    const { runtime, view } = mount({ hideReadout: true })
+  it('carries the readout in the cell view too, since the surface row is gone', async () => {
+    const { runtime, view } = mount()
     await runtime.connect('tab-1', 'demo.db', 'read-only')
 
     await waitFor(() => {
-      expect(view.container.textContent).not.toContain(`demo.db · ${zh['sqlnotebook.readOnlyTier']}`)
+      expect(view.container.textContent).toBe(`demo.db · ${zh['sqlnotebook.readOnlyTier']} · 1000`)
     })
-    // And not its placeholders either: "not connected" and "connecting…" are the same line's
-    // absence, so leaving those behind would duplicate the row above just as loudly.
-    expect(view.container.textContent).not.toContain(zh['sqlnotebook.notConnected'])
-    expect(view.container.textContent).not.toContain(zh['sqlnotebook.connecting'])
   })
 
-  it('still reports a lost database file while the readout is held back', async () => {
-    // The one fact the toolbar cannot say: its own readout keeps naming the path the handle was
-    // opened on until the reader disconnects, so suppressing this would leave no signal at all
-    // that the file is gone.
-    const { runtime, view, api } = mount({ hideReadout: true })
+  it('names the file\'s recorded database before the tab has a runtime', () => {
+    // The paint before `bind` runs, and the whole time in the source view: the file already named
+    // its database, so "connecting…" here is the frame a reader takes for a dropped connection.
+    // The cap is dropped — no Host has answered, and inventing `1000` would be a lie.
+    const { view } = mount({ bound: false, recorded: { path: 'examples/demo.db', access: 'read-only' } })
+
+    expect(view.container.textContent).toBe(`examples/demo.db · ${zh['sqlnotebook.readOnlyTier']}`)
+  })
+
+  it('says unconnected before the tab has a runtime and the file names no database', () => {
+    const { view } = mount({ bound: false, recorded: null })
+
+    expect(view.container.textContent).toBe(zh['sqlnotebook.notConnected'])
+  })
+
+  it('prefers the live handle over the file record once the tab is bound', async () => {
+    // The record is a fallback, not a second authority: once `bind` has seeded the store and the
+    // Host has answered, a strip still reading the file's copy would be the stale one of the two.
+    const { runtime, view } = mount({ recorded: { path: 'old.db', access: 'read-only' } })
+    await runtime.connect('tab-1', 'demo.db', 'writable')
+
+    await waitFor(() => {
+      expect(view.container.textContent).toBe(`demo.db · ${zh['sqlnotebook.writableTier']} · 1000`)
+    })
+  })
+
+  it('still reports a lost database file over the readout', async () => {
+    // The readout would keep naming the path the handle was opened on until the reader disconnects,
+    // so a missing file must outrank it rather than sit underneath it.
+    const { runtime, view, api } = mount()
     await runtime.connect('tab-1', 'demo.db', 'read-only')
     api['sqlExecute'] = vi.fn(() => Promise.reject(new WorkbenchApiError(SQL_PATH_UNAVAILABLE_CODE, '数据库文件当前不可访问。')))
     runtime.runCell('tab-1', 'sqlnb-0')
@@ -185,11 +216,9 @@ describe('SqlConnectionStatus', () => {
     await waitFor(() => { expect(view.container.textContent).toBe(zh['sqlnotebook.reconnectHint']) })
   })
 
-  it('still carries the two standing session facts while the readout is held back', async () => {
-    // Neither of these is something the toolbar says, and both stay true while the cell view is
-    // up: an in-memory database is evaporating right now, and a WAL handle will still leave
-    // -wal/-shm behind after the reader disconnects.
-    const { runtime, view } = mount({ walExpected: true, hideReadout: true })
+  it('carries the two standing session facts beside the readout', async () => {
+    // Both are true for the whole session, and the strip is the one surface on screen in both views.
+    const { runtime, view } = mount({ walExpected: true })
     await runtime.connect('tab-1', ':memory:', 'read-only')
 
     await waitFor(() => {

@@ -1,23 +1,22 @@
 /**
  * What the SQL notebook tab is attached to, for the editor's status strip.
  *
- * The strip carries the whole readout in the source view of a `.sqlnb`, where no toolbar is on
- * screen to say it. In the cell view it is wired up too but asked to hold the line back
- * (`hideReadout`), because the toolbar owns the connection face (ADR 0008) and says the same
- * sentence one row above. So the line is never duplicated while the strip still outlives both
- * views — which is the right home for a fact the reader needs to remember between runs.
+ * This is the **one** place that sentence is said, in both views of a `.sqlnb`. The cell surface
+ * used to paint `库名 · 档别 · 上限` in a row of its own directly above the strip, and the strip
+ * held its copy back while that row was on screen (ADR 0008's `hideReadout`). Two rows, one
+ * sentence, and the reader had to know which of them was the authority — so the row is gone and
+ * the strip says it always. It is the surface that outlives both views, and the one the kernel
+ * chip already uses for the same fact on an `.ipynb`.
  *
  * Deliberately not `NotebookKernelStatus`: that chip reports a kernel's phase, and an in-process
  * handle has no phase — a reader told "ready" about a handle would be told about something that
  * does not exist. What this shows is the database, the tier it was granted and the row cap.
  *
- * The two standing session-level facts — a read-only handle on a WAL database still leaves the
- * sidecar files, and an in-memory database evaporates with the handle — also live here rather
- * than above the cell surface, and `hideReadout` does not touch them: the toolbar says neither.
- * They are true for the whole session, and the body strip on top of the cells is read as "this
- * run's status", not "this handle's standing facts". A WAL notice that the reader only sees while
- * a specific cell is on screen is the same kind of leak as a toolbelt of session banners showing
- * only in source view (#16's complaint, kept honest by moving the control).
+ * The two standing session facts — a read-only handle on a WAL database still leaves the
+ * sidecar files, and an in-memory database evaporates with the handle — live here too: they are
+ * true for the whole session, and a banner above the cells is only on screen while a specific
+ * cell is. A notice the reader sees in one view and not the other is a fact they have to
+ * remember the toolbar for (#16's complaint, kept honest by moving the control).
  */
 
 import { Fragment, useCallback, useSyncExternalStore } from 'react'
@@ -25,31 +24,28 @@ import type { ReactNode } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { SQL_PATH_UNAVAILABLE_CODE } from '../../shared/sql-protocol.ts'
 import { connectionReadout } from './sql-connection-readout.ts'
+import type { SqlNotebookConnectionRecord } from './sql-notebook-document.ts'
 import type { SqlRuntime } from './sql-runtime.ts'
 import css from './sql-notebook.module.css'
 
 export interface SqlConnectionStatusProps {
   runtime: SqlRuntime
   tabId: string
-  t: TranslateNS<'workbench'>
   /**
-   * Drop the `库名 · 档别 · 上限` line while the cell surface is on screen.
+   * The database this notebook's own file names, read from its `connection` record.
    *
-   * The toolbar owns the connection face (ADR 0008) and paints that same line in its own status
-   * row, so a strip repeating it is one sentence said twice on one screen. The strip's rule is to
-   * say only what nothing else on screen says — the rule the kernel chip already spells out as
-   * `hideChip`, copied rather than reinvented.
-   *
-   * What survives the suppression is the one fact the toolbar cannot say: a database file that
-   * went missing underneath a live handle. The toolbar's readout keeps naming the old path until
-   * the reader disconnects, so the strip stays the place that tells them to reconnect. The two
-   * standing session facts (in-memory, WAL sidecar) stay too, for the same reason — the toolbar
-   * says neither.
+   * Only consulted while the tab has no runtime yet: `bind` seeds the store with the same record,
+   * so from that moment the store is the authority and this is dead weight. The gap it covers is
+   * the paint before the bind effect runs — and in the source view, where no surface mounts to
+   * bind anything and the sidebar may be closed, the whole time. Without it the strip would open
+   * on "connecting…" for a notebook whose file already named its database, which is the frame the
+   * reader reads as *disconnected while loading*.
    */
-  hideReadout?: boolean
+  recorded: SqlNotebookConnectionRecord | null
+  t: TranslateNS<'workbench'>
 }
 
-export function SqlConnectionStatus({ runtime, tabId, t, hideReadout = false }: SqlConnectionStatusProps) {
+export function SqlConnectionStatus({ runtime, tabId, recorded, t }: SqlConnectionStatusProps) {
   const subscribe = useCallback((notify: () => void) => runtime.subscribe(tabId, notify), [runtime, tabId])
   const readState = useCallback(() => runtime.peek(tabId), [runtime, tabId])
   const state = useSyncExternalStore(subscribe, readState)
@@ -62,36 +58,44 @@ export function SqlConnectionStatus({ runtime, tabId, t, hideReadout = false }: 
   /**
    * The strip's one line.
    *
-   * `lostFile` is checked first and is never suppressed: it is the one fact the toolbar cannot
-   * say, because the toolbar's own readout keeps naming the path the handle was opened on until
-   * the reader disconnects. Everything below it is what the cell surface's status row already
-   * says, so `hideReadout` drops the whole branch rather than just the final readout — leaving
-   * "connecting…" or "not connected" on screen while the row above says the same words would be
-   * the duplication this flag exists to remove.
+   * `lostFile` is checked first: it outranks the readout because the readout would keep naming the
+   * path the handle was opened on until the reader disconnects, and a line that says `demo.db ·
+   * 只读` about a file that is gone is the one thing this row must not claim.
+   *
+   * `rowLimit: 0` is the marker `connectionReadout` reads as "the Host has not answered" and drops
+   * the cap segment for, which is what lets the fallback name a real path and tier without
+   * inventing a number nobody granted.
    */
   const text = lostFile
     ? t('sqlnotebook.reconnectHint')
-    : hideReadout
-      ? ''
-      : state === null || state.connecting
+    : state === null
+      ? recorded === null
+        ? t('sqlnotebook.notConnected')
+        : connectionReadout({ path: recorded.path, access: recorded.access, rowLimit: 0 }, {
+          readOnly: t('sqlnotebook.readOnlyTier'),
+          writable: t('sqlnotebook.writableTier'),
+        })
+      : state.connecting && connection === null
         ? t('sqlnotebook.connecting')
         : connection === null
           ? t('sqlnotebook.notConnected')
           : connectionReadout(connection, { readOnly: t('sqlnotebook.readOnlyTier'), writable: t('sqlnotebook.writableTier') })
 
   /*
-   * The two standing session banners. The strip outlives the cell surface, so it is the
-   * right home for the same fact regardless of which view the reader has on screen.
+   * The two standing session banners. The strip is on screen in both views, so it is the home
+   * for the same fact whichever one the reader is in.
    */
   const isMemory = connection !== null && connection.path === ':memory:'
   const leavesSidecar = connection?.walSidecarExpected === true
   const notices: ReactNode[] = []
   if (isMemory) notices.push(<span key="memory" className={css.statusBarNotice}>{t('sqlnotebook.memoryNotice')}</span>)
   if (leavesSidecar) notices.push(<span key="sidecar" className={css.statusBarNotice}>{t('sqlnotebook.walSidecarNotice')}</span>)
-  if (notices.length === 0 && text === '') return null
   return (
     <Fragment>
-      {text === '' ? null : <span>{text}</span>}
+      {/* `role="status"` came with the row this replaced: the line is the reader's only notice that
+       * a handle just opened, refused, or went away underneath them, and the strip itself is a
+       * `contentinfo` landmark, which no screen reader treats as live. */}
+      <span role="status">{text}</span>
       {notices}
     </Fragment>
   )

@@ -259,24 +259,25 @@ describe('WorkbenchEditor multi-file tabs', () => {
   })
 
   /**
-   * Which of the two surfaces says "here is the database this notebook is on" is decided by the
-   * shell, not by the strip (ADR 0008): the cell view's own bottom strip states it while the cell
-   * surface is mounted, and the workbench status strip takes over when that surface is gone (i.e.
-   * in source view). Asserted here rather than in the strip's own spec because *whether* the
-   * strip is wired up at all is a shell-level decision — a strip test can only check what it
-   * renders when it is asked to render.
+   * Which surface says "here is the database this notebook is on" is decided by the shell, not by
+   * the strip: the strip says it in both views, and the cell surface says it nowhere. It used to be
+   * split — the surface painted the line in a row of its own and the strip held its copy back
+   * (`hideReadout`, ADR 0008), which put two rows carrying one sentence at the bottom of the editor.
+   * Asserted here rather than in the strip's own spec because *whether* the strip is wired up at all
+   * is a shell-level decision — a strip test can only check what it renders when asked to render.
    */
-  it('leaves the connection readout to the cell surface in the cell view; the workbench status strip stays empty', () => {
+  it('says the connection readout once, in the workbench status strip, in the cell view', () => {
     openSqlNotebookTab('query.sqlnb', SQLNB_DRAFT, 'notebook')
     const controller = controllerFake()
     controller.sqlRuntime.peek.mockReturnValue(SQL_CONNECTED_STATE)
     const view = renderEditor(controller)
 
-    // The cell surface paints the readout in its own bottom strip (`.notebookStatusBar`); the
-    // workbench's `editorStatusBar` does not carry it, because the cell view is on screen and
-    // would otherwise show the same line twice.
     const statusBar = view.container.querySelector('[class*="editorStatusBar"]')
-    expect(statusBar?.textContent ?? '').not.toContain('demo.db · 只读 · 1000')
+    expect(statusBar?.textContent ?? '').toContain('demo.db · 只读 · 1000')
+    // And it is said exactly once on the whole surface: the point of the merge was one sentence,
+    // one row. A second copy anywhere — a row under the cells, a second attachment — fails this.
+    const occurrences = (view.container.textContent ?? '').split('demo.db · 只读 · 1000').length - 1
+    expect(occurrences, 'the connection readout must appear exactly once').toBe(1)
   })
 
   it('carries the whole connection readout over the raw JSON', () => {
@@ -288,6 +289,29 @@ describe('WorkbenchEditor multi-file tabs', () => {
     const view = renderEditor(controller)
 
     expect(view.getByText('demo.db · 只读 · 1000')).toBeTruthy()
+  })
+
+  it('names the file\'s recorded database in the source view before the tab has a runtime', () => {
+    // Nothing mounts a surface in the source view, so nothing binds the tab: the runtime answers
+    // `null` here for the whole time, not just for one paint. The strip must still say what the
+    // file says the notebook is on — an empty attachment would read as "this notebook has no
+    // database" to a reader whose file names one.
+    openSqlNotebookTab(
+      'query.sqlnb',
+      JSON.stringify({
+        version: 2,
+        cells: [{ kind: 'sql', source: 'SELECT 1' }],
+        connection: { path: 'examples/demo.db', access: 'read-only' },
+      }),
+      'source',
+    )
+    const controller = controllerFake()
+    const view = renderEditor(controller)
+
+    const statusBar = view.container.querySelector('[class*="editorStatusBar"]')
+    expect(statusBar?.textContent ?? '').toContain(`examples/demo.db · ${zh['sqlnotebook.readOnlyTier']}`)
+    // The cap is the Host's to give, and no Host has answered: the line must not invent one.
+    expect(statusBar?.textContent ?? '').not.toContain('1000')
   })
 
   it('offers the SQL notebook outline in the cell view', () => {

@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { SqlConnectionStatus } from '../../sql/SqlConnectionStatus.tsx'
 import { SqlNotebookSurface, type SqlNotebookLabels } from '../../sql/SqlNotebookSurface.tsx'
 import type { SqlResultLabels } from '../../sql/SqlResultBlockView.tsx'
-import { isSqlNotebookPath } from '../../sql/sql-notebook-document.ts'
+import { isSqlNotebookPath, parseSqlNotebook } from '../../sql/sql-notebook-document.ts'
 import { sqlWorkspaceScanner, type SqlWorkspaceScanner } from '../../sql/sql-workspace-cache.ts'
 import { IconOutline16, IconPreviewOutline16, IconSourceOutline16 } from '../EditorViewIcons.tsx'
 import type { FileView, FileViewBodyProps, FileViewChromeProps } from '../view-registry.ts'
@@ -60,17 +60,10 @@ function SqlNotebookBody({ tab, mode, workspaceId, controller, codeEditor, markd
     memoryDatabase: t('sqlnotebook.memoryDatabase'),
     connect: t('sqlnotebook.connect'),
     disconnect: t('sqlnotebook.disconnect'),
-    connecting: t('sqlnotebook.connecting'),
-    notConnected: t('sqlnotebook.notConnected'),
     noDatabase: t('sqlnotebook.noDatabase'),
-    readOnlyTier: t('sqlnotebook.readOnlyTier'),
-    writableTier: t('sqlnotebook.writableTier'),
-    tierLocked: t('sqlnotebook.tierLocked'),
     rescan: t('sqlnotebook.rescan'),
     scanTruncated: t('sqlnotebook.scanTruncated'),
     disconnectHint: t('sqlnotebook.disconnectHint'),
-    memoryNotice: t('sqlnotebook.memoryNotice'),
-    walSidecarNotice: t('sqlnotebook.walSidecarNotice'),
     runAllStopped: (index, remaining) => t('sqlnotebook.runAllStopped', { index: String(index), remaining: String(remaining) }),
     disconnectedRolledBack: t('sqlnotebook.disconnectedRolledBack'),
     runAllNotice: count => t('sqlnotebook.runAllNotice', { count: String(count) }),
@@ -154,19 +147,33 @@ function SqlNotebookToolbar({ tab, mode, controller, t }: FileViewChromeProps) {
 
 /**
  * What the status strip says this tab is attached to: the connection readout for a SQL notebook in
- * either view. Built here rather than inside the surface because the strip outlives both views —
- * the same line says the database in source view (where the cell surface is not on screen) and in
- * cell view (where it is). The runtime's store is seeded with the file's recorded connection in
- * `bind`, so the first paint after the surface mounts already reports the right database rather
- * than flashing "未连接" under tables the file just loaded.
+ * either view, and the only place that sentence is said.
+ *
+ * Built here rather than inside the surface because the strip outlives both views. The cell surface
+ * used to carry its own copy of the line at its bottom edge; that row is gone, so the strip answers
+ * in the cell view as well as in the source view.
+ *
+ * The file's own `connection` record is passed down as the answer for the moment the tab has no
+ * runtime: `bind` runs in the surface's mount effect, and the source view mounts no surface at all
+ * — so without it the strip would open on "connecting…" for a notebook whose file already named its
+ * database, which is the frame the reader takes for a dropped connection. Two things keep that
+ * cheap, and both matter because this component re-renders on every keystroke in the source view:
+ * the parse is memoised on the draft, and it is skipped entirely once the tab is bound — which is
+ * the steady state whenever the SQL panel is open, since the panel binds every notebook it can see.
+ * A stale `false` here is harmless either way: the strip prefers the live state over the record.
  */
-function SqlConnectionAttachment({ tab, mode, controller, t }: FileViewChromeProps) {
+function SqlConnectionAttachment({ tab, controller, t }: FileViewChromeProps) {
+  const bound = controller.sqlRuntime.peek(tab.id) !== null
+  const recorded = useMemo(
+    () => (bound ? null : parseSqlNotebook(tab.draft).connection),
+    [bound, tab.draft],
+  )
   return (
     <SqlConnectionStatus
       runtime={controller.sqlRuntime}
       tabId={tab.id}
       t={t}
-      hideReadout={mode === 'notebook'}
+      recorded={recorded}
     />
   )
 }

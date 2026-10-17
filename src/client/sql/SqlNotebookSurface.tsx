@@ -40,7 +40,6 @@ import {
 import css from './sql-notebook.module.css'
 import { SqlResultBlockView, type SqlResultLabels } from './SqlResultBlockView.tsx'
 import { buildSqlNotebookOutline } from './sql-notebook-outline.ts'
-import { connectionReadout } from './sql-connection-readout.ts'
 import { useDatabaseScan } from './use-database-scan.ts'
 import type { SqlWorkspaceCache, SqlWorkspaceScanner } from './sql-workspace-cache.ts'
 import {
@@ -55,7 +54,7 @@ import {
   type SqlNotebookDocument,
   type SqlNotebookEdit,
 } from './sql-notebook-document.ts'
-import type { SqlCellRun, SqlNotebookConnection, SqlRuntime } from './sql-runtime.ts'
+import type { SqlCellRun, SqlRuntime } from './sql-runtime.ts'
 
 export interface SqlNotebookLabels {
   save: string
@@ -116,30 +115,28 @@ export interface SqlNotebookLabels {
   statusError: string
   statusCancelled: string
   // --- the connection --------------------------------------------------------------------
+  /*
+   * Only the controls' words. The readout the row used to spell — `库名 · 档别 · 上限`, plus 正在连接…
+   * / 未连接数据库 and the two standing notices — is the status strip's alone now (see
+   * `SqlConnectionStatus`), so the labels that existed only to build that sentence are gone; the
+   * picker asks for a database, never for a tier.
+   */
   database: string
   memoryDatabase: string
   connect: string
   disconnect: string
-  connecting: string
-  notConnected: string
   /** Offered instead of a connection when the reader has not picked a file yet. */
   noDatabase: string
-  readOnlyTier: string
-  writableTier: string
-  /** Why the tier cannot be changed while a handle is open. */
-  tierLocked: string
   rescan: string
   /*
-   * The three connection-domain facts the sidebar used to say. They moved with the control they
-   * explain (ADR 0008), which is `ca2296c`'s rule read the other way round: the copy that sits next
-   * to the thing it describes is the one that survives, so when the database list moved here, its
-   * notes had to move here too — otherwise the warning would be floating a column away from the
-   * picker it warns about.
+   * The two connection-domain caveats that sit on a control of this toolbar rather than on a line:
+   * the walk's truncation rides on the picker, the cost of disconnecting on its button. They moved
+   * with the control they explain (ADR 0008), which is `ca2296c`'s rule read the other way round:
+   * the copy that sits next to the thing it describes is the one that survives — otherwise the
+   * warning would be floating a column away from the picker it warns about.
    */
   scanTruncated: string
   disconnectHint: string
-  memoryNotice: string
-  walSidecarNotice: string
   /** A Run All that stopped mid-stretch has to say where, and how many it left. */
   runAllStopped: (index: number, remaining: number) => string
   /** The Host rolls an open transaction back when a handle closes; that is worth saying. */
@@ -251,34 +248,6 @@ export function SqlNotebookSurface({
 
   const connection = runState?.connection ?? null
   const busy = runState !== null && (runState.connection !== null) && runtime.busy(tabId)
-  /**
-   * What the status row says about the handle.
-   *
-   * The runtime's store is the authority, but it is only populated once `bind` has run in the
-   * mount effect — so on the first synchronous render there is nothing to read. The file's own
-   * record is the fallback: it is parsed from the draft the tab already holds, and it is the same
-   * fact `bind` will seed the store with a moment later. Without it a notebook reopened onto a
-   * database it had already named would flash "not connected" under tables it had just loaded.
-   *
-   * `rowLimit: 0` is the marker `connectionReadout` reads as "the Host has not answered yet"; it
-   * drops the cap segment, so the first paint names the database and the tier truthfully and adds
-   * the cap when the Host's answer refines it.
-   */
-  const readoutConnection = connection ?? (document.connection === null ? null : {
-    path: document.connection.path,
-    access: document.connection.access,
-    sqliteVersion: '',
-    rowLimit: 0,
-    walSidecarExpected: false,
-  })
-  const statusText = readoutConnection !== null
-    ? connectionReadout(readoutConnection, {
-      readOnly: labels.readOnlyTier,
-      writable: labels.writableTier,
-    })
-    : runState?.connecting === true
-      ? labels.connecting
-      : labels.notConnected
   /**
    * An in-memory database has no tier: there is no file to protect, so the Host always opens
    * it writable and refuses a request that names a tier for it. The toggle is therefore
@@ -750,29 +719,11 @@ export function SqlNotebookSurface({
         )}
       </div>
       {/*
-        The connection readout, in the row that owns the connection.
-
-        ADR 0008 gave the toolbar the whole connection face, and this line is the part of it that
-        has no control to sit on: which database the handle is on, at which tier, under which row
-        cap. The workbench's status strip below carries the same sentence in the source view, where
-        there is no toolbar to say it, and `SqlConnectionStatus` hides its copy here — the strip's
-        rule, already written down for the kernel chip as `hideChip`, is to say only what nothing
-        else on screen says.
-
-        It reads the runtime's seed as well as the Host's answer. `bind` puts the file's recorded
-        path and tier into the store before any request is on the wire, so a notebook reopened onto
-        a database it already named says so on the first paint instead of flashing "not connected"
-        under tables the file had just loaded; `connectionReadout` drops the cap segment until the
-        Host answers with a real one.
-      */}
-      <div className={css.notebookStatusBar} role="status">
-        {statusText}
-      </div>
-      {/*
-        The two standing facts about the live handle — an in-memory database evaporates with the
-        handle, and a read-only handle on a WAL database leaves -wal/-shm beside the file — stay in
-        the workbench's `editorStatusBar`. They are true for the whole session rather than for the
-        cell view, and the strip outlives this surface.
+        No connection readout here. The row used to sit at the bottom of this surface and say
+        `库名 · 档别 · 上限`, one row above the workbench's status strip — two rows carrying one
+        sentence, with the strip holding its copy back while this one was on screen. The strip is
+        now the only place that line is said, in both views (`SqlConnectionStatus`), so this
+        surface ends at its cells and the editor keeps a single bottom row.
       */}
     </div>
   )

@@ -390,33 +390,6 @@
 }
 
 /*
- * ---------- connection readout ----------
- *
- * The connection face is the toolbar's (ADR 0008), and this is the part of it that has no control
- * to sit on: which database the handle is on, at which tier, under which cap. The workbench's
- * `editorStatusBar` carries the same sentence in the source view, where no toolbar is on screen,
- * and `SqlConnectionStatus` hides its copy while this row is — the strip says only what nothing
- * else on screen says, the rule the kernel chip already spells out as `hideChip`.
- */
-.notebookStatusBar {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  box-sizing: border-box;
-  min-height: 24px;
-  padding: 3px 10px;
-  border-block-start: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-layer-1);
-  font-size: 12px;
-  /* One line, clipped rather than wrapped: a long path must not grow the row and steal height
-     from the cells, and the picker's `title` is where the whole path is readable. */
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--dsw-alias-label-secondary);
-}
-
-/*
  * ---------- results ----------
  *
  * The table body is the Host's normalized values and nothing else: a clipped value keeps its
@@ -510,8 +483,10 @@
 .resultTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
-  font-family: var(--dsw-font-family-code, ui-monospace, monospace);
+  /* The theme's 12px text style — the same size the cells already used, in the workbench's own
+     typeface rather than the editor's. Query output is a grid of data, not source code; setting it
+     in the code family made the result area read as a second editor bolted under the cell. */
+  font: var(--dsw-font-xxs-12);
 }
 
 .resultTable th,

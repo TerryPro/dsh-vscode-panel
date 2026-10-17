@@ -106,17 +106,10 @@ const labels: SqlNotebookLabels = {
   memoryDatabase: zh['sqlnotebook.memoryDatabase'],
   connect: zh['sqlnotebook.connect'],
   disconnect: zh['sqlnotebook.disconnect'],
-  connecting: zh['sqlnotebook.connecting'],
-  notConnected: zh['sqlnotebook.notConnected'],
   noDatabase: zh['sqlnotebook.noDatabase'],
-  readOnlyTier: zh['sqlnotebook.readOnlyTier'],
-  writableTier: zh['sqlnotebook.writableTier'],
-  tierLocked: zh['sqlnotebook.tierLocked'],
   rescan: zh['sqlnotebook.rescan'],
   scanTruncated: zh['sqlnotebook.scanTruncated'],
   disconnectHint: zh['sqlnotebook.disconnectHint'],
-  memoryNotice: zh['sqlnotebook.memoryNotice'],
-  walSidecarNotice: zh['sqlnotebook.walSidecarNotice'],
   runAllStopped: (index, remaining) => zh['sqlnotebook.runAllStopped']
     .replace('{index}', String(index)).replace('{remaining}', String(remaining)),
   disconnectedRolledBack: zh['sqlnotebook.disconnectedRolledBack'],
@@ -471,20 +464,16 @@ describe('SqlNotebookSurface 文档层', () => {
   })
 
   /**
-   * The notebook whose file already records a database must not flash a "connecting…"
-   * placeholder on the first paint (ADR 0007): the file is the only thing that can answer
-   * before the auto-connect lands, and the status bar must answer from it. The earlier
-   * version of this surface routed `runState === null` to the placeholder, which read as
-   * a "not connected" line sitting under tables the file had just loaded — the user
-   * reported it as "disconnected while loading". The auto-connect still races, but the bar
-   * says the path and tier the file recorded for the whole stretch, and the Host's answer
-   * (which carries the row cap) only refines it.
+   * The surface paints no connection line of its own.
    *
-   * The case holds `sqlOpen` so the auto-connect is paused on the wire: without the
-   * fallback the bar would have nowhere to look but `runState`, which is `null` until
-   * `bind` runs in the effect.
+   * It used to carry `库名 · 档别 · 上限` in a row at its bottom edge, right above the workbench's
+   * status strip — two rows on screen for one sentence. That row is gone and the strip is the only
+   * place the line is said (`sql-connection-status.spec.tsx` owns that behaviour now, including the
+   * "no connecting… flash" promise the deleted row used to keep). What the surface still owes on the
+   * first paint is that its *picker* names the database the file recorded, so a reader whose
+   * auto-connect was refused can reconnect without hunting for the file again.
    */
-  it('does not flash a connecting placeholder on first paint when the file already records a database', () => {
+  it('paints no connection row of its own, and still names the recorded database in the picker', () => {
     const draft = JSON.stringify({
       version: 2,
       cells: [{ kind: 'sql', source: 'SELECT 1' }],
@@ -492,15 +481,14 @@ describe('SqlNotebookSurface 文档层', () => {
     })
     const held = new Promise<{ path: string; access: 'read-only'; sqliteVersion: string; walSidecarExpected: boolean; rowLimit: number }>(() => undefined)
     const harness = open(draft, { open: () => held })
-    // The file recorded `demo.db` as read-only, so the very first synchronous render should
-    // already say so — no "connecting…" placeholder, no "not connected" line.
-    expect(harness.view.queryByText(labels.connecting)).toBeNull()
-    expect(harness.view.queryByText(labels.notConnected)).toBeNull()
-    // Asserted as the bar's whole sentence rather than a `/demo\.db/` search: the path also
-    // appears as the picker's selected option, and a loose match would pass on either one while
-    // the bar itself said nothing. This is the line that must carry the path *and* the tier, and
-    // must not yet carry a cap — `connectionReadout` drops that until the Host answers with one.
-    expect(harness.view.getByText(`demo.db · ${labels.readOnlyTier}`)).toBeTruthy()
+
+    const text = harness.view.container.textContent ?? ''
+    expect(text).not.toContain(`demo.db · ${zh['sqlnotebook.readOnlyTier']}`)
+    expect(text).not.toContain(zh['sqlnotebook.connecting'])
+    expect(text).not.toContain(zh['sqlnotebook.notConnected'])
+    // The picker holds the recorded path as its own option and has it selected.
+    const picker = harness.view.getByRole('combobox', { name: zh['sqlnotebook.database'] }) as HTMLSelectElement
+    expect(picker.value).toBe('demo.db')
   })
 
   it('opens a file that records no database without connecting anything', async () => {
@@ -511,7 +499,6 @@ describe('SqlNotebookSurface 文档层', () => {
     await new Promise(resolve => { setTimeout(resolve, 0) })
 
     expect(harness.api.sqlOpen).not.toHaveBeenCalled()
-    expect(harness.view.getByText(labels.notConnected)).toBeTruthy()
     expect((harness.view.getAllByRole('button', { name: labels.runCell })[0] as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -571,8 +558,8 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(harness.api.sqlOpen).toHaveBeenCalledWith({
       workspaceId: 'workspace-1', notebook: 'query.sqlnb', path: 'demo.db', access: 'read-only',
     })
-    // The readout answers with what the Host granted, in the same row the picker sits in.
-    await harness.view.findByText('demo.db · 只读 · 1000')
+    // The readout the connect produced is not this surface's to show: it belongs to the workbench's
+    // status strip (see the case that asserts the surface paints no connection row).
   })
 
   it('offers an in-memory database beside the files', () => {
@@ -644,7 +631,7 @@ describe('SqlNotebookSurface 连接与执行', () => {
 
     // The requirement is that no read-only/writable choice is shown for it; a toggle that
     // merely defaulted to writable would still offer the answer the Host refuses.
-    expect(harness.view.queryByRole('combobox', { name: labels.readOnlyTier })).toBeNull()
+    expect(harness.view.queryByRole('combobox', { name: zh['sqlnotebook.readOnlyTier'] })).toBeNull()
     fireEvent.click(harness.view.getByRole('button', { name: labels.connect }))
     await waitFor(() => { expect(harness.api.sqlOpen).toHaveBeenCalled() })
     expect(harness.api.sqlOpen).toHaveBeenCalledWith({
@@ -675,20 +662,15 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(await harness.view.findByText(labels.disconnectedRolledBack)).toBeTruthy()
   })
 
-  it('does not expose the tier as a picker in the toolbar; the status bar carries it instead', async () => {
+  it('does not expose the tier as a picker in the toolbar', () => {
     // The toolbar used to hold a `<select>` for the tier, and a separate test used to assert
-    // that the select was disabled while a handle was open. The tier is now a fact about the
-    // handle, not a control: it lives in the status bar alongside the path, and a notebook that
-    // wants a different tier reconnects to a different target. A `<select>` would be one more
-    // thing to scan in a row of icons.
+    // that the select was disabled while a handle was open. The tier is a fact about the handle,
+    // not a control: it is spelled by the status strip, and a notebook that wants a different tier
+    // reconnects to a different target. A `<select>` would be one more thing to scan in a row of
+    // icons. Where the tier is *said* is asserted in `sql-connection-status.spec.tsx`.
     const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
-    expect(harness.view.queryByRole('combobox', { name: labels.readOnlyTier })).toBeNull()
-    expect(harness.view.queryByRole('combobox', { name: labels.writableTier })).toBeNull()
-
-    await harness.connect()
-    // After the connect, the status bar reads the path · tier · rowLimit; that one line is the
-    // reader's only way to see the tier, and it changes only when the handle itself does.
-    await harness.view.findByText('demo.db · 只读 · 1000')
+    expect(harness.view.queryByRole('combobox', { name: zh['sqlnotebook.readOnlyTier'] })).toBeNull()
+    expect(harness.view.queryByRole('combobox', { name: zh['sqlnotebook.writableTier'] })).toBeNull()
   })
 
   /**
@@ -706,36 +688,10 @@ describe('SqlNotebookSurface 连接与执行', () => {
     expect(disconnect.getAttribute('title')).toBe(labels.disconnectHint)
   })
 
-  // The two standing facts about a live handle moved with the control they describe, and stayed
-  // lines rather than becoming tooltips: an in-memory database is still evaporating while the reader
-  // is four queries in, and a WAL sidecar is still there after the handle closes.
-  // The two standing facts about the live handle used to render as a line above the cells. They
-  // moved into the editor's status strip (the `attachment` slot `EditorStatusBar` already owns),
-  // so the cell surface no longer carries them — the strip outlives the cell view and is the
-  // right home for a fact the reader needs to know about the handle, not about the cell. The
-  // behaviour each test pinned now lives in `sql-connection-status.spec.tsx`, with a fixture that
-  // renders the same component the workbench wires into the strip.
-
-  it('does not put the in-memory notice above the cells, because the strip is the home for it', async () => {
-    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]))
-    const picker = harness.view.getByRole('combobox', { name: labels.database }) as HTMLSelectElement
-    await waitFor(() => { expect(picker.options.length).toBeGreaterThan(2) })
-    fireEvent.change(picker, { target: { value: ':memory:' } })
-    fireEvent.click(harness.view.getByRole('button', { name: labels.connect }))
-
-    // The picker change is what triggers the connect; wait for the handle to land before sampling
-    // the surface, otherwise the read races the connect.
-    await harness.view.findByText(labels.memoryDatabase)
-    expect(harness.view.container.textContent).not.toContain(labels.memoryNotice)
-  })
-
-  it('does not put the WAL sidecar notice above the cells, because the strip is the home for it', async () => {
-    const harness = open(notebookDraft([{ kind: 'sql', source: 'SELECT 1' }]), { walExpected: true })
-    await harness.connect()
-
-    // Same reasoning as the memory test: the connect must land before the read.
-    expect(harness.view.container.textContent).not.toContain(labels.walSidecarNotice)
-  })
+  // The two standing facts about a live handle — an in-memory database evaporating with the handle,
+  // and a read-only handle on a WAL database leaving -wal/-shm beside the file — are said by the
+  // workbench's status strip, in both views. The surface renders neither; `sql-connection-status
+  // .spec.tsx` asserts the strip carries them beside the readout.
 
   /**
    * A short database list that claims to be complete is the failure `scanTruncated` exists to
@@ -1507,6 +1463,27 @@ describe('SqlNotebookSurface 拖拽与折叠', () => {
  * to argue with a failing test rather than with a screenshot.
  */
 describe('SqlResultBlockView 结果表', () => {
+  /**
+   * The grid is data, not source code.
+   *
+   * The result table was set in `--dsw-font-family-code`, which the DSH theme does not define — so
+   * it silently fell back to `ui-monospace`, and the whole grid (header chip included) rendered in
+   * the editor's typeface. It now takes the theme's own 12px text style, which keeps the size and
+   * drops the monospace. Asserted against the stylesheet because jsdom applies no CSS: a DOM test
+   * cannot see a font family, so nothing else here would notice the grid turning back into code.
+   */
+  it('uses the theme text style, not the editor code family', () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
+    const table = (stylesheet.match(/\.resultTable \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(table, 'the .resultTable rule must exist').toBeDefined()
+    // The theme's 12px text shorthand — same size as before, theme family instead of monospace.
+    expect(table).toContain('font: var(--dsw-font-xxs-12)')
+    // The code family must not come back: it is what made the grid look like a second editor.
+    expect(table).not.toContain('--dsw-font-family-code')
+    // And the size must not drift while the family changes.
+    expect(table).not.toMatch(/font-size:\s*1[13]px/u)
+  })
+
   it('draws a column rule on every cell, not only a row rule', () => {
     const stylesheet = readFileSync(resolve(process.cwd(), 'src/client/sql/sql-notebook.module.css'), 'utf8')
     const block = (stylesheet.match(/\.resultTable th,\s*\.resultTable td \{[\s\S]*?\n\}/u) ?? [])[0]
