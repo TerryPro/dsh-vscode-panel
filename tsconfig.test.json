@@ -62,6 +62,8 @@
     "tests/terminal-panel.spec.tsx",
     "tests/request-fence.spec.ts",
     "tests/view-registry.spec.ts",
-    "tests/route-table.spec.ts"
+    "tests/route-table.spec.ts",
+    "tests/host-activation.spec.ts",
+    "tests/request-trust.spec.ts"
   ]
 }

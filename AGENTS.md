@@ -46,7 +46,7 @@ npm run test:isolation  # scripts/probe-isolation.mjs：证明同目录两个笔
 
 - 禁止引入 `ws`、`node-pty`（以及任何需要本地编译的原生模块）；`tests/package-manifest.spec.ts` 会直接断言它们不存在。终端走 DSH 官方 `@deepseek-ai/dsh-api-terminal-controller`，内核通信用纯 Node 实现的 ZMTP + JSON 消息。
 - 客户端运行时不得新增依赖：浏览器侧只允许已有的 CodeMirror / xterm / 官方 primitives。
-- 每个 `@deepseek-ai/dsh*` peer 的范围都必须包含当前测试的运行时版本（`^0.2.0-rc.2`），DSH 启动时会逐个校验并拒绝不匹配的插件。
+- 每个 `@deepseek-ai/dsh*` peer 的范围都必须包含当前测试的运行时版本（`^0.2.1-rc.1`），DSH 启动时会逐个校验并拒绝不匹配的插件。`cordis.patch.yml` 的行级 `inject` 与 `src/index.ts` 的 `inject` 导出必须同时跟随运行时提供的服务名（0.2.1 起是 `webStartup`；旧的 `webRuntime` 已不存在，写错会让整行插件永远 pending 而不是报错）。
 
 ## 文案与国际化
 

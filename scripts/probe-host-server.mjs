@@ -118,6 +118,8 @@ export async function serveHostBundle(bundlePath, workspaceRoot) {
       error: message => { logs.push(`error ${message}`) },
     },
     webServer: {
+      // The fence reads the listener's bind address; the probe binds loopback.
+      host: '127.0.0.1',
       register(route) {
         routes.push(route)
         return () => {
@@ -126,7 +128,8 @@ export async function serveHostBundle(bundlePath, workspaceRoot) {
         }
       },
     },
-    webRuntime: { trustedHosts: [] },
+    // DSH 0.2.1 provides `webStartup` (the `webRuntime` service no longer mounts).
+    webStartup: { trustedHosts: [] },
     workspaceRegistry: { get: id => (id === 'ws-1' ? { id, path: workspaceRoot } : undefined) },
     fs: makeFs(workspaceRoot),
     effect(fn) {

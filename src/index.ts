@@ -6,6 +6,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type { WebStartupValues } from '@deepseek-ai/dsh-web-app/startup'
 import type {} from '@deepseek-ai/dsh-workspace'
 import {
   FILE_ROUTES,
@@ -35,15 +36,18 @@ import { SqlBackend } from './host/sql-backend.ts'
 import { WorkspaceBackend } from './host/workspace-backend.ts'
 
 export const name = 'workbench-layout'
-export const inject = ['webServer', 'fs', 'workspaceRegistry', 'webRuntime']
-
-interface WebRuntimeValues {
-  trustedHosts: string[]
-}
+export const inject = ['webServer', 'fs', 'workspaceRegistry', 'webStartup']
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    webRuntime: WebRuntimeValues
+    /**
+     * The Web invocation's trust list, provided by the `webStartup` row.
+     *
+     * DSH 0.2.1 replaced the `webRuntime` service with `webStartup`; the shape is
+     * imported from the package that owns the service rather than restated here,
+     * so a future rename fails this build instead of failing at request time.
+     */
+    webStartup: WebStartupValues
   }
 }
 
@@ -277,7 +281,7 @@ export function apply(ctx: Context, config: Config): void {
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (req.method !== 'POST') throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '只允许 POST 请求。')
-      if (!isTrustedWorkbenchRequest(req.headers, ctx.webRuntime.trustedHosts)) {
+      if (!isTrustedWorkbenchRequest(req.headers, ctx.webStartup.trustedHosts, ctx.webServer.host)) {
         throw new WorkbenchHttpError(403, 'ORIGIN_REJECTED', '请求来源无效。')
       }
       const body = await readJsonObject(req, config.maxFileBytes + 64 * 1024)
@@ -345,7 +349,7 @@ export function apply(ctx: Context, config: Config): void {
       if (!poll && req.method !== 'POST') {
         throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '内核接口只允许 POST 请求。')
       }
-      if (!isTrustedWorkbenchRequest(req.headers, ctx.webRuntime.trustedHosts)) {
+      if (!isTrustedWorkbenchRequest(req.headers, ctx.webStartup.trustedHosts, ctx.webServer.host)) {
         throw new WorkbenchHttpError(403, 'ORIGIN_REJECTED', '请求来源无效。')
       }
       const body = poll
@@ -366,7 +370,7 @@ export function apply(ctx: Context, config: Config): void {
   const streamHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (req.method !== 'GET') throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '内核事件流只允许 GET 请求。')
-      if (!isTrustedWorkbenchRequest(req.headers, ctx.webRuntime.trustedHosts)) {
+      if (!isTrustedWorkbenchRequest(req.headers, ctx.webStartup.trustedHosts, ctx.webServer.host)) {
         throw new WorkbenchHttpError(403, 'ORIGIN_REJECTED', '请求来源无效。')
       }
       await kernel.stream(req, res)

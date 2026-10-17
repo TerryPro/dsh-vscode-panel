@@ -19,11 +19,12 @@ describe('published package metadata', () => {
     expect(manifest.exports).toHaveProperty('./client')
     expect(manifest.dependencies['@codemirror/merge']).toMatch(/^\^6\./u)
     expect(manifest.dependencies['@xterm/xterm']).toMatch(/^\^6\./u)
-    expect(manifest.peerDependencies['@deepseek-ai/dsh-api-terminal-controller']).toContain('^0.2.0-rc.2')
-    expect(manifest.peerDependencies['@deepseek-ai/dsh-api-gateway']).toContain('^0.2.0-rc.2')
+    expect(manifest.peerDependencies['@deepseek-ai/dsh-api-terminal-controller']).toContain('^0.2.1-rc.1')
+    expect(manifest.peerDependencies['@deepseek-ai/dsh-api-gateway']).toContain('^0.2.1-rc.1')
     expect(manifest.dependencies['node-pty']).toBeUndefined()
     expect(manifest.dependencies.ws).toBeUndefined()
-    expect(manifest.peerDependencies['@deepseek-ai/dsh-workspace']).toBe('^0.1.5-rc.1 || ^0.2.0-rc.2')
+    expect(manifest.peerDependencies['@deepseek-ai/dsh-workspace']).toBe('^0.2.1-rc.1')
+    expect(manifest.peerDependencies['@deepseek-ai/dsh-web-app']).toBe('^0.2.1-rc.1')
     expect(manifest.dsh).toEqual(expect.objectContaining({
       bundle: { patch: './cordis.patch.yml' },
       client: expect.objectContaining({
@@ -32,7 +33,12 @@ describe('published package metadata', () => {
       }),
     }))
     const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
-    expect(patch).toContain('inject: [webRuntime, workspaceRegistry]')
+    // DSH 0.2.1 removed the `webRuntime` service. A row that injects it waits for
+    // a service that never mounts: the plugin stays pending with no load error,
+    // so every workbench route 404/405s while the client half still renders. That
+    // silent shape is exactly what this assertion must catch.
+    expect(patch).toContain('inject: [webStartup, workspaceRegistry]')
+    expect(patch).not.toContain('webRuntime')
   })
 
   it('accepts the DSH runtime every dsh peer was built against', async () => {
@@ -47,7 +53,7 @@ describe('published package metadata', () => {
       .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
     expect(dshPeers.length).toBeGreaterThan(0)
     for (const [name, range] of dshPeers) {
-      expect(range.split('||').map(clause => clause.trim()), name).toContain('^0.2.0-rc.2')
+      expect(range.split('||').map(clause => clause.trim()), name).toContain('^0.2.1-rc.1')
     }
   })
 

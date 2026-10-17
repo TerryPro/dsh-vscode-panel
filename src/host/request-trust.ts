@@ -34,18 +34,39 @@ function isTrustedAuthority(host: URL, trustedHosts: readonly string[]): boolean
 }
 
 /**
- * Match the official DSH API fence: bind every request to loopback or a
- * deployment-derived trusted Host, then reject explicit cross-site markers.
+ * Whether the request authority names the listener's own bind address.
+ *
+ * DSH 0.2.1's fence accepts the bind IP independently of `trustedHosts` (a
+ * concrete bind IP is no rebinding target), and rejects wildcard binds outright.
+ * Mirroring that here keeps a deployment reached by its LAN address working
+ * without a `--trusted-host` entry, while the Origin and cross-site checks below
+ * still apply. Any `%zone` interface selector is stripped: it is not address text.
+ */
+function isBindAddressAuthority(host: URL, bindHost: string | undefined): boolean {
+  if (bindHost === undefined) return false
+  const zoneAt = bindHost.indexOf('%')
+  const address = zoneAt === -1 ? bindHost : bindHost.slice(0, zoneAt)
+  const bind = parseAuthority(address.includes(':') ? `[${address}]` : address)
+  return bind !== undefined && bind.hostname === host.hostname
+}
+
+/**
+ * Match the official DSH API fence: bind every request to loopback, the
+ * listener's bind address, or a deployment-derived trusted Host, then reject
+ * explicit cross-site markers.
  */
 export function isTrustedWorkbenchRequest(
   headers: IncomingMessage['headers'],
   trustedHosts: readonly string[],
+  bindHost?: string,
 ): boolean {
   const authority = headers.host
   if (typeof authority !== 'string') return false
   const host = parseAuthority(authority)
   if (host === undefined) return false
-  if (!isLoopbackHostname(host.hostname) && !isTrustedAuthority(host, trustedHosts)) return false
+  if (!isLoopbackHostname(host.hostname)
+    && !isTrustedAuthority(host, trustedHosts)
+    && !isBindAddressAuthority(host, bindHost)) return false
   if (headers['sec-fetch-site'] === 'cross-site') return false
 
   const origin = headers.origin

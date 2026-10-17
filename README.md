@@ -19,7 +19,7 @@ It is a two-part ("dual-half") plugin:
 - **Host half (Node)** — a trusted JSON API mounted on DSH's web server. It exposes workspace file operations and a hardened Git command layer, and serves the lazily loaded Mermaid runtime bundle. Every request is origin-checked and confined to an official Workspace id plus a workspace-relative path.
 - **Client half (React)** — the browser UI. It renders the sidebar, editor, Git views, terminals, and structured viewers, and talks only to the host API. It reuses official DSH components and design tokens wherever the client exposes them, so the workbench looks and behaves native.
 
-This release is built and tested against DSH Web 0.2.0-rc.2; the peer ranges still accept 0.1.5-rc.1, which declares the same sidebar, right-column, and footer slot contracts.
+This release is built and tested against DSH Web 0.2.1-rc.1; the peer ranges require 0.2.1-rc.1 or newer, because the Host half reads the `webStartup` service that replaced `webRuntime` in DSH 0.2.1.
 
 ## Overview
 
