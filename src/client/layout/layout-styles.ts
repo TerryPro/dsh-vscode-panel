@@ -227,10 +227,6 @@ html[${SIDEBAR_SHADOWED_ATTRIBUTE}] [${FRAME_ATTRIBUTE}] > :nth-child(1) [class*
   padding-inline-start: calc(var(--dsh-sidebar-inline-padding, 12px) + 8px);
   border-bottom: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-layer-1);
-  /* The create-entry icons knock their plus badge out with the surface behind it, and this row is
-     no longer the sidebar column's fill — it is the tab bar's. Declared here so the badge matches
-     the bar it sits on rather than leaving a darker disc around the plus. */
-  --dsh-workbench-badge-knockout: var(--dsw-alias-bg-layer-1);
 }
 
 /* With a seam to meet, the row is also sized to meet it: its own last row is the border, exactly as

@@ -11,7 +11,13 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceEntry } from '../../shared/contracts.ts'
 import { isDatabasePath } from '../../shared/sql-protocol.ts'
-import { IconFileAddOutline16, IconFileOutline16, IconFolderAddOutline16, IconSqlNotebookAddOutline16, IconSqlNotebookOutline16 } from './CreateEntryIcons.tsx'
+import {
+  IconBlankFileOutline16,
+  IconFileAddOutline16,
+  IconFolderAddOutline16,
+  IconSqlNotebookAddOutline16,
+  IconSqlNotebookOutline16,
+} from './CreateEntryIcons.tsx'
 import css from './files.module.css'
 
 export type FileTreeMenuAction =
@@ -82,7 +88,7 @@ function entryItems(entry: WorkspaceEntry, expanded: boolean, t: TranslateNS<'wo
     {
       id: 'open',
       label: openLabel,
-      icon: entry.kind === 'directory' ? <IconFolderOpenOutlineMedium size={14} /> : <IconFileOutline16 size={14} />,
+      icon: entry.kind === 'directory' ? <IconFolderOpenOutlineMedium size={14} /> : <IconBlankFileOutline16 size={14} />,
       disabled: entry.kind !== 'file' && entry.kind !== 'directory',
     },
     // A database file has nothing to show as text — the Host reads it as binary and refuses

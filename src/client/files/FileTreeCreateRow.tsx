@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { IconFolderCloseRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import { IconFileOutline16 } from './CreateEntryIcons.tsx'
+import { IconBlankFileOutline16 } from './CreateEntryIcons.tsx'
 import css from './files.module.css'
 
 export type FileTreeCreateKind = 'file' | 'directory'
@@ -37,7 +37,7 @@ export function FileTreeCreateRow(props: FileTreeCreateRowProps) {
     >
       {props.kind === 'directory'
         ? <IconFolderCloseRegular className={css.treeIcon} />
-        : <IconFileOutline16 size={16} className={css.treeIcon} />}
+        : <IconBlankFileOutline16 size={16} className={css.treeIcon} />}
       <input
         autoFocus
         value={name}

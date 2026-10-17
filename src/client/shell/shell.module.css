@@ -205,20 +205,6 @@
   background: transparent;
 }
 
-.railTerminalAdd {
-  position: relative;
-  display: inline-flex;
-}
-
-.railAddGlyph {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  padding: 1px;
-  border-radius: 50%;
-  background: var(--dsw-specific-sidebar-fill);
-}
-
 @media (prefers-reduced-motion: reduce) {
 .treeRow,
   .modeButton,

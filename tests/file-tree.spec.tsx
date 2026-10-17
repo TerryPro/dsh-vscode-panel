@@ -151,14 +151,14 @@ describe('文件目录', () => {
 
     await waitFor(() => { expect(view.getByText('src')).toBeTruthy() })
     expect(view.getByText('/workspace/project').getAttribute('title')).toBe('/workspace/project')
-    const fileAddIcon = view.getByRole('button', { name: '新建文件' }).querySelector('[data-icon="file-add"]')
-    const folderAddIcon = view.getByRole('button', { name: '新建文件夹' }).querySelector('[data-icon="folder-add"]')
+    // 两个「新建」按钮的标记必须各自认出自己的形状，而且**不再**叠一支官方加号：菜单行按 24px 排，
+    // 加号徽标那一圈描边压在文档折角上，缩下去就是一个字母「C」。这条断言防的是有人把徽标加回来。
+    const fileAddIcon = view.getByRole('button', { name: '新建文件' }).querySelector('[data-icon="file"]')
+    const folderAddIcon = view.getByRole('button', { name: '新建文件夹' }).querySelector('[data-icon="folder"]')
     expect(fileAddIcon).not.toBeNull()
     expect(folderAddIcon).not.toBeNull()
-    expect(fileAddIcon?.querySelector('[data-icon="file"]')).not.toBeNull()
-    expect(fileAddIcon?.querySelector('[data-icon="official-plus"]')).not.toBeNull()
-    expect(folderAddIcon?.querySelector('[data-icon="official-folder"]')).not.toBeNull()
-    expect(folderAddIcon?.querySelector('[data-icon="official-plus"]')).not.toBeNull()
+    expect(fileAddIcon?.querySelector('[data-icon="official-plus"]')).toBeNull()
+    expect(folderAddIcon?.querySelector('[data-icon="official-plus"]')).toBeNull()
     fireEvent.click(view.getByText('src'))
     fireEvent.click(view.getByRole('button', { name: '新建文件' }))
     const fileInput = await view.findByRole('textbox', { name: '文件名' })

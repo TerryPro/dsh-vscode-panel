@@ -2,7 +2,6 @@
 
 import {
   IconListPenOutlineMedium,
-  IconPlusOutlineMedium,
   IconRefreshOutlineMedium,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -10,11 +9,11 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconCommitGraphOutline16 } from '../git/CommitGraphIcon.tsx'
 import type { WorkbenchController, WorkbenchTerminalTab } from '../model/controller.ts'
 import type { TerminalDot } from '../model/controller.ts'
-import { IconFileAddOutline16, IconFolderAddOutline16 } from '../files/CreateEntryIcons.tsx'
+import { IconFileAddOutline16, IconFolderAddOutline16, IconSqlNotebookAddOutline16 } from '../files/CreateEntryIcons.tsx'
 import { IconSqlOutline16 } from '../sql/SqlIcon.tsx'
 import { activeSqlNotebook } from '../sql/sql-notebook-tab.ts'
 import { createSqlNotebook } from '../sql/sql-notebook-create.ts'
-import { IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
+import { IconTerminalAddOutline16, IconTerminalOutline16 } from '../terminal/TerminalIcon.tsx'
 import { terminalDot } from '../terminal/terminal-dot.ts'
 import { terminalName } from '../terminal/terminal-name.ts'
 import { useWorkbench } from '../model/use-workbench.ts'
@@ -91,10 +90,7 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
     return (
       <RailActions label={t('mode.terminal')}>
         <RailButton label={t('terminal.new')} disabled={workspaceId === undefined} onClick={() => { controller.openTerminal(workspaceId) }}>
-          <span className={css.railTerminalAdd} aria-hidden>
-            <IconTerminalOutline16 size={18} />
-            <IconPlusOutlineMedium className={css.railAddGlyph} size={8} />
-          </span>
+          <IconTerminalAddOutline16 size={18} />
         </RailButton>
         {terminals.map(terminal => {
           const name = terminalName(terminal, t)
@@ -145,7 +141,7 @@ export function WorkbenchRail({ controller, workspaceId, expandSidebar, t }: Wor
           disabled={workspaceId === undefined}
           onClick={() => { void createNotebookAndOpen() }}
         >
-          <IconFileAddOutline16 size={18} />
+          <IconSqlNotebookAddOutline16 size={18} />
         </RailButton>
       </RailActions>
     )
