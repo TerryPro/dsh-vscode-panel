@@ -32,6 +32,7 @@ import {
   PANEL_HEADER_HEIGHT_PROPERTY,
   PANEL_RULE_ATTRIBUTE,
   PANEL_RULE_OVERLAY_ATTRIBUTE,
+  SIDEBAR_SHADOWED_ATTRIBUTE,
   TRANSITION_CONVERSATION_WIDTH,
   TRANSITION_EDITOR_WIDTH,
   TRANSITION_SIDEBAR_WIDTH,
@@ -164,34 +165,110 @@ const CSS = `
   border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* The sidebar panel rules. They close a panel section and must span the whole
-   column, so they cannot be borders on those sections: the shell's .regionArea
-   clips overflow and reclaims only 4px of the sidebar's 12px inline padding on
-   the left, which leaves any line drawn in there 8px short of the column edge —
-   and a negative margin cannot cross the clip either. Nor can they be background
-   layers on the column or the sidebar root, because each sits behind the next
-   element's own fill and would replace the macOS vibrancy gradients.
+/* The sidebar panel headers are real toolbars — the tab bar's fill and a bottom seam of their own —
+   rather than a caption with a line drawn under them by the frame. Two of the shell's own insets
+   stood in the way, and both are undone at the source rather than compensated for in the
+   measurement, because panel-rule-layout.ts derives the header's height from the tab bar: while the
+   header starts on a lower row it can only ever be measured shorter than the tab bar, which is what
+   made it read as text over a rule.
+ *
+   1. The sidebar root's 6px top padding puts the header on a lower row than the tab bar. Dropping it
+      makes the measured height the tab bar's full outer height and the two bars the same bar. Scoped
+      away from darwin, where that band is the shell's drag strip and carries the sidebar toggle —
+      there the header keeps the row the shell gave it, and the measurement still lands its seam on
+      the tab bar, just with a shorter bar. Also scoped away from the collapsed root, which uses an
+      18px top padding to clear the window chrome and whose rail has no tab bar to align with.
+   2. .regionArea reclaims only 4px of the root's 12px left padding, so the content laid out inside
+      it starts 12px short of the column's left edge while its own border box reaches 8px. Reclaiming
+      the whole inset and giving it back as padding moves the clip to the column edge without moving
+      the content — every panel's text column stays exactly where it was. Unlike (1) this applies on
+      every platform and in both widths: it is what lets a header paint a bar that reaches the column
+      edge, where the seam it continues does.
+ *
+   The first rule names the shell's sidebar root through its region area rather than by class alone.
+   A bare [class*='_root'] also matches the hashed _root_* class every primitives Menu carries —
+   the Git branch menu and the terminal's new-session menu live in this column — which is the same
+   trap the sidebar width override had to be worked around by giving the terminal its own seat. */
+html:not([data-platform='darwin'])[${SIDEBAR_SHADOWED_ATTRIBUTE}] [${FRAME_ATTRIBUTE}] > :nth-child(1) [class*='_root']:not([class*='_collapsed']):has(> [class*='_regionArea']) {
+  padding-top: 0;
+}
 
-   They are therefore real elements appended to the frame: the frame already
-   contains the columns, is not clipped, and paints its trailing children above
-   every column fill. A pseudo-element cannot be used because the panel has more
-   than one rule and a frame has one ::after.
+html[${SIDEBAR_SHADOWED_ATTRIBUTE}] [${FRAME_ATTRIBUTE}] > :nth-child(1) [class*='_regionArea'] {
+  margin-left: calc(-1 * var(--dsh-sidebar-inline-padding, 12px));
+  padding-left: var(--dsh-sidebar-inline-padding, 12px);
+}
 
-   The stroke is the tab bar's own declaration — the same border-bottom width and
-   the same token — rather than a 1px background fill of the same size. Blink
-   quantises a border's edges onto the device grid but paints a background at its
-   exact fractional width, so two visually identical CSS rules render two
-   different lines: at the 125%/150% scales Windows defaults to, a 1px fill
-   spreads over an extra device row and reads heavier than the border it
-   continues. Identical primitive, identical geometry, identical colour.
+/* The header's own toolbar. Its presentation is unconditional — a bar that lost its fill and seam
+   whenever the middle column folded away would be a measurement artefact, not a toolbar. Only the
+   height comes from the measurement, because that is the one number the two columns cannot agree on
+   without measuring: the shell insets the sidebar's content and does not inset the tab bar.
+ *
+   Drawing the seam as a real border rather than as a frame overlay retires a whole class of drift:
+   an overlay's top is a viewport coordinate on a position: fixed element, so it only lands on the
+   seam while the viewport really is its containing block — 12ae73d had to correct exactly that once.
+   A border is quantised by the same rule as the tab bar's own border, so the two halves of one seam
+   cannot disagree.
+ *
+   The row is given the column's full width and one shared left inset rather than keeping each
+   panel's own. That is the point of the change: five headers that each chose their own inset are
+   five captions, and a toolbar is one bar repeated. The negative start margin bleeds the box into
+   the inset the rule above moved out of regionArea's way, and the padding puts the title back on the
+   column it already sat on — 12 + 8, where four of the five panels had put it. Only the start is
+   overridden: each panel's own right inset belongs to its action buttons, and restating it here
+   would move them for no reason. The end needs no bleed, because the shell already pulls this row
+   to the column's right edge.
+ *
+   No pseudo-element and no stacking context here on purpose: the Git branch menu and the terminal's
+   new-session menu are rendered inside this row, and an isolating context would confine their
+   z-index to the header and let the panel body paint over an open menu. */
+[${FRAME_ATTRIBUTE}] [${PANEL_HEADER_ATTRIBUTE}] {
+  box-sizing: border-box;
+  margin-inline-start: calc(-1 * var(--dsh-sidebar-inline-padding, 12px));
+  padding-inline-start: calc(var(--dsh-sidebar-inline-padding, 12px) + 8px);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  /* The create-entry icons knock their plus badge out with the surface behind it, and this row is
+     no longer the sidebar column's fill — it is the tab bar's. Declared here so the badge matches
+     the bar it sits on rather than leaving a darker disc around the plus. */
+  --dsh-workbench-badge-knockout: var(--dsw-alias-bg-layer-1);
+}
 
-   Fixed positioning, not absolute: the frame is deliberately not a containing
-   block (see above), so an absolute overlay would resolve against whichever
-   ancestor happens to be positioned and the computed offsets would be measured
-   from an origin this layout cannot see. The frame cannot be made one either —
-   that is what would capture the commit-graph lanes. Fixing the containing block
-   to the viewport lets the numbers be used as written, on any platform, padding
-   or zoom. */
+/* With a seam to meet, the row is also sized to meet it: its own last row is the border, exactly as
+   the tab bar reserves its own, and its vertical padding goes so align-items: center places the
+   title in the bar. Without a measurement there is nothing to align with and each panel keeps its
+   natural header. */
+[${FRAME_ATTRIBUTE}][${PANEL_RULE_ATTRIBUTE}] [${PANEL_HEADER_ATTRIBUTE}] {
+  height: var(${PANEL_HEADER_HEIGHT_PROPERTY}, auto);
+  min-height: 0;
+  padding-block: 0;
+}
+
+/* The sidebar section rules. A section such as the commit box closes its own bottom edge, and the
+   line has to span the whole column — so it is painted from outside rather than as a border on the
+   box. The header gets away with its own border because it is one shared row given one shared
+   bleed; a section is a one-off with its own inline padding, and making it reach the column edge
+   would restate the shell's inset there too, per panel. An overlay needs neither: it measures the
+   box and draws the line the box's own width could not reach.
+ *
+   Nor can they be background layers on the column or the sidebar root, because each sits behind the
+   next element's own fill and would replace the macOS vibrancy gradients.
+
+   They are therefore real elements appended to the frame: the frame already contains the columns, is
+   not clipped, and paints its trailing children above every column fill. A pseudo-element cannot be
+   used because the panel has more than one rule and a frame has one ::after.
+
+   The stroke is the tab bar's own declaration — the same border-bottom width and the same token —
+   rather than a 1px background fill of the same size. Blink quantises a border's edges onto the
+   device grid but paints a background at its exact fractional width, so two visually identical CSS
+   rules render two different lines: at the 125%/150% scales Windows defaults to, a 1px fill
+   spreads over an extra device row and reads heavier than the border it continues. Identical
+   primitive, identical geometry, identical colour.
+
+   Fixed positioning, not absolute: the frame is deliberately not a containing block (see above), so
+   an absolute overlay would resolve against whichever ancestor happens to be positioned and the
+   computed offsets would be measured from an origin this layout cannot see. The frame cannot be made
+   one either — that is what would capture the commit-graph lanes. Fixing the containing block to the
+   viewport lets the numbers be used as written, on any platform, padding or zoom. */
 [${FRAME_ATTRIBUTE}] > [${PANEL_RULE_OVERLAY_ATTRIBUTE}] {
   position: fixed;
   /* left, top, and width come from panel-rule-layout.ts, per rule, in viewport

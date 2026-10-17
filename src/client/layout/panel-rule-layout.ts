@@ -1,4 +1,4 @@
-/** 侧栏面板分隔线：绘制在 AppFrame 上的覆盖层，几何全部实测。 */
+/** 侧栏面板几何：表头量高、区段画线，全部实测，不假设壳的内缩。 */
 
 import {
   EDITOR_COLLAPSED_ATTRIBUTE,
@@ -54,30 +54,28 @@ interface MeasuredRule {
 }
 
 /**
- * Close the sidebar panel sections across the column's full width.
+ * Publish the sidebar's panel geometry, measured rather than assumed.
  *
- * No rule can be a border on its own section: the shell's `.regionArea` clips
- * overflow and reclaims only 4px of the sidebar's 12px inline padding on the
- * left, so a border drawn in there stops 8px short of the column edge — the
- * visible gap, and a negative margin cannot cross the clip either. Rules are
- * therefore painted by overlay elements appended to the AppFrame, which already
- * contains the columns, is not clipped, and stacks above every column fill
- * without replacing the macOS vibrancy gradients or creating a containing block
- * for the sidebar's absolutely-positioned commit-graph lanes.
+ * Two things come out of a measurement pass, and they are different in kind:
  *
- * Two kinds are measured independently, because each is lost in a different
- * state:
+ * - a panel **header** gets a height. It is a real toolbar and draws its own bottom seam (see the
+ *   `[panel-header]` rules in `layout-styles.ts`); the only thing it cannot decide alone is where
+ *   the middle column's tab bar ends, because the shell insets the sidebar's content and does not
+ *   inset the tab bar. That height is published as a custom property, and no rule is painted for it
+ *   — painting one would put a second line over the border it already draws.
+ * - a panel **section** that needs its bottom edge closed — the commit box, the SQL panes — still
+ *   gets a painted rule, because no border it writes itself can reach the column's left edge: the
+ *   shell's `.regionArea` clips overflow, and a negative margin cannot cross the clip. Those rules
+ *   are overlay elements appended to the AppFrame, which already contains the columns, is not
+ *   clipped, and stacks above every column fill without replacing the macOS vibrancy gradients or
+ *   creating a containing block for the sidebar's absolutely-positioned commit-graph lanes.
  *
- * - the panel header closes against the middle column's tab bar, which is what
- *   makes the two halves of one seam collinear. It needs the tab bar, so it
- *   disappears with a collapsed middle column;
- * - a section, such as the commit box, simply closes its own bottom edge and is
- *   independent of the middle column entirely.
+ * A header's height is lost with a collapsed middle column — the column it aligns to is gone, so
+ * there is nothing to align with — while the section rules are independent of it entirely.
  *
- * Values are published at full measured precision. Rounding to whole CSS pixels
- * would move a line by up to half a pixel, which at a fractional display scale
- * is a whole device row: the two halves of one seam would land on different rows
- * and read as broken.
+ * Values are published at full measured precision. Rounding to whole CSS pixels would move a line
+ * by up to half a pixel, which at a fractional display scale is a whole device row: the two halves
+ * of one seam would land on different rows and read as broken.
  */
 export function createPanelRuleLayout(
   frame: HTMLElement,
@@ -132,10 +130,14 @@ export function createPanelRuleLayout(
   const solve = (): void => {
     const header = frame.querySelector<HTMLElement>(`[${PANEL_HEADER_ATTRIBUTE}]`)
     const anchor = frame.querySelector<HTMLElement>(`[${PANEL_RULE_ANCHOR_ATTRIBUTE}]`)
-    const rules: MeasuredRule[] = []
 
-    const headerRule = measureHeader(header, anchor)
-    if (headerRule !== undefined) rules.push(headerRule.rule)
+    /* The header contributes no rule: it is a real toolbar and draws its own seam, so an overlay
+       painted over it would be a second line. What it still needs from here is the *height* that
+       puts that seam on the middle column's tab bar — the one number the two columns cannot agree
+       on without measuring, because the shell insets the sidebar's content and does not inset the
+       tab bar. */
+    const headerHeight = measureHeaderHeight(header, anchor)
+    const rules: MeasuredRule[] = []
     for (const section of Array.from(
       frame.querySelectorAll<HTMLElement>(`[${PANEL_RULE_SECTION_ATTRIBUTE}]`),
     )) {
@@ -149,14 +151,14 @@ export function createPanelRuleLayout(
 
     apply(rules)
 
-    /* The header row is only resized once its own rule exists, so it never
-       collapses against a measurement that was released, and the section rules
-       keep working while the middle column is folded away. */
-    if (headerRule === undefined) {
+    /* The header row is only resized once a seam can be met at all, so it never collapses against
+       a measurement that was released; the section rules keep working while the middle column is
+       folded away. */
+    if (headerHeight === undefined) {
       frame.removeAttribute(PANEL_RULE_ATTRIBUTE)
       frame.style.removeProperty(PANEL_HEADER_HEIGHT_PROPERTY)
     } else {
-      setProperty(frame, PANEL_HEADER_HEIGHT_PROPERTY, length(headerRule.headerHeight))
+      setProperty(frame, PANEL_HEADER_HEIGHT_PROPERTY, length(headerHeight))
       frame.setAttribute(PANEL_RULE_ATTRIBUTE, '')
     }
 
@@ -168,28 +170,34 @@ export function createPanelRuleLayout(
   }
 
   /**
-   * The header's rule, aligned to the tab bar's bottom edge rather than its own,
-   * plus the header height that edge implies.
+   * The header's height: the one number that puts its own bottom border on the tab bar's seam.
    *
-   * Undefined only when the geometry cannot be trusted at all — no header, no column, a column
-   * with no width. Two states that both lack a *tab bar* are handled differently, because they
-   * mean different things:
+   * Undefined only when the geometry cannot be trusted at all — no header, no column, a column with
+   * no width. Two states that both lack a *tab bar* are handled differently, because they mean
+   * different things:
    *
    * - **No file is open.** `WorkbenchEditor` renders its empty state instead of `EditorPane`, so
-   *   the anchor is absent from the DOM. The header still falls back to the height the tab bar
-   *   would have had, so closing the last file does not resize the panel header or drop its rule
-   *   and make the whole body jump.
+   *   the anchor is absent from the DOM. The header still falls back to the height the tab bar would
+   *   have had, so closing the last file does not resize the panel header and make the whole body
+   *   jump.
    * - **The middle column is collapsed.** The anchor is still rendered but measures zero width, so
-   *   it offers an edge nothing can meet. The header keeps DSH's natural height here (the rule is
-   *   withdrawn): the column it was aligning to is gone, so there is nothing to align with.
+   *   it offers an edge nothing can meet. The header keeps DSH's natural height here and draws no
+   *   seam: the column it was aligning to is gone, so there is nothing to align with.
+   *
+   * The height is measured from the header's own top rather than assumed, which is what lets one
+   * rule serve both platforms: where the shell's top inset is cancelled the result is the tab bar's
+   * full outer height, and where a drag strip keeps that inset the header is shorter by exactly that
+   * much and still closes on the same seam.
    */
-  const measureHeader = (
+  const measureHeaderHeight = (
     header: HTMLElement | null,
     anchor: HTMLElement | null,
-  ): { rule: MeasuredRule; headerHeight: number } | undefined => {
+  ): number | undefined => {
     if (header === null) return undefined
     const column = columnOf(header)
     if (column === undefined) return undefined
+    const headerBox = header.getBoundingClientRect()
+    if (headerBox.width <= 0 || column.getBoundingClientRect().width <= 0) return undefined
 
     if (anchor === null) {
       // No tab bar in the DOM: the empty editor. A collapsed middle column is *not* this case —
@@ -197,31 +205,29 @@ export function createPanelRuleLayout(
       // zero-width check.
       if (frame.hasAttribute(EDITOR_COLLAPSED_ATTRIBUTE)) return undefined
       // The base is the middle column's own root, not the sidebar column's. Both are children of
-      // the frame, but nothing makes them share a top edge: the sidebar is inset by the shell, so
-      // a sidebar-derived edge sits that much lower than the tab bar the rule is meant to continue.
-      // The editor root is the right base because the tab bar lives inside it — and it is present
-      // in this state too (`EditorShared`'s empty state carries the same marker), so the fallback
+      // the frame, but nothing makes them share a top edge: the sidebar is inset by the shell, so a
+      // sidebar-derived edge sits that much lower than the tab bar the header closes against. The
+      // editor root is the right base because the tab bar lives inside it — and it is present in
+      // this state too (`EditorShared`'s empty state carries the same marker), so the fallback
       // measures the same column the measured path does, just without the tab bar in it.
       const editor = frame.querySelector<HTMLElement>(`[${EDITOR_ROOT_ATTRIBUTE}]`)
       if (editor === null) return undefined
-      const columnBox = column.getBoundingClientRect()
       const editorBox = editor.getBoundingClientRect()
-      if (columnBox.width <= 0 || editorBox.width <= 0) return undefined
-      const bottomEdge = editorBox.top + TAB_BAR_OUTER_HEIGHT_PX
-      const rule = measure(header, column, bottomEdge)
-      const headerHeight = bottomEdge - header.getBoundingClientRect().top
-      if (rule === undefined || !(headerHeight > 0)) return undefined
-      return { rule, headerHeight }
+      if (editorBox.width <= 0) return undefined
+      return headerEdge(editorBox.top + TAB_BAR_OUTER_HEIGHT_PX, headerBox.top)
     }
 
     const anchorBox = anchor.getBoundingClientRect()
     // A collapsed middle column still reports the tab bar's height but no width,
     // so the edge it offers cannot be met by anything.
     if (anchorBox.width <= 0) return undefined
-    const rule = measure(header, column, anchorBox.bottom)
-    const headerHeight = anchorBox.bottom - header.getBoundingClientRect().top
-    if (rule === undefined || !(headerHeight > 0)) return undefined
-    return { rule, headerHeight }
+    return headerEdge(anchorBox.bottom, headerBox.top)
+  }
+
+  /** The header row that ends exactly on the tab bar's bottom edge, or nothing trustworthy. */
+  const headerEdge = (bottomEdge: number, headerTop: number): number | undefined => {
+    const height = bottomEdge - headerTop
+    return height > 0 ? height : undefined
   }
 
   /**

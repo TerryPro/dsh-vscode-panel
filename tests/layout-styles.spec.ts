@@ -30,7 +30,7 @@ import {
   EDITOR_HOST_ATTRIBUTE,
   GLOBAL_PANEL_ATTRIBUTE,
 } from '../src/client/layout/global-panel-layout.ts'
-import { CONVERSATION_COLLAPSED_ATTRIBUTE } from '../src/client/layout/editor-layout-contract.ts'
+import { CONVERSATION_COLLAPSED_ATTRIBUTE, SIDEBAR_SHADOWED_ATTRIBUTE } from '../src/client/layout/editor-layout-contract.ts'
 
 afterEach(() => {
   document.head.innerHTML = ''
@@ -330,6 +330,41 @@ describe('workbench layout presentation', () => {
     dispose?.()
     expect(sessionHost.hasAttribute(EDITOR_HOST_ATTRIBUTE)).toBe(false)
     expect(frame.hasAttribute(GLOBAL_PANEL_ATTRIBUTE)).toBe(false)
+  })
+
+  it('makes each sidebar panel header a real toolbar over the whole column', () => {
+    const { frame } = appFrameFixture('active', 312)
+    document.body.appendChild(frame)
+    let dispose: (() => void) | undefined
+
+    installWorkbenchLayout(
+      contextWithDispose(value => { dispose = value }),
+      editorVisibility(),
+      fileController(),
+      panelSelection(),
+    )
+    const style = document.head.querySelector<HTMLStyleElement>('[data-dsh-workbench-layout]')
+    expect(style).not.toBeNull()
+    // The seam is a border on the header's own bar, with the tab bar's fill — not a line the
+    // panels draw themselves and not an overlay painted over them.
+    expect(style?.textContent).toContain('border-bottom: 1px solid var(--dsw-alias-border-l1)')
+    expect(style?.textContent).toContain('background: var(--dsw-alias-bg-layer-1)')
+    // The bar spans the column: it bleeds by the inset the clip rule moved, and puts the same
+    // amount back as padding so the title stays on the column it was already on.
+    expect(style?.textContent).toContain('margin-inline-start: calc(-1 * var(--dsh-sidebar-inline-padding, 12px));')
+    expect(style?.textContent).toContain('padding-inline-start: calc(var(--dsh-sidebar-inline-padding, 12px) + 8px);')
+    // The shell's own insets are cancelled from the measured geometry rather than compensated for:
+    // the clip reaches the column edge, and the top inset goes only where no drag strip needs it.
+    expect(style?.textContent).toContain(`html[${SIDEBAR_SHADOWED_ATTRIBUTE}]`)
+    expect(style?.textContent).toContain(`html:not([data-platform='darwin'])[${SIDEBAR_SHADOWED_ATTRIBUTE}]`)
+    expect(style?.textContent).toContain('padding-top: 0;')
+    /* The whole stylesheet is one template literal, so an unescaped backtick in a comment closes it
+       early and turns the rest into TypeScript. Typecheck catches that for anything after the quote,
+       but not for a comment on the final line — so assert the last rule in the file survived, which
+       is what a truncated string would drop. */
+    expect(style?.textContent).toContain('display: contents !important;')
+
+    dispose?.()
   })
 
   it('re-claims a Session subtree re-created while the global panel is open', async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { SIDEBAR_SHADOWED_ATTRIBUTE } from '../layout/editor-layout-contract.ts'
 import type { WorkbenchController } from '../model/controller.ts'
 import type { WorkbenchKey } from '../core/locales.ts'
 import { FileTree } from '../files/FileTree.tsx'
@@ -21,8 +22,12 @@ export type WorkbenchSidebarProps = PropsRuntime<'sidebar.workspaces'> & PropsLo
  * browser (files/Git/terminal). The shell's persistent New Session button and
  * global panel rows sit above the shadowed region, so CSS hides them only while
  * this marker is set and reveals them again once the seat returns to sessions.
+ *
+ * Re-exported rather than declared here: the layout stylesheet scopes the sidebar
+ * geometry overrides with the same marker, and two copies of the literal is how
+ * the two would drift apart.
  */
-export const SIDEBAR_SHADOWED_ATTRIBUTE = 'data-dsh-workbench-sidebar-shadowed'
+export { SIDEBAR_SHADOWED_ATTRIBUTE }
 
 /** Sidebar replacement body; the official shell, brand, controls, and settings stay mounted. */
 export function WorkbenchSidebar({ wide, expandSidebar, useSessions, useWorkspaces, controller, t }: WorkbenchSidebarProps) {

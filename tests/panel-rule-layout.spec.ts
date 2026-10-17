@@ -24,7 +24,12 @@ afterEach(() => { document.body.innerHTML = '' })
  * geometry of the overlays the layout appends to the frame instead.
  */
 describe('侧栏面板分隔线实测', () => {
-  it('closes the panel header across the column against the tab bar', () => {
+  /**
+   * The header is a real toolbar now: it draws its own seam, so the layout contributes only the
+   * height that puts that seam on the tab bar's bottom edge. Publishing a rule for it as well would
+   * paint a second line over the border it already draws.
+   */
+  it('sizes the header to the tab bar without painting a rule over its own seam', () => {
     const { frame } = fixture({
       frame: rect(0, 0, 1440, 900),
       column: rect(48, 0, 300, 900),
@@ -35,10 +40,8 @@ describe('侧栏面板分隔线实测', () => {
 
     createPanelRuleLayout(frame, { info: vi.fn() })
 
-    const [rule] = rules(frame)
-    // Offsets are relative to the frame's padding box; the rule occupies the
-    // tab bar's last row, so its top is the bottom edge minus 1px.
-    expect(rule).toEqual({ left: '48px', top: '38px', width: '300px' })
+    // No overlay at all: the only section-like row here is the header, and it owns its seam.
+    expect(rules(frame)).toHaveLength(0)
     // The header spans to the tab bar's bottom edge: 39 - 6.
     expect(style(frame, PANEL_HEADER_HEIGHT_PROPERTY)).toBe('33px')
     expect(frame.hasAttribute(PANEL_RULE_ATTRIBUTE)).toBe(true)
@@ -59,8 +62,9 @@ describe('侧栏面板分隔线实测', () => {
 
     createPanelRuleLayout(frame, { info: vi.fn() })
 
-    const [, commitRule] = rules(frame)
-    expect(commitRule).toEqual({ left: '48px', top: '289px', width: '300px' })
+    // Only the section gets a rule; the header is skipped even though it carries its own marker.
+    expect(rules(frame)).toHaveLength(1)
+    expect(rules(frame)[0]).toEqual({ left: '48px', top: '289px', width: '300px' })
     // The overlay replaces a border that could not close, so the box keeps the
     // row it reserved for it.
     expect(section.style.borderBottom).toBe('')
@@ -72,15 +76,15 @@ describe('侧栏面板分隔线实测', () => {
    *
    * `WorkbenchEditor` renders its empty state instead of `EditorPane` when no file is open, so the
    * tab bar the header closes against is absent from the DOM — not zero-width, simply not there.
-   * The header's height and its rule are one measurement, so withdrawing the rule also withdrew the
-   * height and the header fell back to its natural size, moving every row beneath it.
+   * The header's height and its seam are one measurement, so withdrawing the measurement also
+   * withdrew the height and the header fell back to its natural size, moving every row beneath it.
    *
    * The header therefore keeps the height the tab bar *would* have had, measured from the middle
    * column's own root: `.editorHeader` is 38px with a 1px bottom border, and that root is the node
-   * the tab bar lives in. Asserted as the same numbers a rendered tab bar produces, which is what
+   * the tab bar lives in. Asserted as the same number a rendered tab bar produces, which is what
    * makes the two states indistinguishable.
    */
-  it('keeps the header rule and height when no file is open and there is no tab bar', () => {
+  it('keeps the header height when no file is open and there is no tab bar', () => {
     const { frame, anchor } = fixture({
       frame: rect(0, 0, 1440, 900),
       column: rect(48, 0, 300, 900),
@@ -94,10 +98,9 @@ describe('侧栏面板分隔线实测', () => {
 
     createPanelRuleLayout(frame, { info: vi.fn() })
 
-    // Both rules: the commit box's, and the header's fallback edge.
-    expect(rules(frame)).toHaveLength(2)
-    expect(rules(frame)[0]).toEqual({ left: '48px', top: '38px', width: '300px' })
-    expect(rules(frame)[1]).toEqual({ left: '48px', top: '289px', width: '300px' })
+    // The section's rule survives; the header contributes none.
+    expect(rules(frame)).toHaveLength(1)
+    expect(rules(frame)[0]).toEqual({ left: '48px', top: '289px', width: '300px' })
     expect(frame.hasAttribute(PANEL_RULE_ATTRIBUTE)).toBe(true)
     // 39px from the middle column's top, less the header's own 6px top offset — the same '33px'
     // the tab-bar case publishes, which is the point: closing the last file must not resize
@@ -108,11 +111,11 @@ describe('侧栏面板分隔线实测', () => {
   /**
    * The base for that fallback is the middle column's root, not the sidebar column's.
    *
-   * Nothing makes the two columns share a top edge — the shell insets the sidebar — so deriving
-   * the edge from the sidebar's own box puts the rule that much lower than the tab bar it is meant
-   * to continue. This case is the one the original fixtures could not express: they hung the anchor
-   * off the frame directly and gave both columns the same origin, where the wrong arithmetic and
-   * the right one agree.
+   * Nothing makes the two columns share a top edge — the shell insets the sidebar — so deriving the
+   * edge from the sidebar's own box makes the header that much too short, and its seam lands above
+   * the tab bar's. This case is the one the original fixtures could not express: they hung the
+   * anchor off the frame directly and gave both columns the same origin, where the wrong arithmetic
+   * and the right one agree.
    */
   it('measures the fallback edge from the middle column, not the sidebar column', () => {
     const { frame, anchor } = fixture({
@@ -127,10 +130,8 @@ describe('侧栏面板分隔线实测', () => {
 
     createPanelRuleLayout(frame, { info: vi.fn() })
 
-    // 0 + 39 - 1, i.e. the tab bar's own edge — NOT the sidebar's 2px-lower top plus 39.
-    const [headerRule] = rules(frame)
-    expect(headerRule).toEqual({ left: '48px', top: '38px', width: '300px' })
-    // And the height the measured path would publish for the same header.
+    // 39 from the middle column's top, less the header's own 8px — NOT 39 from the sidebar's
+    // 2px-lower top, which would give 29 and leave the seam 4px above the tab bar's.
     expect(style(frame, PANEL_HEADER_HEIGHT_PROPERTY)).toBe('31px')
   })
 
@@ -159,10 +160,10 @@ describe('侧栏面板分隔线实测', () => {
   })
 
   /**
-   * Rounding a measured offset to whole CSS pixels moves the line by up to half a
-   * pixel, which at a fractional display scale is a whole device row: the two
-   * halves of one seam would land on different rows and read as broken. This is
-   * the regression that made the sidebar line look heavier.
+   * Rounding a measured height to whole CSS pixels moves the header's seam by up to half a pixel,
+   * which at a fractional display scale is a whole device row: the two halves of one seam would land
+   * on different rows and read as broken. This is the regression that made the sidebar line look
+   * heavier, and it survives the header taking over its own seam — the height is still measured.
    */
   it('publishes fractional geometry without rounding to whole pixels', () => {
     const { frame } = fixture({
@@ -170,11 +171,12 @@ describe('侧栏面板分隔线实测', () => {
       column: rect(48.5, 0, 300.25, 900),
       header: rect(60, 6.25, 276, 34),
       anchor: rect(360, 0, 640, 39.5),
+      section: rect(60, 200.5, 276, 90),
     })
 
     createPanelRuleLayout(frame, { info: vi.fn() })
 
-    expect(rules(frame)[0]).toEqual({ left: '48.5px', top: '38.5px', width: '300.25px' })
+    expect(rules(frame)[0]).toEqual({ left: '48.5px', top: '289.5px', width: '300.25px' })
     expect(style(frame, PANEL_HEADER_HEIGHT_PROPERTY)).toBe('33.25px')
   })
 
@@ -205,7 +207,7 @@ describe('侧栏面板分隔线实测', () => {
     })
 
     const layout = createPanelRuleLayout(frame, { info: vi.fn() })
-    expect(rules(frame)).toHaveLength(2)
+    expect(rules(frame)).toHaveLength(1)
     layout.dispose()
 
     expect(rules(frame)).toHaveLength(0)
@@ -232,16 +234,16 @@ describe('侧栏面板分隔线实测', () => {
   })
 
   /**
-   * The reported bug: the SQL panel's header declared its own `border-block-end`
-   * while the layout was also painting the measured rule, so two lines landed just
-   * under the title — the panel's own, clipped 8px short of the column edge by
-   * `.regionArea`, next to the full-width overlay.
+   * The seam under a panel header is drawn once, by the shared `[panel-header]` rule in
+   * `layout-styles.ts`, which every marked panel gets for free. A panel that also declared a bottom
+   * border on its own header would draw a second line — the reported bug this replaces, when the
+   * SQL panel's own `border-block-end` landed next to the measured overlay.
    *
-   * Marking a header hands the line over to the overlay, so the marked panels'
-   * stylesheets must carry no bottom border at all: this is a property of the
-   * handover, not of any one panel, which is why every marked stylesheet is read.
+   * So the marked panels' stylesheets must still carry no bottom border: the rule is now shared
+   * rather than painted from outside, but a per-panel copy of it is still a duplicate. Every marked
+   * stylesheet is read because this is a property of the marker, not of any one panel.
    */
-  it('leaves the header rule to the overlay it hands the line over to', () => {
+  it('leaves the seam to the shared header rule rather than drawing its own', () => {
     const headers = [
       ['src/client/files/files.module.css', 'panelHeader'],
       ['src/client/git/git.module.css', 'panelHeader'],
@@ -259,6 +261,15 @@ describe('侧栏面板分隔线实测', () => {
         /border(?:-block-end|-bottom)?:/u,
       )
     }
+
+    // And the shared rule is what draws it, with the tab bar's own declaration.
+    const css = readFileSync(resolve(process.cwd(), 'src/client/layout/layout-styles.ts'), 'utf8')
+    const headerRule = (css.match(/PANEL_HEADER_ATTRIBUTE\}\] \{[\s\S]*?\n\}/u) ?? [])[0]
+    expect(headerRule, 'the shared header rule must paint the seam').toBeDefined()
+    expect(headerRule).toContain('border-bottom: 1px solid var(--dsw-alias-border-l1)')
+    expect(headerRule).toContain('background: var(--dsw-alias-bg-layer-1)')
+    // No stacking context: the Git and terminal menus are rendered inside this row.
+    expect(headerRule).not.toMatch(/isolation|z-index|position: relative/u)
   })
 
   it('draws each rule with the tab bar border declaration', () => {

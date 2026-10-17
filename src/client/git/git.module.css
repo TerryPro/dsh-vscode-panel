@@ -751,12 +751,12 @@
   flex-direction: column;
   gap: 8px;
   padding: 4px 12px 10px 8px;
-  /* The row is reserved by a transparent border rather than dropped: the visible
-     line is painted by panel-rule-layout.ts on the AppFrame, because this box
-     lives inside the shell's .regionArea, which clips 8px short of the column
-     edge and so can never close a line drawn here on the left. Keeping the
-     border keeps this box's height, and the overlay's row, exactly where they
-     already were. See [data-dsh-workbench-panel-rule-section]. */
+  /* The row is reserved by a transparent border rather than dropped: this box starts
+     at the sidebar's content inset, so a border drawn here cannot reach the column's
+     left edge — the line is painted from outside by panel-rule-layout.ts on the
+     AppFrame instead. Keeping the border keeps this box's height, and the overlay's
+     row, exactly where they already were. See [data-dsh-workbench-panel-rule-section]
+     and the note on why a section, unlike a panel header, is not given the bleed. */
   border-bottom: 1px solid transparent;
 }
 
