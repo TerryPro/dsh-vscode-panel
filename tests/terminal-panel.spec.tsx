@@ -281,6 +281,25 @@ describe('终端左栏', () => {
     expect(controller.listShells).not.toHaveBeenCalled()
   })
 
+  it('新建终端按钮画的是「终端本体 + 加号徽标」，与文件面板同一套图标', () => {
+    current.state = terminalState()
+    const controller = controllerFixture()
+    const view = renderPanel(controller)
+
+    // The plus used to be a bare glyph beside a chevron inside one split pill. The panel headers
+    // now share the file panel's action row, where "create X" is always the thing's own outline
+    // with the official plus badged onto its corner — so the button must carry that composite,
+    // not a bare plus, or the terminal's header reads as a different product's toolbar.
+    const create = view.getByRole('button', { name: '新建终端' })
+    const composite = create.querySelector('[data-icon="terminal-add"]')
+    expect(composite, 'the create button must render the terminal-add composite').not.toBeNull()
+    // Both halves live inside the composite: the terminal body as an svg, and the official plus
+    // (mocked as a bare span here) as its second child. A flattened composite — the plus rendered
+    // beside the button instead of badged onto it — would leave one child and fail here.
+    expect(composite?.querySelector('svg')).not.toBeNull()
+    expect(composite?.children).toHaveLength(2)
+  })
+
   it('+ 与下拉是两个独立按钮，互不触发对方', () => {
     current.state = terminalState()
     const controller = controllerFixture()

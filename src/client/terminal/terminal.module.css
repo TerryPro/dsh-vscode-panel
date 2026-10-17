@@ -215,73 +215,44 @@
   white-space: nowrap;
 }
 
-/* Own seat for the new-terminal pair. The runtime layout stylesheet widens
-   any `[class*="_root"]` node in the sidebar to `width: 100% !important`, and
-   the Menu root carries a hashed `_root_*` class: unconfined, that override
-   stretched the anchor across the header, pulling the plus away from the
-   chevron and squeezing the title into a vertical stack. A fixed-width seat
-   keeps the override harmless at 100% of the pair, and the two buttons share
-   it without either overflowing into the title. */
+/* Own seat for the new-terminal pair. The runtime layout stylesheet widens any
+   `[class*="_root"]` node in the sidebar to `width: 100% !important`, and the Menu
+   root carries a hashed `_root_*` class: unconfined, that override stretched the
+   anchor across the header, pulling the plus away from the chevron and squeezing
+   the title into a vertical stack. A fixed-width seat keeps the override harmless
+   at 100% of the pair, and the two buttons share it without either overflowing
+   into the title. The width is the two 28px circles plus their 1px gap. */
 .newTerminalSeat {
   display: inline-flex;
   flex: none;
   align-items: center;
-  width: 52px;
+  gap: 1px;
+  width: 57px;
 }
 
-/* The two new-terminal buttons sit next to each other and read as one split
-   affordance: a tap on the plus opens a default terminal, a tap on the chevron
-   opens the shell list. They share an 8px corner radius and an 8px height so
-   they look like the original single pill, only split. */
-.newTerminalDefault,
-.newTerminalChevron {
+/* The two new-terminal buttons are ordinary panel-header icon buttons — the same
+   28px circle the file panel uses, one action per circle. They used to be halves
+   of a split pill joined by a hairline, which read as a single control that had
+   been cut in two; each of these is its own action and now looks like one. */
+.newTerminalButton {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  box-sizing: border-box;
+  width: 28px;
   height: 28px;
   padding: 0;
   border: none;
+  border-radius: 50%;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
-/* Equal halves of the seat: the plus owns the left 24px, the chevron owns the
-   right 24px. They sit flush against each other so the seat is 48px wide
-   overall — only 2px wider than the merged pill they replaced, which keeps
-   the title from being squeezed in a narrow sidebar. */
-.newTerminalDefault {
-  width: 24px;
-  border-radius: 8px 0 0 8px;
-}
-
-.newTerminalChevron {
-  width: 24px;
-  border-radius: 0 8px 8px 0;
-  /* A 1px hairline on the chevron's left edge acts as the split between the
-     two buttons. It only paints when the row is at rest, so the focus / hover
-     fills still read as one continuous pill when the pointer is over the
-     chevron. */
-  box-shadow: inset 1px 0 0 var(--dsw-alias-border-l2);
-}
-
-.newTerminalDefault:hover,
-.newTerminalDefault:focus-visible,
-.newTerminalChevron:hover,
-.newTerminalChevron:focus-visible,
-.newTerminalChevron[aria-expanded='true'] {
+.newTerminalButton:hover,
+.newTerminalButton:focus-visible,
+.newTerminalButton[aria-expanded='true'] {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.newTerminalChevron > svg {
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.newTerminalChevron:hover > svg,
-.newTerminalChevron[aria-expanded='true'] > svg {
   color: var(--dsw-alias-label-primary);
 }
 
@@ -427,8 +398,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .newTerminalDefault,
-  .newTerminalChevron,
+  .newTerminalButton,
   .terminalClose {
     transition: none;
   }

@@ -13,5 +13,9 @@
   box-sizing: content-box;
   padding: 1px;
   border-radius: 50%;
-  background: var(--dsw-specific-sidebar-fill);
+  /* The badge has to knock out the surface it sits on, not a fixed one: this icon appears on
+     the sidebar column, inside menus, and (since the panel headers became toolbars) on a header
+     painted with the tab bar's fill. A surface that differs from the sidebar column declares
+     --dsh-workbench-badge-knockout; everywhere else the column fill is already right. */
+  background: var(--dsh-workbench-badge-knockout, var(--dsw-specific-sidebar-fill));
 }

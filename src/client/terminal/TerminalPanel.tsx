@@ -5,7 +5,6 @@ import {
   IconChevronDownOutlineRegular,
   IconCloseOutlineMedium,
   IconEditOutlineMedium,
-  IconPlusOutlineMedium,
   Input,
   Menu,
   type MenuEntry,
@@ -13,7 +12,7 @@ import {
   Tooltip,
   Button,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { IconTerminalOutline16 } from './TerminalIcon.tsx'
+import { IconTerminalAddOutline16, IconTerminalOutline16 } from './TerminalIcon.tsx'
 import { shellDisplayName } from './shell-display.ts'
 import { terminalDot } from './terminal-dot.ts'
 import { terminalName } from './terminal-name.ts'
@@ -224,18 +223,19 @@ function DefaultTerminalButton({ controller, workspaceId, t }: {
     <Tooltip label={t('terminal.new')} side="bottom" delayMs={500}>
       <button
         type="button"
-        className={css.newTerminalDefault}
+        className={css.newTerminalButton}
         aria-label={t('terminal.new')}
         onClick={() => { controller.openTerminal(workspaceId) }}
       >
-        <IconPlusOutlineMedium size={16} />
+        <IconTerminalAddOutline16 size={16} />
       </button>
     </Tooltip>
   )
 }
 
-/** Chevron that opens the shell list. The plus and the chevron share a 52px seat so the
- *  panel header does not grow noticeably; the chevron is the only entry point to a non-default shell. */
+/** Chevron that opens the shell list — the only entry point to a non-default shell. It is a
+ *  sibling button rather than the second half of a split pill: the panel headers now share the
+ *  file panel's action row, where each action is its own 28px circle. */
 function ShellPickerButton({ controller, workspaceId, t }: {
   controller: WorkbenchController
   workspaceId: string
@@ -290,7 +290,7 @@ function ShellPickerButton({ controller, workspaceId, t }: {
         <Tooltip label={t('terminal.shellHeading')} side="bottom" delayMs={500}>
           <button
             type="button"
-            className={css.newTerminalChevron}
+            className={css.newTerminalButton}
             aria-label={t('terminal.shellHeading')}
             aria-expanded={open}
             onClick={() => {
@@ -298,7 +298,7 @@ function ShellPickerButton({ controller, workspaceId, t }: {
               setOpen(value => !value)
             }}
           >
-            <IconChevronDownOutlineRegular size={11} />
+            <IconChevronDownOutlineRegular size={14} />
           </button>
         </Tooltip>
       )}
