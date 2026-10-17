@@ -10,6 +10,7 @@
  */
 
 import { WORKBENCH_API_PREFIX } from './contracts.ts'
+import { route, type RouteTable } from './route.ts'
 
 /** Prefix every kernel POST is dispatched under, beside the file and Git arms. */
 export const KERNEL_POST_PREFIX = `${WORKBENCH_API_PREFIX}/kernel`
@@ -280,3 +281,51 @@ export interface NotebookKernelMetadata {
   displayName: string
   language: string
 }
+
+/**
+ * 内核对 token 的那几条路由共用的请求前导。
+ *
+ * 回环来源栅栏只能证明请求来自本机浏览器，不能证明来自*这个*页面，所以 id 与 token 一起
+ * 才是「允许动这个内核」的凭据。`discover` 与 `list` 没有它，它们问的是工作区有什么。
+ */
+export type KernelSessionRequest = { kernelId: string; token: string; workspaceId: string }
+
+/**
+ * 内核那一组路由的声明。
+ *
+ * 事件流（`KERNEL_STREAM_PATH`）不在这里：它是一条 GET 长连接，不是一次请求-响应，
+ * 所以没有可查的回值形状。`poll` 声明在这，但它的 GET 臂由宿主的注册路由单独处理。
+ */
+export const KERNEL_ROUTES = {
+  kernelDiscover: route<{ workspaceId: string }, KernelDiscoverResult>(`${KERNEL_POST_PREFIX}/discover`),
+  kernelList: route<{ workspaceId: string }, KernelListResult>(`${KERNEL_POST_PREFIX}/list`),
+  kernelReclaim: route<{ kernelId: string; workspaceId: string }, KernelStatusResult>(`${KERNEL_POST_PREFIX}/reclaim`),
+  kernelStart: route<{ workspaceId: string; path: string; specName?: string }, KernelStartResult>(
+    `${KERNEL_POST_PREFIX}/start`,
+  ),
+  kernelStatus: route<KernelSessionRequest, KernelStatusResult>(`${KERNEL_POST_PREFIX}/status`),
+  kernelExecute: route<
+    { kernelId: string; token: string; workspaceId: string; code: string; cellId?: string; silent?: boolean },
+    KernelExecuteResult
+  >(`${KERNEL_POST_PREFIX}/execute`),
+  kernelInterrupt: route<KernelSessionRequest, KernelStatusResult>(`${KERNEL_POST_PREFIX}/interrupt`),
+  kernelInput: route<{ kernelId: string; token: string; workspaceId: string; value: string }, KernelInputResult>(
+    `${KERNEL_POST_PREFIX}/input`,
+  ),
+  kernelComplete: route<{ kernelId: string; token: string; workspaceId: string; code: string; cursorPos: number }, KernelCompletionResult>(
+    `${KERNEL_POST_PREFIX}/complete`,
+  ),
+  kernelInspect: route<{ kernelId: string; token: string; workspaceId: string; code: string; cursorPos: number }, KernelInspectResult>(
+    `${KERNEL_POST_PREFIX}/inspect`,
+  ),
+  kernelIsComplete: route<{ kernelId: string; token: string; workspaceId: string; code: string }, KernelIsCompleteResult>(
+    `${KERNEL_POST_PREFIX}/is-complete`,
+  ),
+  kernelPoll: route<{ kernelId: string; token: string; workspaceId: string; since: number }, NotebookKernelPollResult>(
+    `${KERNEL_POST_PREFIX}/poll`,
+  ),
+  kernelRestart: route<{ kernelId: string; token: string; workspaceId: string; path: string }, KernelStartResult>(
+    `${KERNEL_POST_PREFIX}/restart`,
+  ),
+  kernelShutdown: route<KernelSessionRequest, KernelStatusResult>(`${KERNEL_POST_PREFIX}/shutdown`),
+} satisfies RouteTable

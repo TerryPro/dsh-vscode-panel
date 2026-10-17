@@ -29,7 +29,9 @@ import type {
   WorkspaceAbsolutePath,
   WorkspaceRelativePath,
 } from '../../shared/contracts.ts'
-import type { ConfigSnapshot } from '../../shared/config-protocol.ts'
+import { FILE_ROUTES, GIT_ROUTES } from '../../shared/contracts.ts'
+import { CONFIG_PREAMBLE, CONFIG_ROUTES, type ConfigSnapshot } from '../../shared/config-protocol.ts'
+import type { Route } from '../../shared/route.ts'
 import type {
   KernelCompletionResult,
   KernelDiscoverResult,
@@ -42,10 +44,9 @@ import type {
   KernelStatusResult,
   NotebookKernelPollResult,
 } from '../../shared/notebook-protocol.ts'
-import { WORKBENCH_API_PREFIX } from '../../shared/contracts.ts'
-import { KERNEL_POST_PREFIX } from '../../shared/notebook-protocol.ts'
+import { KERNEL_POST_PREFIX, KERNEL_ROUTES } from '../../shared/notebook-protocol.ts'
 import {
-  SQL_POST_PREFIX,
+  SQL_ROUTES,
   type SqlCancelResult,
   type SqlCloseResult,
   type SqlColumnsResult,
@@ -65,43 +66,43 @@ export class WorkbenchApiError extends Error {
 /** Typed fetch facade; all mutations stay explicit methods. */
 export class WorkbenchApi {
   async listDirectory(workspaceId: string, path: string): Promise<DirectoryListing> {
-    return this.post('/tree', { workspaceId, path })
+    return this.post(FILE_ROUTES.listDirectory, { workspaceId, path })
   }
 
   async readFile(workspaceId: string, path: string): Promise<WorkspaceFile> {
-    return this.post('/file/read', { workspaceId, path })
+    return this.post(FILE_ROUTES.readFile, { workspaceId, path })
   }
 
   async readImage(workspaceId: string, path: string): Promise<WorkspaceImageFile> {
-    return this.post('/file/image', { workspaceId, path })
+    return this.post(FILE_ROUTES.readImage, { workspaceId, path })
   }
 
   async refreshFiles(workspaceId: string, files: WorkspaceFileObservation[]): Promise<WorkspaceFilesRefresh> {
-    return this.post('/files/refresh', { workspaceId, files })
+    return this.post(FILE_ROUTES.refreshFiles, { workspaceId, files })
   }
 
   async saveFile(workspaceId: string, path: string, content: string, version: string): Promise<SavedWorkspaceFile> {
-    return this.post('/file/save', { workspaceId, path, content, version })
+    return this.post(FILE_ROUTES.saveFile, { workspaceId, path, content, version })
   }
 
   async createFile(workspaceId: string, path: string): Promise<CreatedWorkspaceEntry> {
-    return this.post('/file/create', { workspaceId, path })
+    return this.post(FILE_ROUTES.createFile, { workspaceId, path })
   }
 
   async createDirectory(workspaceId: string, path: string): Promise<CreatedWorkspaceEntry> {
-    return this.post('/directory/create', { workspaceId, path })
+    return this.post(FILE_ROUTES.createDirectory, { workspaceId, path })
   }
 
   async renameEntry(workspaceId: string, path: string, name: string): Promise<RenamedWorkspaceEntry> {
-    return this.post('/entry/rename', { workspaceId, path, name })
+    return this.post(FILE_ROUTES.renameEntry, { workspaceId, path, name })
   }
 
   async deleteEntry(workspaceId: string, path: string): Promise<DeletedWorkspaceEntry> {
-    return this.post('/entry/delete', { workspaceId, path })
+    return this.post(FILE_ROUTES.deleteEntry, { workspaceId, path })
   }
 
   async absolutePath(workspaceId: string, path: string): Promise<WorkspaceAbsolutePath> {
-    return this.post('/path/absolute', { workspaceId, path })
+    return this.post(FILE_ROUTES.absolutePath, { workspaceId, path })
   }
 
   /**
@@ -111,67 +112,67 @@ export class WorkbenchApi {
    * Host spends on the way out, not something this page needs back.
    */
   async revealPath(workspaceId: string, path: string): Promise<WorkspaceRelativePath> {
-    return this.post('/path/reveal', { workspaceId, path })
+    return this.post(FILE_ROUTES.revealPath, { workspaceId, path })
   }
 
   async relativePath(workspaceId: string, path: string): Promise<WorkspaceRelativePath> {
-    return this.post('/path/relative', { workspaceId, path })
+    return this.post(FILE_ROUTES.relativePath, { workspaceId, path })
   }
 
   async gitStatus(workspaceId: string): Promise<GitStatus> {
-    return this.post('/git/status', { workspaceId })
+    return this.post(GIT_ROUTES.gitStatus, { workspaceId })
   }
 
   async gitDiff(workspaceId: string, path: string, staged: boolean): Promise<GitFileDiff> {
-    return this.post('/git/diff', { workspaceId, path, staged })
+    return this.post(GIT_ROUTES.gitDiff, { workspaceId, path, staged })
   }
 
   async gitEditorBaseline(workspaceId: string, path: string): Promise<GitEditorBaseline> {
-    return this.post('/git/editor-baseline', { workspaceId, path })
+    return this.post(GIT_ROUTES.gitEditorBaseline, { workspaceId, path })
   }
 
   async gitGraph(workspaceId: string, offset = 0): Promise<GitGraph> {
-    return this.post('/git/graph', { workspaceId, offset })
+    return this.post(GIT_ROUTES.gitGraph, { workspaceId, offset })
   }
 
   async gitBranches(workspaceId: string): Promise<GitBranches> {
-    return this.post('/git/branches', { workspaceId })
+    return this.post(GIT_ROUTES.gitBranches, { workspaceId })
   }
 
   async gitSwitchBranch(workspaceId: string, ref: string): Promise<GitStatus> {
-    return this.post('/git/branch/switch', { workspaceId, ref })
+    return this.post(GIT_ROUTES.gitSwitchBranch, { workspaceId, ref })
   }
 
   async gitCreateBranch(workspaceId: string, name: string, source?: string): Promise<GitStatus> {
-    return this.post('/git/branch/create', { workspaceId, name, source })
+    return this.post(GIT_ROUTES.gitCreateBranch, { workspaceId, name, ...(source === undefined ? {} : { source }) })
   }
 
   async gitRenameBranch(workspaceId: string, name: string): Promise<GitStatus> {
-    return this.post('/git/branch/rename', { workspaceId, name })
+    return this.post(GIT_ROUTES.gitRenameBranch, { workspaceId, name })
   }
 
   async gitDeleteBranch(workspaceId: string, ref: string): Promise<GitStatus> {
-    return this.post('/git/branch/delete', { workspaceId, ref })
+    return this.post(GIT_ROUTES.gitDeleteBranch, { workspaceId, ref })
   }
 
   async gitRemoteOperation(workspaceId: string, operation: GitRemoteOperation): Promise<GitRemoteResult> {
-    return this.post('/git/remote', { workspaceId, operation })
+    return this.post(GIT_ROUTES.gitRemoteOperation, { workspaceId, operation })
   }
 
   async gitRemotes(workspaceId: string): Promise<GitRemotes> {
-    return this.post('/git/remotes', { workspaceId })
+    return this.post(GIT_ROUTES.gitRemotes, { workspaceId })
   }
 
   async gitAddRemote(workspaceId: string, remote: Omit<GitRemote, 'separatePushUrl'>): Promise<GitRemotes> {
-    return this.post('/git/remote/add', { workspaceId, ...remote })
+    return this.post(GIT_ROUTES.gitAddRemote, { workspaceId, ...remote })
   }
 
   async gitUpdateRemote(workspaceId: string, currentName: string, remote: Omit<GitRemote, 'separatePushUrl'>): Promise<GitRemotes> {
-    return this.post('/git/remote/update', { workspaceId, currentName, ...remote })
+    return this.post(GIT_ROUTES.gitUpdateRemote, { workspaceId, currentName, ...remote })
   }
 
   async gitDeleteRemote(workspaceId: string, name: string): Promise<GitRemotes> {
-    return this.post('/git/remote/delete', { workspaceId, name })
+    return this.post(GIT_ROUTES.gitDeleteRemote, { workspaceId, name })
   }
 
   async gitTargetRemoteOperation(
@@ -180,55 +181,58 @@ export class WorkbenchApi {
     remote: string,
     branch?: string,
   ): Promise<GitTargetRemoteResult> {
-    return this.post('/git/remote/target', { workspaceId, operation, remote, branch })
+    return this.post(
+      GIT_ROUTES.gitTargetRemoteOperation,
+      { workspaceId, operation, remote, ...(branch === undefined ? {} : { branch }) },
+    )
   }
 
   async gitCommitFiles(workspaceId: string, revision: string): Promise<GitCommitFiles> {
-    return this.post('/git/commit/files', { workspaceId, revision })
+    return this.post(GIT_ROUTES.gitCommitFiles, { workspaceId, revision })
   }
 
   async gitCommitFileDiff(workspaceId: string, revision: string, path: string): Promise<GitFileDiff> {
-    return this.post('/git/commit/file', { workspaceId, revision, path })
+    return this.post(GIT_ROUTES.gitCommitFileDiff, { workspaceId, revision, path })
   }
 
   async gitComparisonFiles(workspaceId: string, revision: string): Promise<GitCommitFiles> {
-    return this.post('/git/comparison/files', { workspaceId, revision })
+    return this.post(GIT_ROUTES.gitComparisonFiles, { workspaceId, revision })
   }
 
   async gitComparisonFileDiff(workspaceId: string, revision: string, path: string): Promise<GitFileDiff> {
-    return this.post('/git/comparison/file', { workspaceId, revision, path })
+    return this.post(GIT_ROUTES.gitComparisonFileDiff, { workspaceId, revision, path })
   }
 
   async gitCommitAction(workspaceId: string, operation: GitCommitAction, revision: string): Promise<GitCommitActionResult> {
-    return this.post('/git/commit/action', { workspaceId, operation, revision })
+    return this.post(GIT_ROUTES.gitCommitAction, { workspaceId, operation, revision })
   }
 
   async gitStage(workspaceId: string, path: string): Promise<GitStatus> {
-    return this.post('/git/stage', { workspaceId, path })
+    return this.post(GIT_ROUTES.gitStage, { workspaceId, path })
   }
 
   async gitStageAll(workspaceId: string): Promise<GitStatus> {
-    return this.post('/git/stage-all', { workspaceId })
+    return this.post(GIT_ROUTES.gitStageAll, { workspaceId })
   }
 
   async gitUnstage(workspaceId: string, path: string): Promise<GitStatus> {
-    return this.post('/git/unstage', { workspaceId, path })
+    return this.post(GIT_ROUTES.gitUnstage, { workspaceId, path })
   }
 
   async gitUnstageAll(workspaceId: string): Promise<GitStatus> {
-    return this.post('/git/unstage-all', { workspaceId })
+    return this.post(GIT_ROUTES.gitUnstageAll, { workspaceId })
   }
 
   async gitDiscard(workspaceId: string, path: string): Promise<GitStatus> {
-    return this.post('/git/discard', { workspaceId, path })
+    return this.post(GIT_ROUTES.gitDiscard, { workspaceId, path })
   }
 
   async gitDiscardAll(workspaceId: string): Promise<GitStatus> {
-    return this.post('/git/discard-all', { workspaceId })
+    return this.post(GIT_ROUTES.gitDiscardAll, { workspaceId })
   }
 
   async gitCommit(workspaceId: string, message: string): Promise<GitCommitResult> {
-    return this.post('/git/commit', { workspaceId, message })
+    return this.post(GIT_ROUTES.gitCommit, { workspaceId, message })
   }
 
   /**
@@ -238,7 +242,7 @@ export class WorkbenchApi {
    * user presses Run rather than failing on it.
    */
   async kernelDiscover(workspaceId: string): Promise<KernelDiscoverResult> {
-    return this.postKernel('/discover', { workspaceId })
+    return this.post(KERNEL_ROUTES.kernelDiscover, { workspaceId })
   }
 
   /**
@@ -249,20 +253,20 @@ export class WorkbenchApi {
    * Host never returns a token here.
    */
   async kernelList(workspaceId: string): Promise<KernelListResult> {
-    return this.postKernel('/list', { workspaceId })
+    return this.post(KERNEL_ROUTES.kernelList, { workspaceId })
   }
 
   /** Reclaim a kernel the Host has judged unreachable by any notebook. */
   async kernelReclaim(kernelId: string, workspaceId: string): Promise<KernelStatusResult> {
-    return this.postKernel('/reclaim', { kernelId, workspaceId })
+    return this.post(KERNEL_ROUTES.kernelReclaim, { kernelId, workspaceId })
   }
 
   async kernelStart(workspaceId: string, path: string, specName?: string): Promise<KernelStartResult> {
-    return this.postKernel('/start', { workspaceId, path, ...(specName === undefined ? {} : { specName }) })
+    return this.post(KERNEL_ROUTES.kernelStart, { workspaceId, path, ...(specName === undefined ? {} : { specName }) })
   }
 
   async kernelStatus(kernelId: string, token: string, workspaceId: string): Promise<KernelStatusResult> {
-    return this.postKernel('/status', { kernelId, token, workspaceId })
+    return this.post(KERNEL_ROUTES.kernelStatus, { kernelId, token, workspaceId })
   }
 
   async kernelExecute(input: {
@@ -273,15 +277,15 @@ export class WorkbenchApi {
     cellId?: string
     silent?: boolean
   }): Promise<KernelExecuteResult> {
-    return this.postKernel('/execute', input)
+    return this.post(KERNEL_ROUTES.kernelExecute, input)
   }
 
   async kernelInterrupt(kernelId: string, token: string, workspaceId: string): Promise<KernelStatusResult> {
-    return this.postKernel('/interrupt', { kernelId, token, workspaceId })
+    return this.post(KERNEL_ROUTES.kernelInterrupt, { kernelId, token, workspaceId })
   }
 
   async kernelInput(kernelId: string, token: string, workspaceId: string, value: string): Promise<KernelInputResult> {
-    return this.postKernel('/input', { kernelId, token, workspaceId, value })
+    return this.post(KERNEL_ROUTES.kernelInput, { kernelId, token, workspaceId, value })
   }
 
   async kernelComplete(input: {
@@ -291,7 +295,7 @@ export class WorkbenchApi {
     code: string
     cursorPos: number
   }): Promise<KernelCompletionResult> {
-    return this.postKernel('/complete', input)
+    return this.post(KERNEL_ROUTES.kernelComplete, input)
   }
 
   async kernelInspect(input: {
@@ -301,7 +305,7 @@ export class WorkbenchApi {
     code: string
     cursorPos: number
   }): Promise<KernelInspectResult> {
-    return this.postKernel('/inspect', input)
+    return this.post(KERNEL_ROUTES.kernelInspect, input)
   }
 
   async kernelIsComplete(input: {
@@ -310,7 +314,7 @@ export class WorkbenchApi {
     workspaceId: string
     code: string
   }): Promise<KernelIsCompleteResult> {
-    return this.postKernel('/is-complete', input)
+    return this.post(KERNEL_ROUTES.kernelIsComplete, input)
   }
 
   async kernelRestart(input: {
@@ -319,11 +323,11 @@ export class WorkbenchApi {
     workspaceId: string
     path: string
   }): Promise<KernelStartResult> {
-    return this.postKernel('/restart', input)
+    return this.post(KERNEL_ROUTES.kernelRestart, input)
   }
 
   async kernelShutdown(kernelId: string, token: string, workspaceId: string): Promise<KernelStatusResult> {
-    return this.postKernel('/shutdown', { kernelId, token, workspaceId })
+    return this.post(KERNEL_ROUTES.kernelShutdown, { kernelId, token, workspaceId })
   }
 
   /** Poll fallback for the event stream, for environments that cannot hold one open. */
@@ -353,7 +357,7 @@ export class WorkbenchApi {
    * restate a number the host no longer uses; it renders whatever the schema declares.
    */
   async readPluginConfig(): Promise<ConfigSnapshot> {
-    return this.post('/config', {})
+    return this.post(CONFIG_ROUTES.readPluginConfig, {})
   }
 
   /**
@@ -364,7 +368,7 @@ export class WorkbenchApi {
    * this plugin owns, which is why the page says so before it offers the button.
    */
   async updatePluginConfig(config: Record<string, number>): Promise<ConfigSnapshot> {
-    return this.post('/config/update', { config })
+    return this.post(CONFIG_PREAMBLE.updatePluginConfig, { config })
   }
 
   // --- SQL notebook -------------------------------------------------------------
@@ -388,17 +392,17 @@ export class WorkbenchApi {
     access?: SqlAccess
     rowLimit?: number
   }): Promise<SqlOpenResult> {
-    return this.postSql('/open', input)
+    return this.post(SQL_ROUTES.sqlOpen, input)
   }
 
   /** Run one cell. The Host runs its statements in order and answers one block each. */
   async sqlExecute(workspaceId: string, notebook: string, sql: string): Promise<SqlExecuteResult> {
-    return this.postSql('/execute', { workspaceId, notebook, sql })
+    return this.post(SQL_ROUTES.sqlExecute, { workspaceId, notebook, sql })
   }
 
   /** Close the connection now, rolling back an open transaction on the way out. */
   async sqlClose(workspaceId: string, notebook: string): Promise<SqlCloseResult> {
-    return this.postSql('/close', { workspaceId, notebook })
+    return this.post(SQL_ROUTES.sqlClose, { workspaceId, notebook })
   }
 
   /**
@@ -409,7 +413,7 @@ export class WorkbenchApi {
    * running at all.
    */
   async sqlCancel(workspaceId: string, notebook: string): Promise<SqlCancelResult> {
-    return this.postSql('/cancel', { workspaceId, notebook })
+    return this.post(SQL_ROUTES.sqlCancel, { workspaceId, notebook })
   }
 
   /**
@@ -419,54 +423,38 @@ export class WorkbenchApi {
    * makes a page reload keep the user's temporary tables.
    */
   async sqlAbandon(workspaceId: string, notebook: string): Promise<{ path: string; scheduled: boolean }> {
-    return this.postSql('/abandon', { workspaceId, notebook })
+    return this.post(SQL_ROUTES.sqlAbandon, { workspaceId, notebook })
   }
 
   /** First schema level: tables and views, with the tree's own truncation flag. */
   async sqlTables(workspaceId: string, notebook: string): Promise<SqlTablesResult> {
-    return this.postSql('/tables', { workspaceId, notebook })
+    return this.post(SQL_ROUTES.sqlTables, { workspaceId, notebook })
   }
 
   /** Declared columns of one table or view, as the schema tree shows them. */
   async sqlColumns(workspaceId: string, notebook: string, table: string): Promise<SqlColumnsResult> {
-    return this.postSql('/columns', { workspaceId, notebook, table })
+    return this.post(SQL_ROUTES.sqlColumns, { workspaceId, notebook, table })
   }
 
   /** Release every connection of a workspace the reader left. */
   async sqlReleaseWorkspace(workspaceId: string): Promise<{ released: number }> {
-    return this.postSql('/release-workspace', { workspaceId })
+    return this.post(SQL_ROUTES.sqlReleaseWorkspace, { workspaceId })
   }
 
-  private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${WORKBENCH_API_PREFIX}${path}`, {
+  /**
+   * 一次工作台请求，唯一的那条出口。
+   *
+   * 路径与参数都来自同一个声明：声明里已经拼好完整路径，所以这里不再加任何前缀；
+   * 参数由声明的形状约束，写错名字或漏一个字段过不了编译。
+   */
+  private async post<Params extends object, Result>(spec: Route<Params, Result>, params: Params): Promise<Result> {
+    const response = await fetch(spec.path, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(params),
     })
-    return readResponse<T>(response)
-  }
-
-  /** One kernel JSON call; the path is relative to the kernel prefix. */
-  private async postKernel<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${KERNEL_POST_PREFIX}${path}`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return readResponse<T>(response)
-  }
-
-  /** One SQL notebook JSON call; the path is relative to the SQL prefix. */
-  private async postSql<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${SQL_POST_PREFIX}${path}`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return readResponse<T>(response)
+    return readResponse(response)
   }
 }
 

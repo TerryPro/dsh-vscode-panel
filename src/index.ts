@@ -7,19 +7,27 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-workspace'
-import { GIT_GRAPH_PAGE_SIZE, MERMAID_RUNTIME_PATH, WORKBENCH_API_PREFIX } from './shared/contracts.ts'
+import {
+  FILE_ROUTES,
+  GIT_GRAPH_PAGE_SIZE,
+  GIT_ROUTES,
+  MERMAID_RUNTIME_PATH,
+  WORKBENCH_API_PREFIX,
+} from './shared/contracts.ts'
 import {
   CONFIG_FIELDS,
-  CONFIG_READ_PATH,
+  CONFIG_ROUTES,
   CONFIG_WRITE_PATH,
   type ConfigFieldMeta,
   type ConfigKey,
 } from './shared/config-protocol.ts'
-import { KERNEL_POST_PREFIX, KERNEL_STREAM_PATH } from './shared/notebook-protocol.ts'
-import { SQL_DEFAULT_MAX_ROWS, SQL_POST_PREFIX } from './shared/sql-protocol.ts'
+import type { RouteTable } from './shared/route.ts'
+import { KERNEL_POST_PREFIX, KERNEL_ROUTES, KERNEL_STREAM_PATH } from './shared/notebook-protocol.ts'
+import { SQL_DEFAULT_MAX_ROWS, SQL_ROUTES } from './shared/sql-protocol.ts'
 import { ConfigBackend } from './host/config-backend.ts'
 import { GitBackend } from './host/git-backend.ts'
 import { errorResponse, readJsonObject, sendJson, WorkbenchHttpError } from './host/http.ts'
+import { dispatchRoute, routeRegistry } from './host/route-dispatch.ts'
 import { DEFAULT_KERNEL_LIMITS, KernelBackend } from './host/kernel-backend.ts'
 import { serveMermaidRuntime } from './host/mermaid-runtime.ts'
 import { isTrustedWorkbenchRequest } from './host/request-trust.ts'
@@ -180,6 +188,92 @@ export function apply(ctx: Context, config: Config): void {
   // SQL notebook connections. Independent of the kernel backend by design (ADR 0002): it shares
   // the cell view, not the Jupyter session or transport, so it never enters the kernel registry.
   const sql = new SqlBackend(ctx, { maxRowLimit: config.sqlMaxRows })
+  /*
+   * 每个路由键一个 handler。
+   *
+   * 参数与回值都由共享声明给出：漏写一格、或把 handler 的参数写成另一个名字，都是编译错误。
+   * 这里只做转交——工作台那 62 条路由的行为各自住在它的后端里，路由表不改变任何一条的行为。
+   */
+  const routes = routeRegistry(WORKBENCH_ROUTES, {
+    // 配置
+    readPluginConfig: async () => settings.read(),
+    // 文件与目录
+    listDirectory: async params => workspace.list(params.workspaceId, params.path),
+    readFile: async params => workspace.read(params.workspaceId, params.path),
+    readImage: async params => workspace.readImage(params.workspaceId, params.path),
+    refreshFiles: async params => workspace.refreshFiles(params.workspaceId, params.files),
+    saveFile: async params => workspace.save(params.workspaceId, params.path, params.content, params.version),
+    createFile: async params => workspace.createFile(params.workspaceId, params.path),
+    createDirectory: async params => workspace.createDirectory(params.workspaceId, params.path),
+    renameEntry: async params => workspace.renameEntry(params.workspaceId, params.path, params.name),
+    deleteEntry: async params => workspace.deleteEntry(params.workspaceId, params.path),
+    absolutePath: async params => workspace.absolutePath(params.workspaceId, params.path),
+    revealPath: async params => workspace.revealPath(params.workspaceId, params.path),
+    relativePath: async params => workspace.relativePath(params.workspaceId, params.path),
+    // Git
+    gitStatus: async params => git.status(params.workspaceId),
+    gitDiff: async params => git.diff(params.workspaceId, params.path, params.staged),
+    gitEditorBaseline: async params => git.editorBaseline(params.workspaceId, params.path),
+    gitGraph: async params => git.graph(params.workspaceId, params.offset),
+    gitBranches: async params => git.branches(params.workspaceId),
+    gitSwitchBranch: async params => git.switchBranch(params.workspaceId, params.ref),
+    gitCreateBranch: async params => git.createBranch(params.workspaceId, params.name, params.source),
+    gitRenameBranch: async params => git.renameBranch(params.workspaceId, params.name),
+    gitDeleteBranch: async params => git.deleteBranch(params.workspaceId, params.ref),
+    gitRemoteOperation: async params => git.remoteOperation(params.workspaceId, params.operation),
+    gitRemotes: async params => git.remotes(params.workspaceId),
+    gitAddRemote: async params => git.addRemote(params.workspaceId, params.name, params.fetchUrl, params.pushUrl),
+    gitUpdateRemote: async params =>
+      git.updateRemote(params.workspaceId, params.currentName, params.name, params.fetchUrl, params.pushUrl),
+    gitDeleteRemote: async params => git.deleteRemote(params.workspaceId, params.name),
+    gitTargetRemoteOperation: async params =>
+      git.targetRemoteOperation(params.workspaceId, params.operation, params.remote, params.branch),
+    gitCommitFiles: async params => git.commitFiles(params.workspaceId, params.revision),
+    gitCommitFileDiff: async params => git.commitFileDiff(params.workspaceId, params.revision, params.path),
+    gitComparisonFiles: async params => git.comparisonFiles(params.workspaceId, params.revision),
+    gitComparisonFileDiff: async params => git.comparisonFileDiff(params.workspaceId, params.revision, params.path),
+    gitCommitAction: async params => git.commitAction(params.workspaceId, params.operation, params.revision),
+    gitStage: async params => git.stage(params.workspaceId, params.path),
+    gitStageAll: async params => git.stageAll(params.workspaceId),
+    gitUnstage: async params => git.unstage(params.workspaceId, params.path),
+    gitUnstageAll: async params => git.unstageAll(params.workspaceId),
+    gitDiscard: async params => git.discard(params.workspaceId, params.path),
+    gitDiscardAll: async params => git.discardAll(params.workspaceId),
+    gitCommit: async params => git.commit(params.workspaceId, params.message),
+    /*
+     * SQL notebook. These verbs are POST-only, so they ride the same prefix, origin fence and
+     * JSON bounds as files and Git rather than getting their own registration. Identity is the
+     * *notebook*, not the database: `path` below is the database, `notebook` is the .sqlnb file,
+     * and the connection belongs to the notebook (see src/host/sql-backend.ts).
+     */
+    sqlOpen: async params => sql.open(params.workspaceId, params.notebook, params.path, params.access, params.rowLimit),
+    sqlExecute: async params => sql.execute(params.workspaceId, params.notebook, params.sql),
+    sqlCancel: async params => sql.cancel(params.workspaceId, params.notebook),
+    sqlClose: async params => sql.close(params.workspaceId, params.notebook),
+    sqlTables: async params => sql.tables(params.workspaceId, params.notebook),
+    sqlColumns: async params => sql.columns(params.workspaceId, params.notebook, params.table),
+    sqlAbandon: async params => sql.abandon(params.workspaceId, params.notebook),
+    sqlReleaseWorkspace: async params => ({ released: sql.releaseWorkspace(params.workspaceId) }),
+    /*
+     * Kernel API arms. Every verb that names a kernel needs its token too — the loopback
+     * origin fence proves the request came from a browser on this machine, not from *this*
+     * page, so the token is what keeps one tab from interrupting another notebook's kernel.
+     */
+    kernelDiscover: async params => kernel.discover(params.workspaceId),
+    kernelList: async params => kernel.list(params.workspaceId),
+    kernelReclaim: async params => kernel.reclaim(params),
+    kernelStart: async params => kernel.start(params.workspaceId, params.path, params.specName),
+    kernelStatus: async params => kernel.status(params),
+    kernelExecute: async params => kernel.execute(params),
+    kernelInterrupt: async params => kernel.interrupt(params),
+    kernelInput: async params => kernel.input(params),
+    kernelComplete: async params => kernel.complete(params),
+    kernelInspect: async params => kernel.inspect(params),
+    kernelIsComplete: async params => kernel.isComplete(params),
+    kernelPoll: async params => kernel.poll(params),
+    kernelRestart: async params => kernel.restart(params),
+    kernelShutdown: async params => kernel.shutdown(params),
+  })
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (req.method !== 'POST') throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '只允许 POST 请求。')
@@ -222,8 +316,10 @@ export function apply(ctx: Context, config: Config): void {
         }
         return
       }
-      const value = await dispatch(path, body, workspace, git, settings, sql)
-      sendJson(res, 200, value)
+      const routed = await dispatchRoute(routes, path, body)
+      // 表里没有这条路径：`routeIndex` 只登记声明过的路径，所以这就是原来的 404。
+      if (!routed.found) throw new WorkbenchHttpError(404, 'ENDPOINT_NOT_FOUND', '工作台接口不存在。')
+      sendJson(res, 200, routed.value)
     } catch (error: unknown) {
       const response = errorResponse(error)
       if (response.status >= 500 || response.body.error.code === 'WORKBENCH_OPERATION_FAILED') {
@@ -244,7 +340,8 @@ export function apply(ctx: Context, config: Config): void {
   const kernelHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       const path = new URL(req.url ?? '/', 'http://dsh.invalid').pathname
-      const poll = path === `${KERNEL_POST_PREFIX}/poll` && req.method === 'GET'
+      // 轮询那条臂单独处理：它是一次 GET，参数来自查询串而不是请求体，理由见这条注释上方。
+      const poll = path === KERNEL_ROUTES.kernelPoll.path && req.method === 'GET'
       if (!poll && req.method !== 'POST') {
         throw new WorkbenchHttpError(405, 'METHOD_NOT_ALLOWED', '内核接口只允许 POST 请求。')
       }
@@ -254,8 +351,9 @@ export function apply(ctx: Context, config: Config): void {
       const body = poll
         ? Object.fromEntries(new URL(req.url ?? '/', 'http://dsh.invalid').searchParams)
         : await readJsonObject(req, config.maxFileBytes + 64 * 1024)
-      const value = await dispatchKernel(path, body, kernel)
-      sendJson(res, 200, value)
+      const routed = await dispatchRoute(routes, path, body)
+      if (!routed.found) throw new WorkbenchHttpError(404, 'ENDPOINT_NOT_FOUND', '内核接口不存在。')
+      sendJson(res, 200, routed.value)
     } catch (error: unknown) {
       const response = errorResponse(error)
       if (response.status >= 500) {
@@ -313,167 +411,16 @@ export function apply(ctx: Context, config: Config): void {
   ctx.logger.info('workbench-layout: public-package workspace, Git, and kernel APIs registered')
 }
 
-async function dispatch(
-  path: string,
-  body: Record<string, unknown>,
-  workspace: WorkspaceBackend,
-  git: GitBackend,
-  settings: ConfigBackend,
-  sql: SqlBackend,
-): Promise<unknown> {
-  switch (path) {
-    case CONFIG_READ_PATH:
-      return settings.read()
-    case `${WORKBENCH_API_PREFIX}/tree`:
-      return workspace.list(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/file/read`:
-      return workspace.read(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/file/image`:
-      return workspace.readImage(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/files/refresh`:
-      return workspace.refreshFiles(body.workspaceId, body.files)
-    case `${WORKBENCH_API_PREFIX}/file/save`:
-      return workspace.save(body.workspaceId, body.path, body.content, body.version)
-    case `${WORKBENCH_API_PREFIX}/file/create`:
-      return workspace.createFile(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/directory/create`:
-      return workspace.createDirectory(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/entry/rename`:
-      return workspace.renameEntry(body.workspaceId, body.path, body.name)
-    case `${WORKBENCH_API_PREFIX}/entry/delete`:
-      return workspace.deleteEntry(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/path/absolute`:
-      return workspace.absolutePath(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/path/reveal`:
-      return workspace.revealPath(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/path/relative`:
-      return workspace.relativePath(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/status`:
-      return git.status(body.workspaceId)
-    case `${WORKBENCH_API_PREFIX}/git/diff`:
-      return git.diff(body.workspaceId, body.path, body.staged)
-    case `${WORKBENCH_API_PREFIX}/git/editor-baseline`:
-      return git.editorBaseline(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/graph`:
-      return git.graph(body.workspaceId, body.offset)
-    case `${WORKBENCH_API_PREFIX}/git/branches`:
-      return git.branches(body.workspaceId)
-    case `${WORKBENCH_API_PREFIX}/git/branch/switch`:
-      return git.switchBranch(body.workspaceId, body.ref)
-    case `${WORKBENCH_API_PREFIX}/git/branch/create`:
-      return git.createBranch(body.workspaceId, body.name, body.source)
-    case `${WORKBENCH_API_PREFIX}/git/branch/rename`:
-      return git.renameBranch(body.workspaceId, body.name)
-    case `${WORKBENCH_API_PREFIX}/git/branch/delete`:
-      return git.deleteBranch(body.workspaceId, body.ref)
-    case `${WORKBENCH_API_PREFIX}/git/remote`:
-      return git.remoteOperation(body.workspaceId, body.operation)
-    case `${WORKBENCH_API_PREFIX}/git/remotes`:
-      return git.remotes(body.workspaceId)
-    case `${WORKBENCH_API_PREFIX}/git/remote/add`:
-      return git.addRemote(body.workspaceId, body.name, body.fetchUrl, body.pushUrl)
-    case `${WORKBENCH_API_PREFIX}/git/remote/update`:
-      return git.updateRemote(body.workspaceId, body.currentName, body.name, body.fetchUrl, body.pushUrl)
-    case `${WORKBENCH_API_PREFIX}/git/remote/delete`:
-      return git.deleteRemote(body.workspaceId, body.name)
-    case `${WORKBENCH_API_PREFIX}/git/remote/target`:
-      return git.targetRemoteOperation(body.workspaceId, body.operation, body.remote, body.branch)
-    case `${WORKBENCH_API_PREFIX}/git/commit/files`:
-      return git.commitFiles(body.workspaceId, body.revision)
-    case `${WORKBENCH_API_PREFIX}/git/commit/file`:
-      return git.commitFileDiff(body.workspaceId, body.revision, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/comparison/files`:
-      return git.comparisonFiles(body.workspaceId, body.revision)
-    case `${WORKBENCH_API_PREFIX}/git/comparison/file`:
-      return git.comparisonFileDiff(body.workspaceId, body.revision, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/commit/action`:
-      return git.commitAction(body.workspaceId, body.operation, body.revision)
-    case `${WORKBENCH_API_PREFIX}/git/stage`:
-      return git.stage(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/stage-all`:
-      return git.stageAll(body.workspaceId)
-    case `${WORKBENCH_API_PREFIX}/git/unstage`:
-      return git.unstage(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/unstage-all`:
-      return git.unstageAll(body.workspaceId)
-    case `${WORKBENCH_API_PREFIX}/git/discard`:
-      return git.discard(body.workspaceId, body.path)
-    case `${WORKBENCH_API_PREFIX}/git/discard-all`:
-      return git.discardAll(body.workspaceId)
-    case `${WORKBENCH_API_PREFIX}/git/commit`:
-      return git.commit(body.workspaceId, body.message)
-    // SQL notebook. These verbs are POST-only, so they ride the same prefix, origin fence and
-    // JSON bounds as files and Git rather than getting their own registration. Identity is the
-    // *notebook*, not the database: `path` below is the database, `notebook` is the .sqlnb file,
-    // and the connection belongs to the notebook (see src/host/sql-backend.ts).
-    case `${SQL_POST_PREFIX}/open`:
-      return sql.open(body.workspaceId, body.notebook, body.path, body.access, body.rowLimit)
-    case `${SQL_POST_PREFIX}/execute`:
-      return sql.execute(body.workspaceId, body.notebook, body.sql)
-    // Cancel is a separate verb from close because it answers a different question: the reader
-    // wants this cell to stop taking rows while keeping the connection, its scratch tables and
-    // its place in the session. Closing would drop all three.
-    case `${SQL_POST_PREFIX}/cancel`:
-      return sql.cancel(body.workspaceId, body.notebook)
-    case `${SQL_POST_PREFIX}/close`:
-      return sql.close(body.workspaceId, body.notebook)
-    case `${SQL_POST_PREFIX}/tables`:
-      return sql.tables(body.workspaceId, body.notebook)
-    case `${SQL_POST_PREFIX}/columns`:
-      return sql.columns(body.workspaceId, body.notebook, body.table)
-    case `${SQL_POST_PREFIX}/abandon`:
-      return sql.abandon(body.workspaceId, body.notebook)
-    // Requirement: switching away from a workspace releases all of its connections rather than
-    // letting them hold files open until the grace timers happen to fire.
-    case `${SQL_POST_PREFIX}/release-workspace`:
-      return { released: sql.releaseWorkspace(body.workspaceId) }
-    default:
-      throw new WorkbenchHttpError(404, 'ENDPOINT_NOT_FOUND', '工作台接口不存在。')
-  }
-}
-
 /**
- * Kernel API arms.
+ * 宿主服务端全部路由：各区域协议模块的声明拼成一张。
  *
- * Every verb needs the kernel id plus its token — the loopback origin fence proves
- * the request came from a browser on this machine, not from *this* page, so the
- * token is what keeps one tab from interrupting another notebook's kernel.
+ * 这是唯一一张表，客户端与宿主都照它走：客户端照形状写参数，宿主照路径查 handler。
+ * 表里漏一条、或同一条路径被两个区域各声明一次，都由 `routeRegistry` 在启动时报出来。
  */
-async function dispatchKernel(
-  path: string,
-  body: Record<string, unknown>,
-  kernel: KernelBackend,
-): Promise<unknown> {
-  switch (path) {
-    case `${KERNEL_POST_PREFIX}/discover`:
-      return kernel.discover(body.workspaceId)
-    case `${KERNEL_POST_PREFIX}/list`:
-      return kernel.list(body.workspaceId)
-    case `${KERNEL_POST_PREFIX}/reclaim`:
-      return kernel.reclaim(body)
-    case `${KERNEL_POST_PREFIX}/start`:
-      return kernel.start(body.workspaceId, body.path, body.specName)
-    case `${KERNEL_POST_PREFIX}/status`:
-      return kernel.status(body)
-    case `${KERNEL_POST_PREFIX}/execute`:
-      return kernel.execute(body)
-    case `${KERNEL_POST_PREFIX}/interrupt`:
-      return kernel.interrupt(body)
-    case `${KERNEL_POST_PREFIX}/input`:
-      return kernel.input(body)
-    case `${KERNEL_POST_PREFIX}/complete`:
-      return kernel.complete(body)
-    case `${KERNEL_POST_PREFIX}/inspect`:
-      return kernel.inspect(body)
-    case `${KERNEL_POST_PREFIX}/is-complete`:
-      return kernel.isComplete(body)
-    case `${KERNEL_POST_PREFIX}/poll`:
-      return kernel.poll(body)
-    case `${KERNEL_POST_PREFIX}/restart`:
-      return kernel.restart(body)
-    case `${KERNEL_POST_PREFIX}/shutdown`:
-      return kernel.shutdown(body)
-    default:
-      throw new WorkbenchHttpError(404, 'ENDPOINT_NOT_FOUND', '内核接口不存在。')
-  }
-}
+export const WORKBENCH_ROUTES = {
+  ...CONFIG_ROUTES,
+  ...FILE_ROUTES,
+  ...GIT_ROUTES,
+  ...SQL_ROUTES,
+  ...KERNEL_ROUTES,
+} satisfies RouteTable

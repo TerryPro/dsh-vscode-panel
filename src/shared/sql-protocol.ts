@@ -9,6 +9,7 @@
  */
 
 import { WORKBENCH_API_PREFIX } from './contracts.ts'
+import { route, type RouteTable } from './route.ts'
 
 /** Prefix every SQL notebook route hangs off. POST-only, like the file and Git APIs. */
 export const SQL_POST_PREFIX = `${WORKBENCH_API_PREFIX}/sqlnotebook`
@@ -346,3 +347,32 @@ export interface SqlColumnsResult {
   table: string
   columns: SqlColumnEntry[]
 }
+
+/**
+ * SQL 笔记本那一组路由的声明。
+ *
+ * 身份是笔记本而不是数据库：`notebook` 是那个 `.sqlnb` 文件，`path` 只是它连的库，
+ * 所以每个参数的形状里都有 `notebook`，没有内核 id 或 token（ADR 0002）。
+ */
+export const SQL_ROUTES = {
+  sqlOpen: route<
+    { workspaceId: string; notebook: string; path: string; access?: SqlAccess; rowLimit?: number },
+    SqlOpenResult
+  >(`${SQL_POST_PREFIX}/open`),
+  sqlExecute: route<{ workspaceId: string; notebook: string; sql: string }, SqlExecuteResult>(
+    `${SQL_POST_PREFIX}/execute`,
+  ),
+  // Cancel 是独立的一条而不是 close 的参数：它回答的是另一个问题——停这一格，但留下连接、
+  // 临时表和它在会话里的位置。
+  sqlCancel: route<{ workspaceId: string; notebook: string }, SqlCancelResult>(`${SQL_POST_PREFIX}/cancel`),
+  sqlClose: route<{ workspaceId: string; notebook: string }, SqlCloseResult>(`${SQL_POST_PREFIX}/close`),
+  sqlTables: route<{ workspaceId: string; notebook: string }, SqlTablesResult>(`${SQL_POST_PREFIX}/tables`),
+  sqlColumns: route<{ workspaceId: string; notebook: string; table: string }, SqlColumnsResult>(
+    `${SQL_POST_PREFIX}/columns`,
+  ),
+  sqlAbandon: route<{ workspaceId: string; notebook: string }, { path: string; scheduled: boolean }>(
+    `${SQL_POST_PREFIX}/abandon`,
+  ),
+  // 要求：离开工作区要把它所有连接放开，而不是让它们占着文件直到宽限计时器碰巧触发。
+  sqlReleaseWorkspace: route<{ workspaceId: string }, { released: number }>(`${SQL_POST_PREFIX}/release-workspace`),
+} satisfies RouteTable

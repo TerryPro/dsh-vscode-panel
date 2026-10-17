@@ -1,5 +1,7 @@
 /** JSON vocabulary shared by the workbench Host and browser halves. */
 
+import { route, type RouteTable } from './route.ts'
+
 export const WORKBENCH_API_PREFIX = '/dsh-workbench-layout'
 
 /**
@@ -260,3 +262,92 @@ export interface WorkbenchErrorBody {
     message: string
   }
 }
+
+/**
+ * 文件与目录那一组路由的声明。
+ *
+ * 一条路由只在这里声明一次：路径、客户端照它写的参数、宿主 handler 照它检查的回值。
+ * 客户端写错参数名过不了编译，宿主少写一个 handler 也过不了编译。
+ */
+export const FILE_ROUTES = {
+  listDirectory: route<{ workspaceId: string; path: string }, DirectoryListing>(`${WORKBENCH_API_PREFIX}/tree`),
+  readFile: route<{ workspaceId: string; path: string }, WorkspaceFile>(`${WORKBENCH_API_PREFIX}/file/read`),
+  readImage: route<{ workspaceId: string; path: string }, WorkspaceImageFile>(`${WORKBENCH_API_PREFIX}/file/image`),
+  refreshFiles: route<{ workspaceId: string; files: WorkspaceFileObservation[] }, WorkspaceFilesRefresh>(
+    `${WORKBENCH_API_PREFIX}/files/refresh`,
+  ),
+  saveFile: route<{ workspaceId: string; path: string; content: string; version: string }, SavedWorkspaceFile>(
+    `${WORKBENCH_API_PREFIX}/file/save`,
+  ),
+  createFile: route<{ workspaceId: string; path: string }, CreatedWorkspaceEntry>(`${WORKBENCH_API_PREFIX}/file/create`),
+  createDirectory: route<{ workspaceId: string; path: string }, CreatedWorkspaceEntry>(
+    `${WORKBENCH_API_PREFIX}/directory/create`,
+  ),
+  renameEntry: route<{ workspaceId: string; path: string; name: string }, RenamedWorkspaceEntry>(
+    `${WORKBENCH_API_PREFIX}/entry/rename`,
+  ),
+  deleteEntry: route<{ workspaceId: string; path: string }, DeletedWorkspaceEntry>(`${WORKBENCH_API_PREFIX}/entry/delete`),
+  absolutePath: route<{ workspaceId: string; path: string }, WorkspaceAbsolutePath>(`${WORKBENCH_API_PREFIX}/path/absolute`),
+  revealPath: route<{ workspaceId: string; path: string }, WorkspaceRelativePath>(`${WORKBENCH_API_PREFIX}/path/reveal`),
+  relativePath: route<{ workspaceId: string; path: string }, WorkspaceRelativePath>(`${WORKBENCH_API_PREFIX}/path/relative`),
+} satisfies RouteTable
+
+/**
+ * Git 那一组路由的声明。
+ *
+ * 与 `FILE_ROUTES` 同住在契约模块里，因为它们的参数与回值都是这个模块里的类型：
+ * 一条路由的声明离它的类型越远，越容易有一天两边说的不是同一件事。
+ */
+export const GIT_ROUTES = {
+  gitStatus: route<{ workspaceId: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/status`),
+  gitDiff: route<{ workspaceId: string; path: string; staged: boolean }, GitFileDiff>(`${WORKBENCH_API_PREFIX}/git/diff`),
+  gitEditorBaseline: route<{ workspaceId: string; path: string }, GitEditorBaseline>(
+    `${WORKBENCH_API_PREFIX}/git/editor-baseline`,
+  ),
+  gitGraph: route<{ workspaceId: string; offset: number }, GitGraph>(`${WORKBENCH_API_PREFIX}/git/graph`),
+  gitBranches: route<{ workspaceId: string }, GitBranches>(`${WORKBENCH_API_PREFIX}/git/branches`),
+  gitSwitchBranch: route<{ workspaceId: string; ref: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/branch/switch`),
+  gitCreateBranch: route<{ workspaceId: string; name: string; source?: string }, GitStatus>(
+    `${WORKBENCH_API_PREFIX}/git/branch/create`,
+  ),
+  gitRenameBranch: route<{ workspaceId: string; name: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/branch/rename`),
+  gitDeleteBranch: route<{ workspaceId: string; ref: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/branch/delete`),
+  gitRemoteOperation: route<{ workspaceId: string; operation: GitRemoteOperation }, GitRemoteResult>(
+    `${WORKBENCH_API_PREFIX}/git/remote`,
+  ),
+  gitRemotes: route<{ workspaceId: string }, GitRemotes>(`${WORKBENCH_API_PREFIX}/git/remotes`),
+  gitAddRemote: route<{ workspaceId: string; name: string; fetchUrl: string; pushUrl?: string }, GitRemotes>(
+    `${WORKBENCH_API_PREFIX}/git/remote/add`,
+  ),
+  gitUpdateRemote: route<
+    { workspaceId: string; currentName: string; name: string; fetchUrl: string; pushUrl?: string },
+    GitRemotes
+  >(`${WORKBENCH_API_PREFIX}/git/remote/update`),
+  gitDeleteRemote: route<{ workspaceId: string; name: string }, GitRemotes>(`${WORKBENCH_API_PREFIX}/git/remote/delete`),
+  gitTargetRemoteOperation: route<
+    { workspaceId: string; operation: GitTargetRemoteOperation; remote: string; branch?: string },
+    GitTargetRemoteResult
+  >(`${WORKBENCH_API_PREFIX}/git/remote/target`),
+  gitCommitFiles: route<{ workspaceId: string; revision: string }, GitCommitFiles>(
+    `${WORKBENCH_API_PREFIX}/git/commit/files`,
+  ),
+  gitCommitFileDiff: route<{ workspaceId: string; revision: string; path: string }, GitFileDiff>(
+    `${WORKBENCH_API_PREFIX}/git/commit/file`,
+  ),
+  gitComparisonFiles: route<{ workspaceId: string; revision: string }, GitCommitFiles>(
+    `${WORKBENCH_API_PREFIX}/git/comparison/files`,
+  ),
+  gitComparisonFileDiff: route<{ workspaceId: string; revision: string; path: string }, GitFileDiff>(
+    `${WORKBENCH_API_PREFIX}/git/comparison/file`,
+  ),
+  gitCommitAction: route<{ workspaceId: string; operation: GitCommitAction; revision: string }, GitCommitActionResult>(
+    `${WORKBENCH_API_PREFIX}/git/commit/action`,
+  ),
+  gitStage: route<{ workspaceId: string; path: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/stage`),
+  gitStageAll: route<{ workspaceId: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/stage-all`),
+  gitUnstage: route<{ workspaceId: string; path: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/unstage`),
+  gitUnstageAll: route<{ workspaceId: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/unstage-all`),
+  gitDiscard: route<{ workspaceId: string; path: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/discard`),
+  gitDiscardAll: route<{ workspaceId: string }, GitStatus>(`${WORKBENCH_API_PREFIX}/git/discard-all`),
+  gitCommit: route<{ workspaceId: string; message: string }, GitCommitResult>(`${WORKBENCH_API_PREFIX}/git/commit`),
+} satisfies RouteTable

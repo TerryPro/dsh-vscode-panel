@@ -61,6 +61,7 @@
     "tests/native-rightbar-entry.spec.ts",
     "tests/terminal-panel.spec.tsx",
     "tests/request-fence.spec.ts",
-    "tests/view-registry.spec.ts"
+    "tests/view-registry.spec.ts",
+    "tests/route-table.spec.ts"
   ]
 }

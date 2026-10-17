@@ -9,12 +9,34 @@
  */
 
 import { WORKBENCH_API_PREFIX } from './contracts.ts'
+import { route, type RouteTable } from './route.ts'
 
 /** Read the current configuration. */
 export const CONFIG_READ_PATH = `${WORKBENCH_API_PREFIX}/config`
 
 /** Apply a new configuration, which restarts the plugin. */
 export const CONFIG_WRITE_PATH = `${WORKBENCH_API_PREFIX}/config/update`
+
+/**
+ * The settings routes the Host dispatches through the route table.
+ *
+ * `write` is deliberately absent: applying a configuration restarts the plugin, and that restart
+ * has to wait until the answer is on the wire, so the endpoint handles it in its preamble rather
+ * than through the table (see `CONFIG_PREAMBLE`).
+ */
+export const CONFIG_ROUTES = {
+  readPluginConfig: route<Record<string, never>, ConfigSnapshot>(CONFIG_READ_PATH),
+} satisfies RouteTable
+
+/**
+ * The one settings route the Host answers *before* the route table.
+ *
+ * It still carries a declaration, so the client types its parameters against the same shape as
+ * every other route; the Host simply never looks it up.
+ */
+export const CONFIG_PREAMBLE = {
+  updatePluginConfig: route<ConfigUpdateRequest, ConfigSnapshot>(CONFIG_WRITE_PATH),
+} satisfies RouteTable
 
 /**
  * What a schema declares about one field, narrowed to what the page can use.
